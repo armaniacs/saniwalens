@@ -86,52 +86,25 @@ enum Command {
         /// Bucket usage by time: year | month | week | day | hour (JST).
         #[arg(long)]
         by: Option<String>,
-        /// Only count events on or after this date (YYYY-MM-DD, JST).
-        #[arg(long, value_name = "DATE")]
-        since: Option<String>,
-        /// Only count events through this date (YYYY-MM-DD, JST) — the
-        /// whole day counts.
-        #[arg(long, value_name = "DATE")]
-        until: Option<String>,
-        /// Rolling window ending now: <N>d | <N>h | <N>w (e.g. 7d). Exclusive
-        /// with the explicit dates.
-        #[arg(long, value_name = "SPAN", conflicts_with_all = ["since", "until"])]
-        last: Option<String>,
+        #[command(flatten)]
+        period: PeriodArgs,
         /// Output format: table | markdown.
         #[arg(long)]
         format: Option<String>,
-        /// Read the store as-is; skip the automatic refresh.
-        #[arg(long)]
-        frozen: bool,
-        /// Store path (default: $XDG_STATE_HOME/saniwalens/saniwalens.db).
-        #[arg(long)]
-        db: Option<PathBuf>,
+        #[command(flatten)]
+        read: ReadArgs,
     },
     /// How usage moved: each kind of event, each skill, and the session and
     /// subagent totals this window against the equal-length window right
     /// before it (default 7d vs the 7d before).
     Trend {
-        /// Current window start (YYYY-MM-DD, JST). The window to compare it
-        /// with is the same length immediately before it.
-        #[arg(long, value_name = "DATE")]
-        since: Option<String>,
-        /// Current window end (YYYY-MM-DD, JST) — the whole day counts.
-        /// Needs --since; alone, the window to compare against is undefined.
-        #[arg(long, value_name = "DATE")]
-        until: Option<String>,
-        /// Rolling pair ending now: <N>d | <N>h | <N>w (e.g. 7d). Exclusive
-        /// with the explicit dates.
-        #[arg(long, value_name = "SPAN", conflicts_with_all = ["since", "until"])]
-        last: Option<String>,
+        #[command(flatten)]
+        pair: PairArgs,
         /// Output format: table | markdown | json.
         #[arg(long)]
         format: Option<String>,
-        /// Read the store as-is; skip the automatic refresh.
-        #[arg(long)]
-        frozen: bool,
-        /// Store path (default: $XDG_STATE_HOME/saniwalens/saniwalens.db).
-        #[arg(long)]
-        db: Option<PathBuf>,
+        #[command(flatten)]
+        read: ReadArgs,
     },
     /// Everything installed in your config (skills, rules, agents, MCP
     /// servers, CLAUDE.md), what it weighs, and whether it was ever used.
@@ -140,26 +113,13 @@ enum Command {
         /// projects' own config) | project:<slug> (one project's).
         #[arg(long)]
         scope: Option<String>,
-        /// Only count events on or after this date (YYYY-MM-DD, JST).
-        #[arg(long, value_name = "DATE")]
-        since: Option<String>,
-        /// Only count events through this date (YYYY-MM-DD, JST) — the
-        /// whole day counts.
-        #[arg(long, value_name = "DATE")]
-        until: Option<String>,
-        /// Rolling window ending now: <N>d | <N>h | <N>w (e.g. 7d). Exclusive
-        /// with the explicit dates.
-        #[arg(long, value_name = "SPAN", conflicts_with_all = ["since", "until"])]
-        last: Option<String>,
+        #[command(flatten)]
+        period: PeriodArgs,
         /// Output format: table | markdown.
         #[arg(long)]
         format: Option<String>,
-        /// Read the store as-is; skip the automatic refresh.
-        #[arg(long)]
-        frozen: bool,
-        /// Store path (default: $XDG_STATE_HOME/saniwalens/saniwalens.db).
-        #[arg(long)]
-        db: Option<PathBuf>,
+        #[command(flatten)]
+        read: ReadArgs,
     },
     /// Cleanup opportunities: config that is never used, loaded every session
     /// while heavy, or rarely worth its cost — ranked by what removing it
@@ -169,26 +129,13 @@ enum Command {
         /// projects' own config) | project:<slug> (one project's).
         #[arg(long)]
         scope: Option<String>,
-        /// Only count events on or after this date (YYYY-MM-DD, JST).
-        #[arg(long, value_name = "DATE")]
-        since: Option<String>,
-        /// Only count events through this date (YYYY-MM-DD, JST) — the
-        /// whole day counts.
-        #[arg(long, value_name = "DATE")]
-        until: Option<String>,
-        /// Rolling window ending now: <N>d | <N>h | <N>w (e.g. 7d). Exclusive
-        /// with the explicit dates.
-        #[arg(long, value_name = "SPAN", conflicts_with_all = ["since", "until"])]
-        last: Option<String>,
+        #[command(flatten)]
+        period: PeriodArgs,
         /// Output format: table | markdown.
         #[arg(long)]
         format: Option<String>,
-        /// Read the store as-is; skip the automatic refresh.
-        #[arg(long)]
-        frozen: bool,
-        /// Store path (default: $XDG_STATE_HOME/saniwalens/saniwalens.db).
-        #[arg(long)]
-        db: Option<PathBuf>,
+        #[command(flatten)]
+        read: ReadArgs,
     },
     /// What every session pays in context before any work starts, and how
     /// much of that comes from your own config files vs the harness itself.
@@ -196,23 +143,10 @@ enum Command {
         /// Output format: table | markdown.
         #[arg(long)]
         format: Option<String>,
-        /// Only count events on or after this date (YYYY-MM-DD, JST).
-        #[arg(long, value_name = "DATE")]
-        since: Option<String>,
-        /// Only count events through this date (YYYY-MM-DD, JST) — the
-        /// whole day counts.
-        #[arg(long, value_name = "DATE")]
-        until: Option<String>,
-        /// Rolling window ending now: <N>d | <N>h | <N>w (e.g. 7d). Exclusive
-        /// with the explicit dates.
-        #[arg(long, value_name = "SPAN", conflicts_with_all = ["since", "until"])]
-        last: Option<String>,
-        /// Read the store as-is; skip the automatic refresh.
-        #[arg(long)]
-        frozen: bool,
-        /// Store path (default: $XDG_STATE_HOME/saniwalens/saniwalens.db).
-        #[arg(long)]
-        db: Option<PathBuf>,
+        #[command(flatten)]
+        period: PeriodArgs,
+        #[command(flatten)]
+        read: ReadArgs,
     },
     /// How you steer Claude: the mix of instructing, steering ("go ahead"),
     /// correcting ("no, instead…"), and questioning prompts — and what that
@@ -221,23 +155,10 @@ enum Command {
         /// Output format: table | markdown.
         #[arg(long)]
         format: Option<String>,
-        /// Only count events on or after this date (YYYY-MM-DD, JST).
-        #[arg(long, value_name = "DATE")]
-        since: Option<String>,
-        /// Only count events through this date (YYYY-MM-DD, JST) — the
-        /// whole day counts.
-        #[arg(long, value_name = "DATE")]
-        until: Option<String>,
-        /// Rolling window ending now: <N>d | <N>h | <N>w (e.g. 7d). Exclusive
-        /// with the explicit dates.
-        #[arg(long, value_name = "SPAN", conflicts_with_all = ["since", "until"])]
-        last: Option<String>,
-        /// Read the store as-is; skip the automatic refresh.
-        #[arg(long)]
-        frozen: bool,
-        /// Store path (default: $XDG_STATE_HOME/saniwalens/saniwalens.db).
-        #[arg(long)]
-        db: Option<PathBuf>,
+        #[command(flatten)]
+        period: PeriodArgs,
+        #[command(flatten)]
+        read: ReadArgs,
     },
     /// Tool calls that kept failing the same way — recurring failures that
     /// waste turns and tokens, each with a suggested fix.
@@ -247,26 +168,13 @@ enum Command {
         /// project:<slug> (everything in that one project).
         #[arg(long)]
         scope: Option<String>,
-        /// Only count events on or after this date (YYYY-MM-DD, JST).
-        #[arg(long, value_name = "DATE")]
-        since: Option<String>,
-        /// Only count events through this date (YYYY-MM-DD, JST) — the
-        /// whole day counts.
-        #[arg(long, value_name = "DATE")]
-        until: Option<String>,
-        /// Rolling window ending now: <N>d | <N>h | <N>w (e.g. 7d). Exclusive
-        /// with the explicit dates.
-        #[arg(long, value_name = "SPAN", conflicts_with_all = ["since", "until"])]
-        last: Option<String>,
+        #[command(flatten)]
+        period: PeriodArgs,
         /// Output format: table | markdown.
         #[arg(long)]
         format: Option<String>,
-        /// Read the store as-is; skip the automatic refresh.
-        #[arg(long)]
-        frozen: bool,
-        /// Store path (default: $XDG_STATE_HOME/saniwalens/saniwalens.db).
-        #[arg(long)]
-        db: Option<PathBuf>,
+        #[command(flatten)]
+        read: ReadArgs,
     },
     /// Files Claude kept re-editing in rapid bursts — where it got stuck
     /// retrying instead of making progress.
@@ -274,23 +182,10 @@ enum Command {
         /// Output format: table | markdown.
         #[arg(long)]
         format: Option<String>,
-        /// Only count events on or after this date (YYYY-MM-DD, JST).
-        #[arg(long, value_name = "DATE")]
-        since: Option<String>,
-        /// Only count events through this date (YYYY-MM-DD, JST) — the
-        /// whole day counts.
-        #[arg(long, value_name = "DATE")]
-        until: Option<String>,
-        /// Rolling window ending now: <N>d | <N>h | <N>w (e.g. 7d). Exclusive
-        /// with the explicit dates.
-        #[arg(long, value_name = "SPAN", conflicts_with_all = ["since", "until"])]
-        last: Option<String>,
-        /// Read the store as-is; skip the automatic refresh.
-        #[arg(long)]
-        frozen: bool,
-        /// Store path (default: $XDG_STATE_HOME/saniwalens/saniwalens.db).
-        #[arg(long)]
-        db: Option<PathBuf>,
+        #[command(flatten)]
+        period: PeriodArgs,
+        #[command(flatten)]
+        read: ReadArgs,
     },
     /// The health check — what to fix first, what your sessions cost, and
     /// what is fine as-is. Start here.
@@ -299,26 +194,13 @@ enum Command {
         /// projects' own config) | project:<slug> (one project's).
         #[arg(long)]
         scope: Option<String>,
-        /// Only count events on or after this date (YYYY-MM-DD, JST).
-        #[arg(long, value_name = "DATE")]
-        since: Option<String>,
-        /// Only count events through this date (YYYY-MM-DD, JST) — the
-        /// whole day counts.
-        #[arg(long, value_name = "DATE")]
-        until: Option<String>,
-        /// Rolling window ending now: <N>d | <N>h | <N>w (e.g. 7d). Exclusive
-        /// with the explicit dates.
-        #[arg(long, value_name = "SPAN", conflicts_with_all = ["since", "until"])]
-        last: Option<String>,
+        #[command(flatten)]
+        period: PeriodArgs,
         /// Output format: table (human text) | json (the routed findings).
         #[arg(long)]
         format: Option<String>,
-        /// Read the store as-is; skip the automatic refresh.
-        #[arg(long)]
-        frozen: bool,
-        /// Store path (default: $XDG_STATE_HOME/saniwalens/saniwalens.db).
-        #[arg(long)]
-        db: Option<PathBuf>,
+        #[command(flatten)]
+        read: ReadArgs,
     },
     /// Ask anything the fixed reports don't cover: run a read-only SQL query
     /// against the analyzed store (as an argument, or piped via stdin).
@@ -377,11 +259,15 @@ pub fn run() -> Result<()> {
     let resolved = resolve_cli(cli.harness.as_deref(), cli.profile.as_deref(), &env)?;
     let harness = resolved.harness;
     let config_db = resolved.config_db;
-    // Flags are parsed before the session is built — the pre-Session dispatch
-    // evaluated `parse_scope`/`parse_format` ahead of any store work, so an
-    // invalid flag fails on its own instead of surfacing a store error (or a
-    // freshness line) first. Byte-identical output, error ordering included
-    // (PBI 01's acceptance criterion).
+    // The windowed report arms resolve their flags through one dispatch —
+    // scope, format, period, then the store, the order pinned in
+    // `cli/window.rs`, so an invalid flag fails on its own before any store
+    // work (PBI 01's byte-identical error ordering included).
+    let dispatch = WindowedDispatch {
+        harness: &harness,
+        config_db: config_db.as_deref(),
+        env: &env,
+    };
     match cli.command {
         Command::Analyze {
             projects,
@@ -394,195 +280,100 @@ pub fn run() -> Result<()> {
         }
         Command::Usage {
             by,
-            since,
-            until,
-            last,
+            period,
             format,
-            frozen,
-            db,
+            read,
         } => {
-            let fmt = parse_format(format.as_deref())?;
-            let window = parse_period(since.as_deref(), until.as_deref(), last.as_deref())?;
-            let sess = Session::open_read(
-                &harness,
-                db,
-                config_db.as_deref(),
-                frozen,
-                &env,
-                run_analyze,
-            )?;
-            usage(&sess, by.as_deref(), window, fmt)
+            let opened = dispatch.open(None, format.as_deref(), &period, &read, run_analyze)?;
+            usage(&opened.sess, by.as_deref(), opened.window, opened.format)
         }
-        Command::Trend {
-            since,
-            until,
-            last,
-            format,
-            frozen,
-            db,
-        } => {
-            let fmt = parse_format(format.as_deref())?;
-            // The pair resolves before the session opens — the same
-            // ahead-of-store evaluation `parse_period` gives the other views,
-            // so a bad date fails as a period error before any store work.
-            let pair = parse_pair(since.as_deref(), until.as_deref(), last.as_deref())?;
-            let sess = Session::open_read(
-                &harness,
-                db,
-                config_db.as_deref(),
-                frozen,
-                &env,
-                run_analyze,
-            )?;
-            trend(&sess, pair, fmt)
+        Command::Trend { pair, format, read } => {
+            let opened = dispatch.open_pair(format.as_deref(), &pair, &read, run_analyze)?;
+            trend(&opened.sess, opened.pair, opened.format)
         }
         Command::Inventory {
             scope,
-            since,
-            until,
-            last,
+            period,
             format,
-            frozen,
-            db,
+            read,
         } => {
-            let filter = parse_scope(scope.as_deref())?;
-            let fmt = parse_format(format.as_deref())?;
-            let window = parse_period(since.as_deref(), until.as_deref(), last.as_deref())?;
-            let sess = Session::open_read(
-                &harness,
-                db,
-                config_db.as_deref(),
-                frozen,
-                &env,
+            let opened = dispatch.open(
+                scope.as_deref(),
+                format.as_deref(),
+                &period,
+                &read,
                 run_analyze,
             )?;
-            inventory(&sess, &filter, window, fmt)
+            inventory(&opened.sess, &opened.filter, opened.window, opened.format)
         }
         Command::Waste {
             scope,
-            since,
-            until,
-            last,
+            period,
             format,
-            frozen,
-            db,
+            read,
         } => {
-            let filter = parse_scope(scope.as_deref())?;
-            let fmt = parse_format(format.as_deref())?;
-            let window = parse_period(since.as_deref(), until.as_deref(), last.as_deref())?;
-            let sess = Session::open_read(
-                &harness,
-                db,
-                config_db.as_deref(),
-                frozen,
-                &env,
+            let opened = dispatch.open(
+                scope.as_deref(),
+                format.as_deref(),
+                &period,
+                &read,
                 run_analyze,
             )?;
-            waste(&sess, &filter, window, fmt)
+            waste(&opened.sess, &opened.filter, opened.window, opened.format)
         }
         Command::Overhead {
-            since,
-            until,
-            last,
             format,
-            frozen,
-            db,
+            period,
+            read,
         } => {
-            let fmt = parse_format(format.as_deref())?;
-            let window = parse_period(since.as_deref(), until.as_deref(), last.as_deref())?;
-            let sess = Session::open_read(
-                &harness,
-                db,
-                config_db.as_deref(),
-                frozen,
-                &env,
-                run_analyze,
-            )?;
-            overhead(&sess, window, fmt)
+            let opened = dispatch.open(None, format.as_deref(), &period, &read, run_analyze)?;
+            overhead(&opened.sess, opened.window, opened.format)
         }
         Command::Prompts {
-            since,
-            until,
-            last,
             format,
-            frozen,
-            db,
+            period,
+            read,
         } => {
-            let fmt = parse_format(format.as_deref())?;
-            let window = parse_period(since.as_deref(), until.as_deref(), last.as_deref())?;
-            let sess = Session::open_read(
-                &harness,
-                db,
-                config_db.as_deref(),
-                frozen,
-                &env,
-                run_analyze,
-            )?;
-            prompts(&sess, window, fmt)
+            let opened = dispatch.open(None, format.as_deref(), &period, &read, run_analyze)?;
+            prompts(&opened.sess, opened.window, opened.format)
         }
         Command::Failures {
             scope,
-            since,
-            until,
-            last,
+            period,
             format,
-            frozen,
-            db,
+            read,
         } => {
-            let filter = parse_scope(scope.as_deref())?;
-            let fmt = parse_format(format.as_deref())?;
-            let window = parse_period(since.as_deref(), until.as_deref(), last.as_deref())?;
-            let sess = Session::open_read(
-                &harness,
-                db,
-                config_db.as_deref(),
-                frozen,
-                &env,
+            let opened = dispatch.open(
+                scope.as_deref(),
+                format.as_deref(),
+                &period,
+                &read,
                 run_analyze,
             )?;
-            failures(&sess, &filter, window, fmt)
+            failures(&opened.sess, &opened.filter, opened.window, opened.format)
         }
         Command::Stuck {
-            since,
-            until,
-            last,
             format,
-            frozen,
-            db,
+            period,
+            read,
         } => {
-            let fmt = parse_format(format.as_deref())?;
-            let window = parse_period(since.as_deref(), until.as_deref(), last.as_deref())?;
-            let sess = Session::open_read(
-                &harness,
-                db,
-                config_db.as_deref(),
-                frozen,
-                &env,
-                run_analyze,
-            )?;
-            stuck(&sess, window, fmt)
+            let opened = dispatch.open(None, format.as_deref(), &period, &read, run_analyze)?;
+            stuck(&opened.sess, opened.window, opened.format)
         }
         Command::Doctor {
             scope,
-            since,
-            until,
-            last,
+            period,
             format,
-            frozen,
-            db,
+            read,
         } => {
-            let filter = parse_scope(scope.as_deref())?;
-            let fmt = parse_format(format.as_deref())?;
-            let window = parse_period(since.as_deref(), until.as_deref(), last.as_deref())?;
-            let sess = Session::open_read(
-                &harness,
-                db,
-                config_db.as_deref(),
-                frozen,
-                &env,
+            let opened = dispatch.open(
+                scope.as_deref(),
+                format.as_deref(),
+                &period,
+                &read,
                 run_analyze,
             )?;
-            doctor(&sess, &filter, window, fmt)
+            doctor(&opened.sess, &opened.filter, opened.window, opened.format)
         }
         Command::Sql { query, format, db } => {
             let fmt = parse_format(format.as_deref())?;
@@ -3301,22 +3092,19 @@ mod tests {
         let cli = Cli::try_parse_from(["saniwalens", "usage", "--last", "7d"]).unwrap();
         let Command::Usage {
             by,
-            since,
-            until,
-            last,
+            period,
             format,
-            frozen,
-            db,
+            read,
         } = cli.command
         else {
             panic!("the command is `usage`");
         };
         assert_eq!(by, None);
-        assert_eq!(since, None);
-        assert_eq!(until, None);
-        assert_eq!(last.as_deref(), Some("7d"));
+        assert_eq!(period.since, None);
+        assert_eq!(period.until, None);
+        assert_eq!(period.last.as_deref(), Some("7d"));
         assert_eq!(format, None);
-        assert!(!frozen);
-        assert_eq!(db, None);
+        assert!(!read.frozen);
+        assert_eq!(read.db, None);
     }
 }

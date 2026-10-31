@@ -24,7 +24,7 @@ pub(crate) enum Align {
 /// Output format for reports: `table` and `markdown` are for humans, `json`
 /// is the machine contract — typed values, nothing but JSON on stdout (all
 /// meta/freshness chatter goes to stderr).
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, PartialEq, Debug)]
 pub(crate) enum Format {
     Table,
     Markdown,

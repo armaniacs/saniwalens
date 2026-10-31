@@ -189,7 +189,6 @@ Options:
   -h, --help               Print help
 "#;
 
-
 #[test]
 fn the_nine_windowed_views_help_is_pinned_byte_for_byte() {
     for (view, expected) in VIEWS.iter().zip(HELP.iter()) {

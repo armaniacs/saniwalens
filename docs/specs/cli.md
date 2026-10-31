@@ -71,7 +71,11 @@ Resolution order, strongest first: explicit flags, the selected profile, the
 file's top-level defaults, then the builtins (`claude`, the per-harness store
 path). Flag *values* (`--scope`, `--format`) are parsed before the session is
 built, so an invalid flag fails on its own ― no store open, no freshness line
-ahead of the error; `optimize` is the exception that resolves the store path
+ahead of the error. The nine report views resolve those flags through **one**
+windowed open (`WindowedDispatch::open` / `open_pair` in `cli/window.rs` ―
+scope where the view has `--scope`, then format, then the period or pair,
+then `Session::open_read`), so this ordering has one counterpart instead of a
+copy per view arm; `optimize` is the exception that resolves the store path
 first, exactly as the pre-`Session` dispatch did. A relative `db` joins the directory holding `config.toml` ― never the
 current working directory ― while an explicit `--db` is taken as is, even
 when relative; `~` is not expanded. Unknown keys are ignored so a newer file
@@ -201,7 +205,11 @@ compare against is undefined.
   established at the entry instead of trusted to the zone's sign.
 - `--last SPAN`: a rolling window ending now ― `<N>d`, `<N>h`, `<N>w`.
   Exclusive with the explicit dates (clap conflict), so "last 7 days" can never
-  be silently reinterpreted by a stray `--since`. The span's resolved window
+  be silently reinterpreted by a stray `--since`. The conflict is declared once
+  on the shared period-flags group the eight single-window views flatten
+  (`cli/window.rs`); trend's pair keeps its own declaration, so its
+  pair-specific help wording survives (the help capture pins hold every view's
+  help byte-identical). The span's resolved window
   must stay inside the calendar chrono can express (`NaiveDate`'s range,
   roughly ±262,000 years, `NaiveDateTime::MIN`/`MAX`'s timestamps): a span
   whose resolved window leaves it (e.g. `--last 100000000d`) has no date to
