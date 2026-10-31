@@ -56,25 +56,25 @@ Scenario: 出力はバイト同一である
 ```
 
 ## 受け入れ基準
-- [ ] trend の payload を typed serializable にする
+- [x] trend の payload を typed serializable にする
   （table と JSON がそこから派生。trend_json precedent（:123-181 + pin
   :724-809）を標準形として使う）
-- [ ] metric 比較の精度規則を 1 箇所に寄せる
+- [x] metric 比較の精度規則を 1 箇所に寄せる
   （metric_json_float の生 f64 比較 :84-96 と delta_cells_float_opt の表示
   精度判定 :221-232 の不統一を消す）
-- [ ] 最初の golden JSON contract テストを同梱する
+- [x] 最初の golden JSON contract テストを同梱する
   （view-landing rule の発火時義務を先に用意）
-- [ ] 出力 byte-identity: trend x 3 format の出力不変
+- [x] 出力 byte-identity: trend x 3 format の出力不変
   （capture pin 保護 trend.rs:697-721/:724-809、trend_markdown.rs 4 goldens、
   period_errors.rs）
-- [ ] with_window 添付の退化禁止（trend 手動 window :167-171）
+- [x] with_window 添付の退化禁止（trend 手動 window :167-171）
   sql/analyze 非添付（:1166, :2128）は本 PBI のスコープ外
-- [ ] spec 同一変更: cli.md:141-163 machine contract 節 +
+- [x] spec 同一変更: cli.md:141-163 machine contract 節 +
   architecture.md:101 report 行 + cli-view-addition.md:36-40 golden "None
   exist yet" の解消
-- [ ] delivery-return（render が返り値を返す）は本 PBI のスコープ外
+- [x] delivery-return（render が返り値を返す）は本 PBI のスコープ外
   （後続、ledger 記録）; doctor text pin 解禁も後続
-- [ ] tripwire に payload 型は view ファイル / 新 module へ（mod.rs に足さない）
+- [x] tripwire に payload 型は view ファイル / 新 module へ（mod.rs に足さない）
 
 ## テスト戦略（t_wadaスタイル）
 
@@ -131,10 +131,10 @@ delivery-return は後続）
 - tripwire（budget 3,383 slack なし）: payload 型は trend.rs / 新 module へ
 
 ## Definition of Done
-- [ ] 全 BDD シナリオが自動テストとして実装されパスする
-- [ ] trend の table/JSON が 1 つの typed payload から導出され、精度規則が
+- [x] 全 BDD シナリオが自動テストとして実装されパスする
+- [x] trend の table/JSON が 1 つの typed payload から導出され、精度規則が
   1 箇所に寄る
-- [ ] 最初の golden JSON contract テストが着地する
-- [ ] `just check`（直接実行）と `cargo test` が green（byte-identity 込み）
-- [ ] コードレビュー完了（task review + 最終 review）
-- [ ] cli.md、architecture.md、cli-view-addition.md 更新済み
+- [x] 最初の golden JSON contract テストが着地する
+- [x] `just check`（直接実行）と `cargo test` が green（byte-identity 込み）
+- [x] コードレビュー完了（task review + 最終 review）
+- [x] cli.md、architecture.md、cli-view-addition.md 更新済み

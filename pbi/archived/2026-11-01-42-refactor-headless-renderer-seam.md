@@ -48,17 +48,17 @@ Scenario: kilo headless が追加編集なしで成立する
 ```
 
 ## 受け入れ基準
-- [ ] headless run-line renderer の選択を adapter/harness.rs の data arms へ
+- [x] headless run-line renderer の選択を adapter/harness.rs の data arms へ
   移設する（PBI 38 の launch shape 移設に続く、input_unit/copy/db_file_name/
   launch shape の隣）
-- [ ] run_headless の spawn/log/heartbeat は harness 非依存のまま、seam が
+- [x] run_headless の spawn/log/heartbeat は harness 非依存のまま、seam が
   選んだ renderer を受ける
-- [ ] run_headless の最小 seam test を追加する
+- [x] run_headless の最小 seam test を追加する
   （heartbeat/thread logic を 1 箇所で testable に。tests/ で 0 件 → 1 件）
-- [ ] kilo headless gate の code comment（:639-647）の判断を維持する
-- [ ] spec 同一変更: harness.md launch 節（PBI 38 と同じ箇所の残り）+
+- [x] kilo headless gate の code comment（:639-647）の判断を維持する
+- [x] spec 同一変更: harness.md launch 節（PBI 38 と同じ箇所の残り）+
   cli.md:424-430 delivery 節の残り
-- [ ] docs-charset（U+2014 禁止）; tripwire の budget 変更は spec update と
+- [x] docs-charset（U+2014 禁止）; tripwire の budget 変更は spec update と
   同一 PR
 
 ## テスト戦略（t_wadaスタイル）
@@ -110,9 +110,9 @@ Scenario: kilo headless が追加編集なしで成立する
 - heartbeat/thread logic の test は最小に（spawn 全体の test は別 PBI スケール）
 
 ## Definition of Done
-- [ ] 全 BDD シナリオが自動テストとして実装されパスする
-- [ ] renderer 選択が harness seam の data arms に住む
-- [ ] run_headless の最小 seam test が着地する
-- [ ] `just check`（直接実行）と `cargo test` が green
-- [ ] コードレビュー完了（task review + 最終 review）
-- [ ] harness.md、cli.md 更新済み
+- [x] 全 BDD シナリオが自動テストとして実装されパスする
+- [x] renderer 選択が harness seam の data arms に住む
+- [x] run_headless の最小 seam test が着地する
+- [x] `just check`（直接実行）と `cargo test` が green
+- [x] コードレビュー完了（task review + 最終 review）
+- [x] harness.md、cli.md 更新済み

@@ -55,26 +55,26 @@ Scenario: 出力と help はバイト同一である
 ```
 
 ## 受け入れ基準
-- [ ] 9 複製 flag 宣言を 1 宣言済み引数群に統合する
+- [x] 9 複製 flag 宣言を 1 宣言済み引数群に統合する
   （clap flatten + conflicts_with_all の arg id を最初に実証）
-- [ ] arm ごとの順序付き配線を 1 窓付きセッション open 呼び出しに集約する
+- [x] arm ごとの順序付き配線を 1 窓付きセッション open 呼び出しに集約する
   （parse_format → [parse_scope] → parse_period/parse_pair → Session::open_read
   の同順序を新 module 内で pin。mod.rs:391-585 の同順序）
-- [ ] mod.rs を約 200-350 行縮める（tripwire green のまま、budget は同一 PR
+- [x] mod.rs を約 200-350 行縮める（tripwire green のまま、budget は同一 PR
   で再測定・更新する ― PBI 38 規範: budget 変更は spec update と同一 PR、
   測定サイズ zero-slack。PBI 38 が 3,383 から 3,322 に再測定済みなので、
   本 PBI の縮小後は 3,322 から再測定する）
-- [ ] help 文面バイト同一 + trend pair 固有文面: 8 view は逐語同一 doc、trend の
+- [x] help 文面バイト同一 + trend pair 固有文面: 8 view は逐語同一 doc、trend の
   3 旗は pair 固有（mod.rs:114-125）― 移動前後で 9 subcommand の --help
   capture diff を空に
-- [ ] 順序不変条件の pin（PBI 01 バイト同一 + tests/period_errors.rs。
+- [x] 順序不変条件の pin（PBI 01 バイト同一 + tests/period_errors.rs。
   frozen 経路 freshness（session.rs:143-147）と optimize arm 例外順序
   （:600-606）には触れない）
-- [ ] view-landing rule 再開禁止（views/ を作らない、trend.rs も移動しない、
+- [x] view-landing rule 再開禁止（views/ を作らない、trend.rs も移動しない、
   テストは移動先 mod に従属 ― tdd.md:41）
-- [ ] spec 同一変更: cli.md:72-75, 204-208（順序不変条件が 1 対応物を得る）+
+- [x] spec 同一変更: cli.md:72-75, 204-208（順序不変条件が 1 対応物を得る）+
   architecture.md:101 層表 report 行
-- [ ] conflict 属性落ちの 6 view（period.rs:47-52 の core 第二防衛が捕めるが
+- [x] conflict 属性落ちの 6 view（period.rs:47-52 の core 第二防衛が捕めるが
   clap 系と文言・終了コードが別系統、cli.md:187-188 は「clap conflict」と明記）
   を機械化するか判断して記録する
 
@@ -134,9 +134,9 @@ Scenario: 出力と help はバイト同一である
 - docs-charset: em dash U+2014 不可、.claude/rules/*.md も対象
 
 ## Definition of Done
-- [ ] 全 BDD シナリオが自動テストとして実装されパスする
-- [ ] 9 subcommand の --help capture diff が空、出力はバイト同一
-- [ ] mod.rs が約 200-350 行縮み（tripwire green、budget 変更なし）
-- [ ] `just check`（直接実行）と `cargo test` が green
-- [ ] コードレビュー完了（task review + 最終 review）
-- [ ] cli.md、architecture.md 更新済み
+- [x] 全 BDD シナリオが自動テストとして実装されパスする
+- [x] 9 subcommand の --help capture diff が空、出力はバイト同一
+- [x] mod.rs が約 200-350 行縮み（tripwire green、budget 変更なし）
+- [x] `just check`（直接実行）と `cargo test` が green
+- [x] コードレビュー完了（task review + 最終 review）
+- [x] cli.md、architecture.md 更新済み

@@ -56,22 +56,22 @@ Scenario: double-backtick は anchor でない
 ```
 
 ## 受け入れ基準
-- [ ] scan_files（tests/prose_reference_gate.rs:106-118）に
+- [x] scan_files（tests/prose_reference_gate.rs:106-118）に
   `.claude/rules/*.md` を追加する（docs/specs と同じ read_dir 経路の再利用）
-- [ ] `the_scan_list_is_current_prose_only`（:250-278）と doc comment 3 箇所
+- [x] `the_scan_list_is_current_prose_only`（:250-278）と doc comment 3 箇所
   （:1-2, :16-19, :103-105）と format_misses 文言（:139）を同一変更で更新する
   （更新しないと PBI 35 の 7 gate テストが red）
-- [ ] cli-view-addition.md:24,28,29 の bare `mod.rs` x 3 を `cli/mod.rs` に
+- [x] cli-view-addition.md:24,28,29 の bare `mod.rs` x 3 を `cli/mod.rs` に
   先に re-point する（5d30eca の統一前例どおり所在明記形）
-- [ ] double-backtick span 対象外の単体テスト 1 行を足す
+- [x] double-backtick span 対象外の単体テスト 1 行を足す
   （refs_in_line("``src/foo.rs``") が空を返す assert）
-- [ ] README/AGENTS を読めない場合の panic は fail-loud のまま維持する
+- [x] README/AGENTS を読めない場合の panic は fail-loud のまま維持する
   （judge 済み ― miss 形式化は anchor 無しの偽情報を miss 一覧に混ぜる）
-- [ ] period.rs:739 の None-skip は本 PBI のスコープ外とする
+- [x] period.rs:739 の None-skip は本 PBI のスコープ外とする
   （PBI 37 が所有）
-- [ ] `.claude/rules/spec-sync.md`:50-54 の「current prose」文言を同一変更で
+- [x] `.claude/rules/spec-sync.md`:50-54 の「current prose」文言を同一変更で
   rules 付きに更新する
-- [ ] `just check`（直接実行）と `cargo test` が green（7 gate テスト + 拡張）
+- [x] `just check`（直接実行）と `cargo test` が green（7 gate テスト + 拡張）
 
 ## テスト戦略（t_wadaスタイル）
 
@@ -126,8 +126,8 @@ Scenario: double-backtick は anchor でない
   U+2014 再導入禁止
 
 ## Definition of Done
-- [ ] 全 BDD シナリオが gate テストとして実装されパスする
-- [ ] rules 内の機械化クラス錨 5+3 件が gate の検証下に入る
-- [ ] `just check`（直接実行）と `cargo test` が green
-- [ ] コードレビュー完了（task review + 最終 review）
-- [ ] tests/prose_reference_gate.rs、.claude/rules/ 2 ファイル更新済み
+- [x] 全 BDD シナリオが gate テストとして実装されパスする
+- [x] rules 内の機械化クラス錨 5+3 件が gate の検証下に入る
+- [x] `just check`（直接実行）と `cargo test` が green
+- [x] コードレビュー完了（task review + 最終 review）
+- [x] tests/prose_reference_gate.rs、.claude/rules/ 2 ファイル更新済み

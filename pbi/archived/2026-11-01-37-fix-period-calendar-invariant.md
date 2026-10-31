@@ -64,21 +64,21 @@ Scenario: 既存の挙動は変わらない
 ```
 
 ## 受け入れ基準
-- [ ] resolve / resolve_pair の日付経路に暦検証を明示確立する
+- [x] resolve / resolve_pair の日付経路に暦検証を明示確立する
   （既存 error family 維持: --last 由来 invalid-span、日付由来 empty-window
   --since 名指し）
-- [ ] bounds の空文字 fallback（map_or_else(String::new,…)）を削除する
+- [x] bounds の空文字 fallback（map_or_else(String::new,…)）を削除する
   （暦外は型で表現不能に。分岐が消えることで型不変条件が consumer に見える）
-- [ ] property test を日付込みの無条件 sweep に拡張する
+- [x] property test を日付込みの無条件 sweep に拡張する
   （None-skip 解消: :739 の if let Some を .expect か明示 assert に戻す）
-- [ ] 順序固定: ガード先・削除後（逆順は沈默誤報が panic に変わるだけ）
-- [ ] store.rs は直さない（`<> ''` は空-stamp 排除の正当役割に戻る）
-- [ ] settled pin 回帰禁止: タイリング不変 previous.end == current.start - 1、
+- [x] 順序固定: ガード先・削除後（逆順は沈默誤報が panic に変わるだけ）
+- [x] store.rs は直さない（`<> ''` は空-stamp 排除の正当役割に戻る）
+- [x] settled pin 回帰禁止: タイリング不変 previous.end == current.start - 1、
   +1 シフト、trend previous 暦外文言、byte-identity、CALENDAR 定数 pin
   （:705-712）、E2E tests/period_errors.rs、--since は必ず clap equals 形
-- [ ] spec 更新: docs/specs/cli.md Period 節 :186-208 + Reporting honesty
+- [x] spec 更新: docs/specs/cli.md Period 節 :186-208 + Reporting honesty
   :266-273（同一変更内）
-- [ ] 検証は再ビルド後のバイナリで行う（stale release が閉じた帯を再び生かす）
+- [x] 検証は再ビルド後のバイナリで行う（stale release が閉じた帯を再び生かす）
 
 ## テスト戦略（t_wadaスタイル）
 
@@ -135,8 +135,8 @@ Scenario: 既存の挙動は変わらない
   別 PBI）
 
 ## Definition of Done
-- [ ] 全 BDD シナリオが自動テストとして実装されパスする
-- [ ] bounds の空文字 fallback が消え、property test が日付込み無条件 sweep に
-- [ ] `just check`（直接実行）と `cargo test` が green（既存 pin 含む）
-- [ ] コードレビュー完了（task review + 最終 review）
-- [ ] docs/specs/cli.md 更新済み（Period 節 + Reporting honesty）
+- [x] 全 BDD シナリオが自動テストとして実装されパスする
+- [x] bounds の空文字 fallback が消え、property test が日付込み無条件 sweep に
+- [x] `just check`（直接実行）と `cargo test` が green（既存 pin 含む）
+- [x] コードレビュー完了（task review + 最終 review）
+- [x] docs/specs/cli.md 更新済み（Period 節 + Reporting honesty）

@@ -52,17 +52,17 @@ Scenario: 2 件目の純粋 join が発火する
 ```
 
 ## 受け入れ基準
-- [ ] docs/specs/architecture.md:99 の core 列挙に trend join 加筆する
-- [ ] `.claude/rules/` に placement rule（fetch 済み row の加工は core へ、
+- [x] docs/specs/architecture.md:99 の core 列挙に trend join 加筆する
+- [x] `.claude/rules/` に placement rule（fetch 済み row の加工は core へ、
   SQLite を含まない関数が store に現れたら同じ PR で core へ移動 ― 2 件目
   発火義務）を追加する
-- [ ] `.claude/rules/spec-sync.md` map に 1 行追加する
-- [ ] refactor（skill_deltas + TwoWindow/SkillDelta の core 移動）は trigger
+- [x] `.claude/rules/spec-sync.md` map に 1 行追加する
+- [x] refactor（skill_deltas + TwoWindow/SkillDelta の core 移動）は trigger
   乗車（次の trend metric/view 着地 PR に同乗）― 本 PBI のスコープ外、ledger
   に記録する
-- [ ] 移動義務の trigger を検知可能にする
+- [x] 移動義務の trigger を検知可能にする
   （grep 可能な契約 or tests/ に軽い tripwire ― judge して記録する）
-- [ ] docs-charset（.claude/rules/*.md も CP932 範囲、em dash 禁止）
+- [x] docs-charset（.claude/rules/*.md も CP932 範囲、em dash 禁止）
 
 ## テスト戦略（t_wadaスタイル）
 
@@ -116,9 +116,9 @@ Scenario: 2 件目の純粋 join が発火する
   （本 PBI では移動しない）
 
 ## Definition of Done
-- [ ] 全 BDD シナリオが rule 文面として充足する
-- [ ] placement rule が .claude/rules/ に着地し、spec-sync map に 1 行追加
-- [ ] refactor の trigger 乗車が ledger に記録される
-- [ ] `just check`（直接実行）と `cargo test` が green
-- [ ] コードレビュー完了（task review + 最終 review）
-- [ ] architecture.md、.claude/rules/ 2 ファイル更新済み
+- [x] 全 BDD シナリオが rule 文面として充足する
+- [x] placement rule が .claude/rules/ に着地し、spec-sync map に 1 行追加
+- [x] refactor の trigger 乗車が ledger に記録される
+- [x] `just check`（直接実行）と `cargo test` が green
+- [x] コードレビュー完了（task review + 最終 review）
+- [x] architecture.md、.claude/rules/ 2 ファイル更新済み
