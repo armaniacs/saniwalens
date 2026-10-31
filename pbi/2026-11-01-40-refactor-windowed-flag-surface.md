@@ -60,8 +60,10 @@ Scenario: 出力と help はバイト同一である
 - [ ] arm ごとの順序付き配線を 1 窓付きセッション open 呼び出しに集約する
   （parse_format → [parse_scope] → parse_period/parse_pair → Session::open_read
   の同順序を新 module 内で pin。mod.rs:391-585 の同順序）
-- [ ] mod.rs を約 200-350 行縮める（tripwire green のまま、budget は下げない
-  ― PBI 34 規範）
+- [ ] mod.rs を約 200-350 行縮める（tripwire green のまま、budget は同一 PR
+  で再測定・更新する ― PBI 38 規範: budget 変更は spec update と同一 PR、
+  測定サイズ zero-slack。PBI 38 が 3,383 から 3,322 に再測定済みなので、
+  本 PBI の縮小後は 3,322 から再測定する）
 - [ ] help 文面バイト同一 + trend pair 固有文面: 8 view は逐語同一 doc、trend の
   3 旗は pair 固有（mod.rs:114-125）― 移動前後で 9 subcommand の --help
   capture diff を空に
@@ -111,7 +113,8 @@ Scenario: 出力と help はバイト同一である
 - src/cli/window.rs: parse_period/parse_pair :15-37
 - src/session.rs: seam :87-91, 135-151（窓の外で止まった現状）、freshness
   :143-147、:190-195
-- tripwire: tests/cli_mod_line_budget.rs:16（3,383 無余裕）
+- tripwire: tests/cli_mod_line_budget.rs:17（PBI 38 が 3,383 から 3,322 に
+  再測定済み、zero-slack。本 PBI の縮小後に再測定する）
 
 ### 実装手順
 1. clap flatten + conflicts_with_all の arg id を最初に実証する
@@ -119,14 +122,15 @@ Scenario: 出力と help はバイト同一である
 3. 1 窓付きセッション open 呼び出しに集約し、順序を新 module 内で pin する
 4. --help capture diff 空 + PBI 01 バイト同一を確認する
 5. spec 同一変更（cli.md、architecture.md）
-6. 検証（tripwire green、budget 変更なし）
+6. 検証（tripwire green、budget は縮小後に同一 PR で再測定・更新）
 
 ### 落とし穴
 - PBI 29/33 は 9 arm を検査対象から制度化して外した ― arm 複製は凍結されたまま
   次の窓 flag 変更を危くする（本 PBI がそれを集約する）
 - 順序の並べ替えは既存 period_errors.rs をすり抜ける（freshness 行と store
   副作用が pin の外）― 新 pin は freshness 行込みで
-- budget は下げない（PBI 34 規範、mod.rs は縮む方向）
+- budget は縮小後に同一 PR で再測定・更新する（PBI 38 規範、zero-slack。
+  PBI 38 が 3,383 から 3,322 に再測定済み）
 - docs-charset: em dash U+2014 不可、.claude/rules/*.md も対象
 
 ## Definition of Done
