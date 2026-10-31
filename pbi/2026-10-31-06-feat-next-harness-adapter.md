@@ -41,7 +41,7 @@ Scenario: 未知のハーネス指定はエラーになる
   ヒント付きで拒否される（既存契約の踏襲）
 - [ ] adapter モジュールが入力の発見、fingerprint スキップ、抽出、
   ストア引き渡しを担い、Harness::analyze が唯一の dispatch である
-  （cli.rs は dispatch arm を増やさない）
+  （cli/mod.rs は dispatch arm を増やさない）
 - [ ] session-format の新 spec（docs/specs/session-format-<harness>.md）を
   docs/specs/ に新設し、docs/specs/harness.md に「One store per harness」の表、
   入力 root、v1 capability の節を「Forward compatibility」の契約どおり追加する
@@ -73,7 +73,7 @@ Scenario: 未知のハーネス指定はエラーになる
 - 契約（docs/specs/harness.md の「Forward compatibility」）: 新ハーネスは
   (1) Harness variant、(2) 既定入力 root とストア名、(3) format spec、
   (4) adapter module（Harness::analyze の背後、入力 route / fingerprinting /
-  analyzer version key 込み）の追加で済み、shell（cli.rs）は dispatch を増やさない。
+  analyzer version key 込み）の追加で済み、shell（cli/mod.rs）は dispatch を増やさない。
   「新ハーネスは variant と module の追加で済む、shell は変更しない」を守る
 - 既存 3 ハーネスの実例: src/adapter/opencode.rs（SQLite 読み）、
   src/adapter/kilocode.rs（ディレクトリ内 2 JSON）、src/adapter/transcript.rs（JSONL）。
@@ -94,7 +94,7 @@ Scenario: 未知のハーネス指定はエラーになる
   docs/specs/architecture.md
 - 関連コード: src/adapter/harness.rs（Harness enum / parse / analyze /
   catalog_surfaces）、src/adapter/opencode.rs / kilocode.rs / transcript.rs（実例）、
-  src/cli.rs（--harness flag）、src/session.rs（Session::open と guard）
+  src/cli/mod.rs（--harness flag）、src/session.rs（Session::open と guard）
 
 ## Definition of Done
 - [ ] 全BDDシナリオが自動テストとして実装されパスする

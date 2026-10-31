@@ -44,7 +44,7 @@ Scenario: 参照先の transcript が回転済み（原文が無い）場合も�
 - 哲学: 結果は提示まで（advise しない）。docs/specs/architecture.md の「Optimization proposals」（optimize の担う領域）との境界を混同しない。スキル抽出は新表面の候補発見
 - E が大きい理由: クラスタリング品質の設計（しきい値、同じ趣旨の判定、言語差の扱い）が要る。まず合成 fixture で判定基準を固定してから実装し、Confidence=2 の理由を設計で潰す
 - spec 更新: 必要（新機能の契約を docs/specs/ の該当節に同じ変更内で追記。spec-sync 規約）
-- 関連コード: src/store.rs（prompt イベントの参照保持）、src/core/（クラスタリング集計は純粋・I/O フリーに）、src/adapter/（transcript からの原文回収は adapter の知識）、src/cli.rs（新ビューの配線）
+- 関連コード: src/store.rs（prompt イベントの参照保持）、src/core/（クラスタリング集計は純粋・I/O フリーに）、src/adapter/（transcript からの原文回収は adapter の知識）、src/cli/mod.rs（新ビューの配線）
 - 落とし穴: 原文が取り出せない参照はエラーではなく注意書き（transcripts rotate、storage.md の記述どおり参照先が無くなってもイベントの件数は残る）。先の trend の「比較不能」明示と同じ報告の誠実さ（近似は隠さずラベルする）に揃える
 
 ## Definition of Done

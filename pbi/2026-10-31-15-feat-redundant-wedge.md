@@ -42,7 +42,7 @@ Scenario: 類似度がしきい値未満のペアは提示されない
 - 現状コードの確認（2026-10-31 実施済み）: surfaces テーブル（src/store.rs 76 行目付近）に description も attrs_json も現状無い。アダプタは frontmatter description を既に読み、トークン数だけを startup_tokens に格納している（src/adapter/config.rs 194 行目付近の frontmatter_description）。description 本文（または類似度シグナル）をカタログに格納する拡張が前提
 - attrs_json は「report が要るまで先送り」の 1 列として想定済み（src/store.rs 5 行目付近）。格納先の候補: attrs_json 相当の列に description を載せる / 類似度を直接格納する / 範囲外とする判断を含める
 - 類似度の計算は純粋関数にする（core に置き、I/O フリー）。外部依存（埋め込み API 等）は持ち込まない
-- 提示先は waste ビュー（src/cli.rs、docs/specs/cli.md の Views 表）。merge の示唆を載せるが実行はしない（計測して見せるの枠内）
+- 提示先は waste ビュー（src/cli/mod.rs、docs/specs/cli.md の Views 表）。merge の示唆を載せるが実行はしない（計測して見せるの枠内）
 - TDD: 単体（類似度・しきい値境界）→ 統合（waste への配線）→ e2e（合成 fixture）の順に赤緑リファクタ
 - プライバシー: 実 config の description はコミットしない。合成 fixture のみ
 

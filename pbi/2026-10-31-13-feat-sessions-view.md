@@ -40,8 +40,8 @@ Scenario: friction が空のセッションも一覧に現れる
 
 ## 実装者向け注記
 - sessions テーブルは既存（src/store.rs 22 行目付近： id・project・slug・root・source_path・started_at・sub_tokens・sub_agent_count）。セッションのトークン合計・所要時間・friction は events の join から集計する（src/store.rs 263 行目付近の JOIN を参照）
-- コマンドは src/cli.rs の Command enum（59 行目付近）に追加する。既存ビューの流れ（parse_period → Session::open_read → 集計 → 行、freshness 表示）の慣例に従う
-- core は純粋関数のままにする（並び替えと行組み立ては core か report 側の純粋関数に置き、I/O は cli.rs / store.rs に集約）
+- コマンドは src/cli/mod.rs の Command enum（67 行目付近）に追加する。既存ビューの流れ（parse_period → Session::open_read → 集計 → 行、freshness 表示）の慣例に従う
+- core は純粋関数のままにする（並び替えと行組み立ては core か report 側の純粋関数に置き、I/O は cli/mod.rs / store.rs に集約）
 - spec 更新: docs/specs/cli.md の Views 表に新しいビューの行を追加する（動作変更と同じ変更内で）。storage.md はスキーマ変更が無ければ触らない
 - セッション軸（sessions.started_at）とイベント軸（events.started_epoch）の二軸問題に注意。期間指定を持つ場合は PBI 01（pbi/archived/2026-10-30-01-feat-period-filter.md）のテスト規約に揃える
 - TDD: e2e（合成ストア経由）→ 統合（集計と並び替え）→ 単体（比較・境界）の順に赤緑リファクタ

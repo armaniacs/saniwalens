@@ -76,7 +76,8 @@ Scenario: model が空の行は unknown として束ねられる
   honesty の各節）、docs/specs/events.md（metrics 表の model 定義、
   NULL if none qualifies）、docs/specs/storage.md（events.model / subagent_runs.model、
   sessions に model 無し）
-- 関連コード: src/core/usage.rs（集計）、src/cli.rs（ビュー追加の位置）、
+- 関連コード: src/core/usage.rs（集計）、src/cli/mod.rs（ビュー追加の配線。新規ビューは
+  src/cli/views/ に着地）、
   src/store.rs（events / subagent_runs の読み出し）
 
 ## Definition of Done

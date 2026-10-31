@@ -38,11 +38,11 @@ Scenario: 履歴が 1 週間分しか無い場合は比較不能を明示して�
 3日（RICE の Effort と同一根拠）
 
 ## 実装者向け注記
-- 現状コードの確認（2026-10-31 実施済み）: `trend` ビューが既に存在する（pbi/2026-10-30-02-feat-usage-trend.md、実装済み。src/cli.rs の Command::Trend、105 行目付近）。既存 trend はイベント種別の行・スキル別の増減・セッション/subagent 合計の 2 ウィンドウ差分を出す。本 PBI は重複する実装をしないこと。新規ビューとして切るか既存 trend を拡張するかは、既存 trend の出力と本 PBI の BDD シナリオを突き合わせて決め、新規部分（surface 単位の使用差分、履歴不足時のフォールバック）に絞る
+- 現状コードの確認（2026-10-31 実施済み）: `trend` ビューが既に存在する（pbi/2026-10-30-02-feat-usage-trend.md、実装済み。src/cli/mod.rs の Command::Trend、113 行目付近）。既存 trend はイベント種別の行・スキル別の増減・セッション/subagent 合計の 2 ウィンドウ差分を出す。本 PBI は重複する実装をしないこと。新規ビューとして切るか既存 trend を拡張するかは、既存 trend の出力と本 PBI の BDD シナリオを突き合わせて決め、新規部分（surface 単位の使用差分、履歴不足時のフォールバック）に絞る
 - カタログ履歴（surfaces スナップショット蓄積）は not-to-do（pbi/2026-10-30-00-backlog.md の「やらないこと」節）。docs/specs/storage.md 354 行目付近が「usage は歴史的、catalog は現在」と明文化。本 PBI は usage / events 側の差分のみに限定する
 - 歴史的 usage を現在のカタログに join するときの近似に注意: カタログは現在の姿なので、改名・削除された surface の過去使用は現名に寄るか orphan になる。この近似を隠さず、必要なら表示に注記する（Reporting honesty）
 - spec 更新: docs/specs/cli.md の Views 表（trend の行）に surface 単位の差分とフォールバックを追記する（cli.md 系の更新が必要になる。動作変更と同じ変更内で）。storage.md は変更しない
-- 関連コード: src/cli.rs（Command::Trend、trend 関数 2044 行目付近）、src/store.rs（trend_aggregates / skill_deltas / TwoWindow）
+- 関連コード: src/cli/mod.rs（Command::Trend）、src/cli/trend.rs（trend ビュー本体）、src/store.rs（trend_aggregates / skill_deltas / TwoWindow）
 - TDD: e2e（合成ストア）→ 統合（2 期間の surface 別集計）→ 単体（向き判定・フォールバック）の順に赤緑リファクタ
 - プライバシー: 合成 fixture のみ。実 transcript はコミットしない
 

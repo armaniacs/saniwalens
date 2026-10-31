@@ -103,7 +103,7 @@ Scenario: path-conditional でない rule は対象外である
   additive 規約）、docs/specs/storage.md（surfaces.attrs_json、analyzer version 規約）
 - 関連コード: src/adapter/config.rs（rule_surface / has_paths_frontmatter）、
   src/adapter/transcript.rs（tool_use 分類、file_edit 抽出）、
-  src/core/surface.rs（wedge 分類）、src/core/findings.rs、src/cli.rs（waste ビュー）、
+  src/core/surface.rs（wedge 分類）、src/core/findings.rs、src/cli/mod.rs（waste ビュー）、
   src/store.rs（カタログとイベントの読み書き）
 
 ## Definition of Done
