@@ -5,7 +5,7 @@
 //! `bucket.rs`) while the bounds they produce are UTC epochs
 //! (`docs/specs/cli.md`).
 
-use chrono::{FixedOffset, NaiveDate, TimeZone};
+use chrono::{FixedOffset, NaiveDate, NaiveDateTime, TimeZone};
 
 /// A resolved evaluation window in UTC epoch seconds. Both ends are
 /// inclusive; `None` is unbounded.
@@ -52,8 +52,18 @@ pub fn resolve(
     }
     if let Some(value) = last {
         let secs = span_secs(value)?;
+        // A span whose window leaves the calendar has no window to name: its
+        // ends are dates that do not exist, so the disclosure line would
+        // render an empty `since` and the store would compare `started_at`
+        // against an empty string. The same invalid-span error as every other
+        // bad `--last` — an unresolvable input is an error, never a report
+        // that reads as "nothing was used" (`docs/specs/cli.md`).
+        let start = now
+            .checked_sub(secs)
+            .filter(|start| in_calendar(*start) && in_calendar(now))
+            .ok_or_else(|| invalid_span_error(value))?;
         return Ok(TimeRange {
-            start: Some(now - secs),
+            start: Some(start),
             end: Some(now),
         });
     }
@@ -210,6 +220,20 @@ fn span_secs(value: &str) -> Result<i64, String> {
         _ => return Err(invalid()),
     };
     n.checked_mul(secs).ok_or_else(invalid)
+}
+
+/// The epoch range chrono's calendar can express — `NaiveDateTime::MIN` /
+/// `MAX`'s timestamps, the dates `NaiveDate` can name (roughly ±262,000
+/// years). Const-evaluated from chrono's own constants, so a chrono upgrade
+/// that moves the range moves it here too.
+const CALENDAR_MIN_EPOCH: i64 = NaiveDateTime::MIN.and_utc().timestamp();
+const CALENDAR_MAX_EPOCH: i64 = NaiveDateTime::MAX.and_utc().timestamp();
+
+/// Whether an instant names a date the calendar can express. Outside the
+/// range there is no date: the bounds would render an empty string and the
+/// store would compare against an empty one.
+fn in_calendar(epoch: i64) -> bool {
+    (CALENDAR_MIN_EPOCH..=CALENDAR_MAX_EPOCH).contains(&epoch)
 }
 
 /// The window's resolved instants as RFC 3339 strings in the given zone:
@@ -531,5 +555,89 @@ mod tests {
         let err = resolve_pair(None, None, Some("92233720368547d")).unwrap_err();
         assert!(err.contains("invalid --last"), "{err}");
         assert!(err.contains("92233720368547d"), "{err}");
+    }
+
+    // ---- PBI 2026-10-31-29: a `--last` whose window leaves the calendar ----
+
+    #[test]
+    fn a_span_beyond_the_calendar_is_an_error() {
+        // The span parses (it fits i64) but its window names dates that do
+        // not exist: resolve must refuse it as the invalid-span error, not
+        // return a window the disclosure line renders as an empty since.
+        let err = resolve(None, None, Some("92233720368547d")).unwrap_err();
+        assert!(err.contains("invalid --last"), "{err}");
+        assert!(err.contains("92233720368547d"), "{err}");
+        // Fits i64, outside the calendar all the same: 100000000d reaches
+        // roughly 273 thousand years back, past every date NaiveDate can name.
+        let err = resolve(None, None, Some("100000000d")).unwrap_err();
+        assert!(err.contains("invalid --last"), "{err}");
+        assert!(err.contains("100000000d"), "{err}");
+    }
+
+    #[test]
+    fn trend_rejects_a_span_whose_current_window_leaves_the_calendar() {
+        // The doubled window still fits i64, so the pair's overflow guard
+        // passes it — the calendar check at the shared resolve entry is what
+        // refuses it, before any current window is built.
+        let err = resolve_pair(None, None, Some("50000000000000d")).unwrap_err();
+        assert!(err.contains("invalid --last"), "{err}");
+        assert!(err.contains("50000000000000d"), "{err}");
+    }
+
+    #[test]
+    fn the_calendar_edges_are_the_limits_of_a_rolling_window() {
+        // chrono's calendar range, `NaiveDateTime::MIN`/`MAX`'s timestamps:
+        // -8,334,601,228,800 (-262143-01-01) .. 8,210,266,876,799 (+262142-12-31).
+        const CAL_MIN: i64 = -8_334_601_228_800;
+        const CAL_MAX: i64 = 8_210_266_876_799;
+        // The widest in-calendar window: its start sits exactly on the
+        // calendar's floor.
+        let now = CAL_MIN + 2 * 86_400;
+        let range = super::resolve(None, None, Some("2d"), now, JST_OFFSET_SECS).unwrap();
+        assert_eq!(range.start, Some(CAL_MIN));
+        // One day wider and the start leaves the calendar.
+        assert!(super::resolve(None, None, Some("3d"), now, JST_OFFSET_SECS).is_err());
+        // The top edge: the rolling end is the clock itself, so a clock at
+        // the calendar's ceiling still resolves — one second beyond it does
+        // not, which is what makes the check a both-ends one.
+        let range = super::resolve(None, None, Some("1d"), CAL_MAX, JST_OFFSET_SECS).unwrap();
+        assert_eq!(range.end, Some(CAL_MAX));
+        assert!(super::resolve(None, None, Some("1d"), CAL_MAX + 1, JST_OFFSET_SECS).is_err());
+    }
+
+    #[test]
+    fn the_calendar_constants_track_chronos_own_range() {
+        // The constants are const-evaluated from chrono's own; pinning the
+        // values turns a chrono upgrade that moves the range into a visible
+        // change instead of a silent one.
+        assert_eq!(CALENDAR_MIN_EPOCH, -8_334_601_228_800);
+        assert_eq!(CALENDAR_MAX_EPOCH, 8_210_266_876_799);
+    }
+
+    #[test]
+    fn every_accepted_window_renders_non_empty_bounds() {
+        // The disclosure line and the JSON window must never carry an empty
+        // since/until: an out-of-calendar span is refused at the resolve
+        // entry, so anything accepted renders as a date that exists.
+        for span in [
+            "1h",
+            "7d",
+            "24h",
+            "2w",
+            "1000w",
+            "100000000d",
+            "92233720368547d",
+        ] {
+            match resolve(None, None, Some(span)) {
+                Ok(range) => {
+                    let (since, until) = bounds(range, JST_OFFSET_SECS);
+                    let since = since.expect("a rolling window has a since");
+                    let until = until.expect("a rolling window has an until");
+                    assert!(!since.is_empty(), "empty since for {span}");
+                    assert!(!until.is_empty(), "empty until for {span}");
+                }
+                Err(err) => assert!(err.contains("invalid --last"), "{err}"),
+            }
+        }
     }
 }

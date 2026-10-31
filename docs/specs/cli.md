@@ -185,10 +185,18 @@ compare against is undefined.
   the store keeps). `--until` is **inclusive**: the whole named day counts.
 - `--last SPAN`: a rolling window ending now ― `<N>d`, `<N>h`, `<N>w`.
   Exclusive with the explicit dates (clap conflict), so "last 7 days" can never
-  be silently reinterpreted by a stray `--since`.
+  be silently reinterpreted by a stray `--since`. The span's resolved window
+  must stay inside the calendar chrono can express (`NaiveDate`'s range,
+  roughly ±262,000 years, `NaiveDateTime::MIN`/`MAX`'s timestamps): a span
+  whose resolved window leaves it (e.g. `--last 100000000d`) has no date to
+  name, so it is refused at the resolve entry with the same invalid-span error
+  as an unparseable one. `trend`'s pair resolves through the same entry, so a
+  current window outside the calendar is refused there too.
 - Errors are parse-time, before any report renders: an unparseable date fails
   on stderr with a non-zero exit and an empty stdout; `--since` after `--until`
-  is an empty-window error rather than an empty-looking report.
+  is an empty-window error rather than an empty-looking report. A `--last`
+  whose resolved window leaves the calendar is that same invalid-span error ―
+  non-zero, empty stdout, before any report renders or store work runs.
 - The window is **disclosed, never silent**: a dimmed `report window:` line
   rides with the freshness line on stderr (every format), the framing block
   carries it as its last line (table only ― markdown stays a bare table),
@@ -238,6 +246,12 @@ caveats in `events.md` / `surfaces.md`):
   for "never installed": without the period flags the window is all history, and
   under `--since` / `--until` / `--last` the row itself says `UNUSED (window)`
   (inventory; the other views' empty states read "in the evaluation window").
+- A window the input makes unresolvable is an **error**, never a silent
+  report: a `--last` whose resolved window leaves the calendar names dates
+  that do not exist, and fails at the resolve entry with the invalid-span
+  error. The alternative would be a disclosure line with an empty `since` and
+  a store bound (`started_at >= ''`) that silently passes every session ― a
+  successful-looking report that measures nothing.
 - A subagent run whose agent type was never recorded is shown as `(unknown)`,
   never merged into a named type and never dropped ― the per-agent rows must
   keep summing to the subagent total the same report prints above them, for
