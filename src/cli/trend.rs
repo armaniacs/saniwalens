@@ -484,3 +484,618 @@ pub(crate) fn trend(sess: &Session, pair: WindowPair, format: Format) -> Result<
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use crate::adapter::harness::Harness;
+    use crate::core::period::TimeRange;
+    use crate::store::Store;
+
+    use super::*;
+    // ---- PBI 2026-10-30-02 part 2: the trend view's CLI wiring ----
+
+    use crate::core::period::WindowPair;
+    use crate::core::span::{SessionStart, Source, Span};
+    use crate::store::{IngestBatch, SessionMeta};
+
+    fn trend_session(id: &str) -> SessionMeta {
+        SessionMeta {
+            id: id.to_string(),
+            project: "demo".to_string(),
+            slug: "demo".to_string(),
+            root: String::new(),
+            source_path: format!("/tmp/{id}.jsonl"),
+            sub_tokens: 0,
+            sub_agent_count: 0,
+            start: None,
+        }
+    }
+
+    fn trend_span(skill: &str, epoch_secs: i64, out_tokens: u64) -> Span {
+        Span {
+            skill: skill.to_string(),
+            source: Source::Slash,
+            started_epoch_ms: epoch_secs * 1000,
+            duration_sec: 2.0,
+            out_tokens,
+            ctx_growth: 5,
+            ctx_start: 0,
+            ctx_peak: 5,
+            model: None,
+            is_trailing: false,
+            spawns: Vec::new(),
+            sub_tokens: 0,
+            sub_agent_count: 0,
+            sub_tokens_estimated: false,
+        }
+    }
+
+    /// Usage in both comparison windows: previous [1_000, 2_000] (two skill
+    /// spans, one file_edit), current [2_001, 3_000] (one skill span, one
+    /// file_edit). Each window's spans ride its own session — the stamped
+    /// start is the earliest of the declared start and the spans, so a
+    /// session's own spans must not reach into the other window.
+    fn two_window_store() -> Store {
+        let mut store = Store::in_memory().unwrap();
+        let mut past = trend_session("past");
+        past.start = Some(SessionStart {
+            timestamp_ms: 1_500 * 1000,
+            ctx: 9_000,
+        });
+        past.sub_tokens = 400;
+        past.sub_agent_count = 1;
+        let past_spans = [
+            trend_span("commit", 1_500, 100),
+            trend_span("review", 1_800, 50),
+        ];
+        store
+            .ingest(IngestBatch::new(&past, &past_spans, &[]).work_events(&[(
+                1_900_000,
+                "file_edit",
+                "main.rs",
+                None,
+            )]))
+            .unwrap();
+
+        let mut present = trend_session("present");
+        present.start = Some(SessionStart {
+            timestamp_ms: 2_500 * 1000,
+            ctx: 10_000,
+        });
+        present.sub_tokens = 500;
+        present.sub_agent_count = 2;
+        let present_spans = [trend_span("commit", 2_500, 300)];
+        store
+            .ingest(
+                IngestBatch::new(&present, &present_spans, &[]).work_events(&[(
+                    2_600_000,
+                    "file_edit",
+                    "main.rs",
+                    None,
+                )]),
+            )
+            .unwrap();
+        store
+    }
+
+    /// A store with usage only in the current window: the previous side of
+    /// every comparison is empty.
+    fn one_sided_store() -> Store {
+        let mut store = Store::in_memory().unwrap();
+        let mut present = trend_session("present");
+        present.start = Some(SessionStart {
+            timestamp_ms: 2_500 * 1000,
+            ctx: 10_000,
+        });
+        present.sub_tokens = 500;
+        present.sub_agent_count = 2;
+        let present_spans = [trend_span("commit", 2_500, 300)];
+        store
+            .ingest(
+                IngestBatch::new(&present, &present_spans, &[]).work_events(&[(
+                    2_600_000,
+                    "file_edit",
+                    "main.rs",
+                    None,
+                )]),
+            )
+            .unwrap();
+        store
+    }
+
+    /// A store whose previous window holds a kind the current one does not:
+    /// the kind-level row must read as a move to zero — the previous side has
+    /// a real baseline, not 比較不能.
+    fn kind_gone_store() -> Store {
+        let mut store = Store::in_memory().unwrap();
+        let mut past = trend_session("past");
+        past.start = Some(SessionStart {
+            timestamp_ms: 1_500 * 1000,
+            ctx: 9_000,
+        });
+        store
+            .ingest(IngestBatch::new(&past, &[], &[]).work_events(&[(
+                1_900_000,
+                "web_fetch",
+                "docs",
+                None,
+            )]))
+            .unwrap();
+        let mut present = trend_session("present");
+        present.start = Some(SessionStart {
+            timestamp_ms: 2_500 * 1000,
+            ctx: 10_000,
+        });
+        store
+            .ingest(IngestBatch::new(&present, &[], &[]).work_events(&[(
+                2_600_000,
+                "file_edit",
+                "main.rs",
+                None,
+            )]))
+            .unwrap();
+        store
+    }
+
+    /// One session declared in the previous window whose events happen in the
+    /// current one: totals follow the stamped start, events split by epoch —
+    /// the two axes never merge.
+    fn straddling_store() -> Store {
+        let mut store = Store::in_memory().unwrap();
+        let mut meta = trend_session("straddle");
+        meta.start = Some(SessionStart {
+            timestamp_ms: 1_500 * 1000,
+            ctx: 9_000,
+        });
+        meta.sub_tokens = 100;
+        meta.sub_agent_count = 1;
+        let spans = [trend_span("commit", 2_500, 300)];
+        store
+            .ingest(IngestBatch::new(&meta, &spans, &[]).work_events(&[(
+                2_600_000,
+                "file_edit",
+                "main.rs",
+                None,
+            )]))
+            .unwrap();
+        store
+    }
+
+    fn trend_pair() -> WindowPair {
+        WindowPair {
+            current: TimeRange {
+                start: Some(2_001),
+                end: Some(3_000),
+            },
+            previous: TimeRange {
+                start: Some(1_000),
+                end: Some(2_000),
+            },
+        }
+    }
+
+    #[test]
+    fn the_trend_direction_judgment() {
+        use Direction::{Down, Same, Unavailable, Up};
+        assert_eq!(direction_of(3.0, 5.0), Up);
+        assert_eq!(direction_of(5.0, 3.0), Down);
+        assert_eq!(direction_of(5.0, 5.0), Same);
+        // An empty previous side is 比較不能: the comparison is unavailable
+        // whatever the current value is — never a -100% drop to zero.
+        assert_eq!(direction_of(0.0, 5.0), Unavailable);
+        assert_eq!(direction_of(0.0, 0.0), Unavailable);
+        // Integer sides share the judgment.
+        assert_eq!(direction_of(4, 1), Down);
+        assert_eq!(direction_of(1, 4), Up);
+        assert_eq!(direction_of(7, 7), Same);
+        assert_eq!(direction_of(0, 7), Unavailable);
+    }
+
+    #[test]
+    fn the_float_delta_judges_direction_at_display_precision() {
+        // The unrounded seconds can differ by float drift smaller than the
+        // display's 0.1: the direction must not claim a move the table shows
+        // as ±0.0 — direction and displayed delta never disagree.
+        let (delta, direction) = delta_cells_float_opt(Some(3.3), 3.3000000000000003);
+        assert_eq!(direction, "same", "drift above zero is not a move");
+        assert_eq!(delta, "+0.0");
+        // A sub-0.05 real move rounds to ±0.0 too: no direction is claimed
+        // for a move the table cannot show.
+        let (delta, direction) = delta_cells_float_opt(Some(1.0), 1.0 - 1e-9);
+        assert_eq!(direction, "same", "drift below zero is not a move");
+        assert_eq!(delta, "+0.0");
+        // A move the table CAN show still reads as one.
+        let (delta, direction) = delta_cells_float_opt(Some(1.0), 2.0);
+        assert_eq!(direction, "up");
+        assert_eq!(delta, "+1.0");
+        // A missing previous side is the only 比較不能: the emptiness rides
+        // the type, not the value.
+        let (delta, direction) = delta_cells_float_opt(None, 2.0);
+        assert_eq!((delta.as_str(), direction.as_str()), ("n/a", "n/a"));
+        // A present baseline that rounds to 0.0 still compares — it is a
+        // measured zero, not an empty side.
+        let (delta, direction) = delta_cells_float_opt(Some(0.04), 2.0);
+        assert_eq!((delta.as_str(), direction.as_str()), ("+2.0", "up"));
+    }
+
+    #[test]
+    fn trend_json_carries_both_windows_and_their_deltas() {
+        let store = two_window_store();
+        let pair = trend_pair();
+        let agg = store.trend_aggregates(pair).unwrap();
+        let json = trend_json(pair, &agg);
+
+        // Both windows' ranges are disclosed under `window`.
+        assert_eq!(
+            json["window"]["current"]["since"],
+            "1970-01-01T09:33:21+09:00"
+        );
+        assert_eq!(
+            json["window"]["current"]["until"],
+            "1970-01-01T09:50:00+09:00"
+        );
+        assert_eq!(
+            json["window"]["previous"]["since"],
+            "1970-01-01T09:16:40+09:00"
+        );
+        assert_eq!(
+            json["window"]["previous"]["until"],
+            "1970-01-01T09:33:20+09:00"
+        );
+
+        // Per-kind rows carry both windows' values and the delta. The skill
+        // invocations went 2 -> 1 (down); their tokens 150 -> 300 (up).
+        let kinds = json["kinds"].as_array().unwrap();
+        let skill = kinds
+            .iter()
+            .find(|k| k["kind"] == "skill_invocation")
+            .unwrap();
+        assert_eq!(skill["events"]["previous"], 2);
+        assert_eq!(skill["events"]["current"], 1);
+        assert_eq!(skill["events"]["delta"], -1);
+        assert_eq!(skill["events"]["direction"], "down");
+        assert_eq!(skill["out_tokens"]["previous"], 150);
+        assert_eq!(skill["out_tokens"]["current"], 300);
+        assert_eq!(skill["out_tokens"]["delta"], 150);
+        assert_eq!(skill["out_tokens"]["direction"], "up");
+        // A kind both windows share at the same size reads as unchanged.
+        let edit = kinds.iter().find(|k| k["kind"] == "file_edit").unwrap();
+        assert_eq!(edit["events"]["previous"], 1);
+        assert_eq!(edit["events"]["current"], 1);
+        assert_eq!(edit["events"]["delta"], 0);
+        assert_eq!(edit["events"]["direction"], "same");
+        // The machine contract keeps every kind × three metrics: a point
+        // kind's output tokens / duration carry the same shape even at the
+        // constant zeros ingest writes — only the table omits what cannot
+        // apply, never the JSON.
+        assert_eq!(edit["out_tokens"]["previous"], 0);
+        assert_eq!(edit["out_tokens"]["current"], 0);
+        assert_eq!(edit["out_tokens"]["delta"], serde_json::Value::Null);
+        assert_eq!(edit["out_tokens"]["direction"], "unavailable");
+        assert_eq!(edit["duration_sec"]["previous"], 0.0);
+        assert_eq!(edit["duration_sec"]["current"], 0.0);
+        assert_eq!(edit["duration_sec"]["delta"], serde_json::Value::Null);
+        assert_eq!(edit["duration_sec"]["direction"], "unavailable");
+        // A span kind's duration compares: 4.0s of spans -> 2.0s.
+        assert_eq!(skill["duration_sec"]["previous"], 4.0);
+        assert_eq!(skill["duration_sec"]["current"], 2.0);
+        assert_eq!(skill["duration_sec"]["delta"], -2.0);
+        assert_eq!(skill["duration_sec"]["direction"], "down");
+
+        // Skills are ordered by movement: review (0 <- 1) before commit (1, 1).
+        let skills = json["skills"].as_array().unwrap();
+        assert_eq!(skills[0]["skill"], "review");
+        assert_eq!(skills[0]["previous"], 1);
+        assert_eq!(skills[0]["current"], 0);
+        assert_eq!(skills[0]["delta"], -1);
+        assert_eq!(skills[0]["direction"], "down");
+        assert_eq!(skills[1]["skill"], "commit");
+        assert_eq!(skills[1]["direction"], "same");
+
+        // Session and subagent totals follow the sessions axis.
+        assert_eq!(json["sessions"]["previous"], 1);
+        assert_eq!(json["sessions"]["current"], 1);
+        assert_eq!(json["sessions"]["direction"], "same");
+        assert_eq!(json["subagent_runs"]["previous"], 1);
+        assert_eq!(json["subagent_runs"]["current"], 2);
+        assert_eq!(json["subagent_runs"]["delta"], 1);
+        assert_eq!(json["subagent_runs"]["direction"], "up");
+        assert_eq!(json["sub_tokens"]["previous"], 400);
+        assert_eq!(json["sub_tokens"]["current"], 500);
+        assert_eq!(json["sub_tokens"]["delta"], 100);
+        assert_eq!(json["sub_tokens"]["direction"], "up");
+    }
+
+    #[test]
+    fn trend_marks_comparisons_unavailable_when_the_previous_window_holds_no_events() {
+        let store = one_sided_store();
+        let pair = trend_pair();
+        let agg = store.trend_aggregates(pair).unwrap();
+        let json = trend_json(pair, &agg);
+
+        // Every metric cell is labeled unavailable, with no delta claimed —
+        // the previous side is empty, not a real zero baseline.
+        for kind in json["kinds"].as_array().unwrap() {
+            for metric in ["events", "out_tokens", "duration_sec"] {
+                assert_eq!(
+                    kind[metric]["direction"], "unavailable",
+                    "unexpected direction for {} of {}",
+                    metric, kind["kind"]
+                );
+                assert_eq!(kind[metric]["delta"], serde_json::Value::Null);
+            }
+        }
+        for skill in json["skills"].as_array().unwrap() {
+            assert_eq!(skill["direction"], "unavailable");
+            assert_eq!(skill["delta"], serde_json::Value::Null);
+        }
+        for total in ["sessions", "subagent_runs", "sub_tokens"] {
+            assert_eq!(json[total]["direction"], "unavailable");
+            assert_eq!(json[total]["delta"], serde_json::Value::Null);
+        }
+
+        // And nothing in the payload reads as a drop to zero.
+        let text = serde_json::to_string(&json).unwrap();
+        assert!(!text.contains("-100%"));
+        assert!(!text.contains("dropped"));
+    }
+
+    #[test]
+    fn trend_rows_label_unavailable_comparisons_instead_of_drops() {
+        let store = one_sided_store();
+        let agg = store.trend_aggregates(trend_pair()).unwrap();
+
+        // The kind rows keep both windows' values (the previous side renders
+        // as 0) but mark the delta and direction n/a.
+        let rows = trend_kind_rows(&agg);
+        assert!(
+            rows.iter()
+                .any(|r| r[1] == "events" && r[2] == "0" && r[3] == "1"),
+            "the current window's values still show: {rows:?}"
+        );
+        assert!(
+            rows.iter().all(|r| r[4] == "n/a" && r[5] == "n/a"),
+            "every comparison is n/a: {rows:?}"
+        );
+
+        // No percentage and no drop claim anywhere in the rendered cells.
+        let flat = rows
+            .iter()
+            .flat_map(|r| r.iter())
+            .cloned()
+            .collect::<Vec<_>>()
+            .join(" ");
+        assert!(!flat.contains('%'), "no percentages: {flat:?}");
+        assert!(!flat.contains("-100"), "no -100: {flat:?}");
+    }
+
+    #[test]
+    fn the_trend_preamble_discloses_both_windows() {
+        let pair = trend_pair();
+        // An empty previous side (the one-sided stores) is what turns the
+        // reason sentence on.
+        let text = trend_preamble(pair, true);
+        assert!(
+            text.contains("previous window: since 1970-01-01T09:16:40+09:00"),
+            "the previous window is named in the preamble: {text:?}"
+        );
+        // framed() appends the current window — both windows end up in the
+        // table's framing block.
+        let framed_text = framed(&text, pair.current);
+        assert!(
+            framed_text.contains("report window: since 1970-01-01T09:33:21+09:00"),
+            "the current window is disclosed too: {framed_text:?}"
+        );
+    }
+
+    #[test]
+    fn the_trend_preamble_states_the_na_reason_only_when_a_side_is_empty() {
+        let pair = trend_pair();
+        // The reason text rides only with a report that actually holds an n/a
+        // comparison — a previous side that holds every rendered kind prints
+        // no reason at all rather than one that cannot occur.
+        let without = trend_preamble(pair, false);
+        assert!(
+            !without.contains("holds no events"),
+            "a report with no empty side states no reason: {without:?}"
+        );
+        assert!(
+            without.contains("previous window: since 1970-01-01T09:16:40+09:00"),
+            "the previous window is still named: {without:?}"
+        );
+        let with = trend_preamble(pair, true);
+        assert!(
+            with.contains("A delta marked n/a: the previous side holds no events"),
+            "the reason text rides with an empty side: {with:?}"
+        );
+    }
+
+    #[test]
+    fn the_span_metric_judgment_follows_the_kind() {
+        // Point kinds — every kind ingest writes without a duration or
+        // output tokens — carry the count alone; a span kind carries all
+        // three metrics.
+        for kind in [
+            "session_start",
+            "prompt",
+            "agent_spawn",
+            "tool_use",
+            "tool_error",
+            "bash_cmd",
+            "file_edit",
+        ] {
+            assert!(!carries_span_metrics(kind), "{kind} is a point kind");
+        }
+        assert!(carries_span_metrics("skill_invocation"));
+        // An unknown kind gets the count row alone, so a new point kind never
+        // renders a row whose stated reason does not apply.
+        assert!(!carries_span_metrics("mcp_call"));
+    }
+
+    #[test]
+    fn trend_runs_end_to_end_against_a_session() {
+        // The full view path — including the empty store's early message —
+        // runs against a real Session without error. The payload and row
+        // structures are asserted by the tests above.
+        let two = Session {
+            harness: Harness::Claude,
+            db_path: PathBuf::new(),
+            store: two_window_store(),
+        };
+        trend(&two, trend_pair(), Format::Table).unwrap();
+        trend(&two, trend_pair(), Format::Markdown).unwrap();
+        trend(&two, trend_pair(), Format::Json).unwrap();
+        let empty = Session {
+            harness: Harness::Claude,
+            db_path: PathBuf::new(),
+            store: Store::in_memory().unwrap(),
+        };
+        trend(&empty, trend_pair(), Format::Table).unwrap();
+        trend(&empty, trend_pair(), Format::Json).unwrap();
+    }
+
+    #[test]
+    fn trend_kind_rows_read_a_gone_kind_as_a_move_to_zero() {
+        // The skill-level path is covered above; this pins the kind-row path:
+        // a kind present only in the PREVIOUS window has a real baseline, so
+        // it reads as a move to zero — down, with a negative delta.
+        let agg = kind_gone_store().trend_aggregates(trend_pair()).unwrap();
+        let rows = trend_kind_rows(&agg);
+        let gone = rows
+            .iter()
+            .find(|r| r[0] == "web_fetch" && r[1] == "events")
+            .expect("the previous window's kind still shows");
+        assert_eq!(gone[2], "1", "the previous side has a baseline: {rows:?}");
+        assert_eq!(gone[3], "0");
+        assert_eq!(gone[4], "-1", "a negative delta: {rows:?}");
+        assert_eq!(gone[5], "down");
+    }
+
+    #[test]
+    fn trend_kind_rows_render_only_applicable_metrics() {
+        // Usage in both windows: two skill spans and one file_edit in the
+        // previous, one of each in the current. A point kind carries no
+        // duration or output tokens — ingest writes both as constant zeros —
+        // so its rows for them would always read `0.0 | 0.0 | n/a | n/a`:
+        // omitted, not rendered. A span kind renders all three metrics.
+        let agg = two_window_store().trend_aggregates(trend_pair()).unwrap();
+        let rows = trend_kind_rows(&agg);
+        let edit: Vec<_> = rows.iter().filter(|r| r[0] == "file_edit").collect();
+        assert_eq!(
+            edit.len(),
+            1,
+            "a point kind renders its count alone: {rows:?}"
+        );
+        assert_eq!(edit[0][1], "events");
+        assert_eq!(
+            (edit[0][4].as_str(), edit[0][5].as_str()),
+            ("+0", "same"),
+            "the point kind's count still compares"
+        );
+        let span: Vec<_> = rows.iter().filter(|r| r[0] == "skill_invocation").collect();
+        assert_eq!(
+            span.len(),
+            3,
+            "a span kind renders all three metrics: {rows:?}"
+        );
+        for metric in ["events", "out tokens", "seconds"] {
+            assert!(
+                span.iter().any(|r| r[1] == metric),
+                "the span kind's {metric} row is missing: {rows:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn trend_kind_rows_do_not_read_a_measured_zero_baseline_as_unavailable() {
+        // A real 0.04s baseline rounds to the displayed 0.0: the comparison
+        // is still one — up, at display precision — never 比較不能. The
+        // sentinel fold (`map_or(0.0)`) used to turn it into an empty side,
+        // so the row read as n/a whatever the current window held.
+        let mut store = Store::in_memory().unwrap();
+        let mut past = trend_session("past");
+        past.start = Some(SessionStart {
+            timestamp_ms: 1_500 * 1000,
+            ctx: 9_000,
+        });
+        let mut span = trend_span("commit", 1_500, 50);
+        span.duration_sec = 0.04;
+        store.ingest(IngestBatch::new(&past, &[span], &[])).unwrap();
+        let mut present = trend_session("present");
+        present.start = Some(SessionStart {
+            timestamp_ms: 2_500 * 1000,
+            ctx: 10_000,
+        });
+        store
+            .ingest(IngestBatch::new(
+                &present,
+                &[trend_span("commit", 2_500, 300)],
+                &[],
+            ))
+            .unwrap();
+
+        let seconds = trend_kind_rows(&store.trend_aggregates(trend_pair()).unwrap())
+            .into_iter()
+            .find(|r| r[0] == "skill_invocation" && r[1] == "seconds")
+            .expect("a span kind renders its seconds row");
+        assert_eq!(
+            (seconds[2].as_str(), seconds[3].as_str()),
+            ("0.0", "2.0"),
+            "both sides display at the table's precision: {seconds:?}"
+        );
+        assert_eq!(
+            (seconds[4].as_str(), seconds[5].as_str()),
+            ("+2.0", "up"),
+            "a measured zero baseline compares: {seconds:?}"
+        );
+    }
+
+    #[test]
+    fn trend_splits_a_straddling_session_across_the_two_axes() {
+        // One session started in the previous window whose events happen in
+        // the current one: totals follow the sessions axis (started_at), the
+        // events follow their own epochs — the axes never merge.
+        let agg = straddling_store().trend_aggregates(trend_pair()).unwrap();
+
+        let rows = trend_total_rows(&agg);
+        let sessions = rows.iter().find(|r| r[0] == "sessions").unwrap();
+        assert_eq!(sessions[1], "1", "started_at is in the previous window");
+        assert_eq!(sessions[2], "0");
+        assert_eq!(sessions[3], "-1");
+        assert_eq!(sessions[4], "down");
+        let runs = rows.iter().find(|r| r[0] == "subagent runs").unwrap();
+        assert_eq!((runs[1].as_str(), runs[2].as_str()), ("1", "0"));
+        let tokens = rows.iter().find(|r| r[0] == "subagent tokens").unwrap();
+        assert_eq!((tokens[1].as_str(), tokens[3].as_str()), ("100", "-100"));
+
+        // Events split by epoch: the span and the work event happened in the
+        // current window, so the previous side of those rows is empty
+        // (比較不能) — and the session_start event rides its own epoch, the
+        // stamped start in the previous window.
+        let kind_rows = trend_kind_rows(&agg);
+        let span = kind_rows
+            .iter()
+            .find(|r| r[0] == "skill_invocation" && r[1] == "events")
+            .unwrap();
+        assert_eq!(span[2], "0");
+        assert_eq!(span[3], "1");
+        assert_eq!(span[4], "n/a");
+        let edit = kind_rows
+            .iter()
+            .find(|r| r[0] == "file_edit" && r[1] == "events")
+            .unwrap();
+        assert_eq!(edit[2], "0");
+        assert_eq!(edit[3], "1");
+        assert_eq!(edit[4], "n/a");
+        let started = kind_rows
+            .iter()
+            .find(|r| r[0] == "session_start" && r[1] == "events")
+            .unwrap();
+        assert_eq!(started[2], "1", "the start event rides started_at");
+        assert_eq!(started[3], "0");
+        assert_eq!(started[4], "-1");
+        assert_eq!(started[5], "down");
+    }
+}
