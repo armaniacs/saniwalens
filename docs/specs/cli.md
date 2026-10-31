@@ -451,4 +451,7 @@ ends. Production wires `ProcessAdvisor` (inherited stdio, or `run_headless`'s
 logged pipe unless `--verbose`); the delivery tests wire a recording double
 and assert the argv instead of spawning. `Harness::copy` assembles the harness
 data those prompts render from, so the shell never spells `HarnessCopy` field
-by field.
+by field. The launch shape the mode defers to is per-harness **data on the
+seam** too (`Harness::launch_command` in `adapter::harness`, beside the
+harness's other arms), so a new harness's delivery lands there and this
+section's wiring stays put.

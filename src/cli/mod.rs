@@ -616,38 +616,6 @@ fn parse_scope(value: Option<&str>) -> Result<ScopeFilter> {
     }
 }
 
-/// Analyze, compose the advisor prompt from the findings, and hand it to an
-/// advisor session — the AI-proposal layer's entry point. The pure
-/// composition lives in `core::optimize`; this shell does the I/O: run the
-/// analysis, read the store into `Findings`, then launch the harness's agent.
-/// See `docs/specs/harness.md` for the per-harness launch shape.
-/// Launch the harness's advisor for an optimize session: the binary plus any
-/// leading argv. `claude` opens interactively on the prompt; `opencode run`
-/// investigates headlessly — JSON events (`--format json`) so the raw tool
-/// dumps can be logged while only the agent's text streams, and a title so
-/// the sessions it seeds are recognizable in the store it feeds.
-fn launch_command(
-    harness: &Harness,
-) -> (&'static str, &'static [&'static str], optimize_mod::RunMode) {
-    match harness {
-        Harness::Claude => ("claude", &[], optimize_mod::RunMode::Interactive),
-        Harness::Opencode => (
-            "opencode",
-            &["run", "--format", "json", "--title", "saniwalens optimize"],
-            optimize_mod::RunMode::Headless,
-        ),
-        // The `kilo` binary is the measured agent CLI (Homebrew), and kilo is
-        // an OpenCode fork whose TUI takes a prompt: `kilo [project] --prompt
-        // <prompt>` opens the interactive session on the pointer prompt — the
-        // experience the claude launch gives, with the user present to approve
-        // the briefing read and steer (kilo gates every tool call where
-        // opencode does not, so a headless run would need `--auto` instead).
-        // A bare `kilo <text>` positional is treated as a file to open
-        // (measured), not a prompt — `--prompt` is the TUI's message surface.
-        Harness::Kilocode => ("kilo", &["--prompt"], optimize_mod::RunMode::Interactive),
-    }
-}
-
 /// How the briefing reaches the advisor — the three deliveries `optimize`
 /// picks between (`docs/specs/cli.md`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -877,13 +845,14 @@ fn optimize(
     // The harness copy for every prompt and briefing rendered here — the
     // harness assembles its own (adapter side), so the core stays agnostic.
     let copy = sess.harness.copy();
-    let (binary, leading, run_mode) = launch_command(&sess.harness);
+    // The launch shape is the harness's own data (`Harness::launch_command`,
+    // beside its other arms), so the shell names no harness here.
+    let (binary, leading, run_mode) = sess.harness.launch_command();
 
     // One seam from here: the payload (the full prompt, or the rendered
     // briefing behind a private pointer file) and the mode are decided, then
-    // `deliver` runs them against the process adapter. `claude` opens an
-    // interactive TUI, `opencode run` goes headless, kilo's TUI takes
-    // `--prompt` (`docs/specs/harness.md`).
+    // `deliver` runs them against the process adapter — the launch shape and
+    // run mode coming from the harness's data arms (`docs/specs/harness.md`).
     let plan = match delivery_mode(print, run_mode) {
         DeliveryMode::Print => DeliveryPlan::print(optimize_mod::compose_prompt(
             &findings,
@@ -3092,36 +3061,6 @@ mod tests {
         assert_eq!(cli.profile, None);
         let cli = Cli::try_parse_from(["saniwalens", "--profile", "work", "doctor"]).unwrap();
         assert_eq!(cli.profile.as_deref(), Some("work"));
-    }
-
-    #[test]
-    fn launch_command_runs_each_harness_own_agent() {
-        // `claude` opens interactively on the prompt; `opencode run` runs the
-        // advisor headless on JSON events (raw tool dumps loggable) with a
-        // recognizable session title (see `run_instructions`). kilo is an
-        // OpenCode fork and documents `kilo run [message..]` with `--format
-        // json` (raw JSON events) and `--title` — the same surface, so the
-        // launch is the opencode shape under kilo's binary.
-        assert_eq!(
-            launch_command(&Harness::Claude),
-            ("claude", &[] as &[&str], optimize_mod::RunMode::Interactive)
-        );
-        assert_eq!(
-            launch_command(&Harness::Opencode),
-            (
-                "opencode",
-                &["run", "--format", "json", "--title", "saniwalens optimize"] as &[&str],
-                optimize_mod::RunMode::Headless
-            )
-        );
-        assert_eq!(
-            launch_command(&Harness::Kilocode),
-            (
-                "kilo",
-                &["--prompt"] as &[&str],
-                optimize_mod::RunMode::Interactive
-            )
-        );
     }
 
     // ---- PBI 06: the delivery seam ----

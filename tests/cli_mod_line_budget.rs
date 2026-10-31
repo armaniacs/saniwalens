@@ -9,11 +9,12 @@
 //! The test lives in `tests/`, not in `mod.rs`'s own test module, so the
 //! tripwire does not grow the very file it guards.
 
-/// The measured size of `src/cli/mod.rs` at the tripwire's landing (the PBI 34
-/// measurement of 2026-10-31: 3,383 lines), with no slack — raising this
-/// constant is a review point, done in the same PR as the spec update it
-/// forces (`docs/specs/architecture.md`).
-const MOD_RS_LINE_BUDGET: usize = 3383;
+/// The measured size of `src/cli/mod.rs` at the latest budget change (the
+/// PBI 38 measurement of 2026-11-01: 3,322 lines, after the launch shape
+/// moved out to `adapter::harness`; the PBI 34 landing measured 3,383), with
+/// no slack — raising this constant is a review point, done in the same PR
+/// as the spec update it forces (`docs/specs/architecture.md`).
+const MOD_RS_LINE_BUDGET: usize = 3322;
 
 /// The remedy half of the tripwire's failure message, pinned here so its
 /// wording cannot drift away from what it prescribes.
