@@ -98,7 +98,7 @@ flowchart TD
 | **adapter** | The raw shapes of *both* inputs: transcript JSONL (record types, field names, `subagents/` layout) and config files (skill/rule frontmatter, `settings.json`, MCP schemas, `CLAUDE.md`). Maps them into the internal domain model. | The SQLite schema; how costs are computed. |
 | **core** | Event extraction, static-cost weighing inputs, the catalog×usage join, the briefing's findings assembly (`core::findings`), and aggregation ― all **pure functions** over the domain model. No I/O, no clock, no DB. | Claude Code field names or config path conventions; SQL. |
 | **store** | Persisting and querying `sessions` / `surfaces` / `events` in SQLite. | Raw input shapes. |
-| **report** | Turning query results into tables / Markdown and ranking wedges. | Raw input shapes; SQL beyond the store's API. |
+| **report** | Turning query results into tables / Markdown and ranking wedges. In `src/`: `cli/mod.rs` (the shell, every view except trend, and the public CLI API), `cli/trend.rs` (the trend view), `cli/window.rs` (the evaluation-window plumbing every view shares), `cli/report.rs` (format, renderer, framing). A new view becomes one file under `cli/views/`, created when the next view lands; views never re-grow a shared file. | Raw input shapes; SQL beyond the store's API. |
 
 The contract between adapter and everything else is the **internal domain
 model** ― tool-centric names stable across Claude Code releases. Renaming an
