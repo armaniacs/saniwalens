@@ -107,12 +107,12 @@ The "next view" above is not left to memory. A PR that adds a `Command` variant
 
 - **`src/cli/views/` is created in that same PR**, and the view lands as one
   file there. View helpers are born in the view's file, never appended to
-  `mod.rs`: the shell keeps dispatch, and nothing else.
+  `cli/mod.rs`: the shell keeps dispatch, and nothing else.
 - **`cli/trend.rs` moves into `src/cli/views/` in the same commit** as the
   first view landing there. Its move cost does not depend on the timing, so
   the move rides along instead of staying a second, forgettable step.
 - **The line-budget tripwire** (`tests/cli_mod_line_budget.rs`) makes the
-  "never re-grow a shared file" half structural: growing `mod.rs` past its
+  "never re-grow a shared file" half structural: growing `cli/mod.rs` past its
   measured budget fails `cargo test` with a message pointing at `cli/views/`.
   Raising the budget is a review point, done in the same PR as the spec
   update it forces.
