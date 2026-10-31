@@ -44,24 +44,24 @@ Scenario: 以降のビュー追加は views/ に入る
 ```
 
 ## 受け入れ基準
-- [ ] `src/cli/trend.rs` を抽出する（trend 専用部 cli.rs:1713-2122 の約
+- [x] `src/cli/trend.rs` を抽出する（trend 専用部 cli.rs:1713-2122 の約
   410 行、他ビューから呼ばれない部分）。trend は合成ゴールデン
   （tests/trend_markdown.rs 型）を所持済みでリグレッション検証可能
-- [ ] `src/cli/window.rs` を抽出する（window_line / window_json /
+- [x] `src/cli/window.rs` を抽出する（window_line / window_json /
   eprint_window / framed 等の 8〜11 ビュー共有部、約 90 行）
-- [ ] `src/cli/report.rs` を抽出する（render / preamble 等の report 層の
+- [x] `src/cli/report.rs` を抽出する（render / preamble 等の report 層の
   実体、約 150 行）。残りは `src/cli/mod.rs`
-- [ ] 1 コミット＝ 1 移動（`77e5621` の前例）。テストは移動先 mod に従属
+- [x] 1 コミット＝ 1 移動（`77e5621` の前例）。テストは移動先 mod に従属
   （`.claude/rules/tdd.md:41`）、テスト名一覧の前後 diff が空であることを
   検証する（テストは移動のみで改名しない）
-- [ ] semver: 新モジュールは `pub(crate)` 配下に置き、公開 API（run / Cli /
+- [x] semver: 新モジュールは `pub(crate)` 配下に置き、公開 API（run / Cli /
   DeliveryMode / DeliveryPlan）は mod.rs で再輸出する。
   cargo publish（Cargo.toml）への影響なし
-- [ ] spec 更新: `docs/specs/architecture.md` 層表の report 行 1 箇所のみ
+- [x] spec 更新: `docs/specs/architecture.md` 層表の report 行 1 箇所のみ
   （src/ に report モジュールが実在した旨）
-- [ ] 以降のビュー追加は `src/cli/views/` に 1 ビュー 1 ファイルである旨を
+- [x] 以降のビュー追加は `src/cli/views/` に 1 ビュー 1 ファイルである旨を
   受け入れ基準として明文化する（views/ は次のビュー追加時に作る）
-- [ ] `just check` と `cargo test` が green（各移動のたび）
+- [x] `just check` と `cargo test` が green（各移動のたび）
 
 ## テスト戦略（t_wadaスタイル）
 
@@ -118,8 +118,8 @@ Scenario: 以降のビュー追加は views/ に入る
   検証が弱くなる。改名は移動と分けない
 
 ## Definition of Done
-- [ ] 全移動が完了し、出力がバイト同一（ゴールデン + capture）
-- [ ] テスト名一覧の前後 diff が空
-- [ ] `just check` と `cargo test` が green
-- [ ] コードレビュー完了（task review + 最終 review）
-- [ ] docs/specs/architecture.md 更新済み（report 層）
+- [x] 全移動が完了し、出力がバイト同一（ゴールデン + capture）
+- [x] テスト名一覧の前後 diff が空
+- [x] `just check` と `cargo test` が green
+- [x] コードレビュー完了（task review + 最終 review）
+- [x] docs/specs/architecture.md 更新済み（report 層）

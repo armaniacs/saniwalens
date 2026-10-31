@@ -50,21 +50,21 @@ Scenario: 通常の --last と無指定は何も変わらない
 ```
 
 ## 受け入れ基準
-- [ ] `resolve` の `--last` 分岐（src/core/period.rs:53-58）で、解決後の窓の
+- [x] `resolve` の `--last` 分岐（src/core/period.rs:53-58）で、解決後の窓の
   両端が chrono の暦レンジ（NaiveDate が表現できるおよそ262,143年、
   epoch でおよそ -8,334,601,228,800 から +8,210,268,767,999）に収まることを
   検証し、外れる場合は既存の `invalid_span_error`
   （src/core/period.rs:192-196）を返す
-- [ ] 入口 1 箇所の修正で、8 ビュー + trend（current 側）+ window_json +
+- [x] 入口 1 箇所の修正で、8 ビュー + trend（current 側）+ window_json +
   store の沈黙崩壊が同時に閉じること（呼び出し側の個別修正をしない）
-- [ ] `resolve_pair` の倍増ガード（checked_sub）は残す。スコープは「単窓
+- [x] `resolve_pair` の倍増ガード（checked_sub）は残す。スコープは「単窓
   8 ビュー + 描画 / json / store の暦外経路」に限定する
-- [ ] spec 更新: `docs/specs/cli.md` Period 節に `--last` の値域契約を追記し、
+- [x] spec 更新: `docs/specs/cli.md` Period 節に `--last` の値域契約を追記し、
   Reporting honesty に「入力由来の解決不能はエラー」を追記する
-- [ ] テスト: 暦外 span（92233720368547d、100000000d）の resolve エラー化、
+- [x] テスト: 暦外 span（92233720368547d、100000000d）の resolve エラー化、
   trend current 側（50000000000000d）、開示行の since/until が非空である
   性質テスト、通常 `--last` と無指定の回帰ピン止め
-- [ ] `just check`（rustfmt + clippy）と `cargo test` が green
+- [x] `just check`（rustfmt + clippy）と `cargo test` が green
 
 ## テスト戦略（t_wadaスタイル）
 
@@ -122,7 +122,7 @@ Scenario: 通常の --last と無指定は何も変わらない
   エラーハンドリングと spec の Errors 節が1語のまま保てる）
 
 ## Definition of Done
-- [ ] 全 BDD シナリオが自動テストとして実装されパスする
-- [ ] `just check` と `cargo test` が green（既存 25 期間系テスト含む）
-- [ ] コードレビュー完了（task review + 最終 review）
-- [ ] docs/specs/cli.md 更新済み（Period 節 + Reporting honesty）
+- [x] 全 BDD シナリオが自動テストとして実装されパスする
+- [x] `just check` と `cargo test` が green（既存 25 期間系テスト含む）
+- [x] コードレビュー完了（task review + 最終 review）
+- [x] docs/specs/cli.md 更新済み（Period 節 + Reporting honesty）

@@ -55,27 +55,27 @@ Scenario: 測定ゼロと空は区別される
 ```
 
 ## 受け入れ基準
-- [ ] kind に適用されない metric の行を省略する（usage ビューの「空セクション
+- [x] kind に適用されない metric の行を省略する（usage ビューの「空セクション
   省略」慣習の行単位拡張、src/cli.rs:2026-2028 付近）。適用の判定は
   `duration_sec` / `out_tokens` がその kind で意味を持つかで行い、
   point kinds（session_start / prompt / agent_spawn / tool_use / tool_error /
   bash_cmd / file_edit）は events 行のみにする
-- [ ] 「空」を値でなく型で運ぶ: `kind_pairs` の `Option<KindRollup>` を
+- [x] 「空」を値でなく型で運ぶ: `kind_pairs` の `Option<KindRollup>` を
   判定まで保持し、`map_or(0.0)` のセンチネル畳み込みを撤去する
   （src/cli.rs:1790-1805、:1904-1943）。測定ゼロ（丸めで 0.0 に見える実測）と
   空（行不在）を区別する
-- [ ] preamble / note の理由文を理由別に修正する: 前側が空のときだけ既存の
+- [x] preamble / note の理由文を理由別に修正する: 前側が空のときだけ既存の
   「holds no events」文を出し、適用外の行は出ない。src/cli.rs:1998-2000 と
   :2112-2118 付近の文言を確認する
-- [ ] spec 更新: `docs/specs/cli.md` Views 表の trend 行に適用 metric の注記
+- [x] spec 更新: `docs/specs/cli.md` Views 表の trend 行に適用 metric の注記
   （point kinds は events のみ）を追記し、134 行目付近の「emptiness makes
   n/a」の偽の因果を修正する。Reporting honesty に「n/a の理由文は実際の理由
   と一致する」条項を追加する
-- [ ] テスト pin: point kind の「seconds」行が出ないこと、preamble 文言が
+- [x] テスト pin: point kind の「seconds」行が出ないこと、preamble 文言が
   前側空のときだけ出ること、丸め境界（実測 0.04s → 表示 0.0 でも n/a に
   ならないこと）
-- [ ] 既存 8 ビューと `sql` / `analyze` / `optimize` の出力は一切変わらない
-- [ ] `just check` と `cargo test` が green
+- [x] 既存 8 ビューと `sql` / `analyze` / `optimize` の出力は一切変わらない
+- [x] `just check` と `cargo test` が green
 
 ## テスト戦略（t_wadaスタイル）
 
@@ -137,8 +137,8 @@ Scenario: 測定ゼロと空は区別される
   判断も可能だが、どちらかを PBI の判断として明記してから実装する
 
 ## Definition of Done
-- [ ] 全 BDD シナリオが自動テストとして実装されパスする
-- [ ] 既存 8 ビュー等の出力が capture / 回帰で不変と確認
-- [ ] `just check` と `cargo test` が green
-- [ ] コードレビュー完了（task review + 最終 review）
-- [ ] docs/specs/cli.md 更新済み（Views 表 + Reporting honesty）
+- [x] 全 BDD シナリオが自動テストとして実装されパスする
+- [x] 既存 8 ビュー等の出力が capture / 回帰で不変と確認
+- [x] `just check` と `cargo test` が green
+- [x] コードレビュー完了（task review + 最終 review）
+- [x] docs/specs/cli.md 更新済み（Views 表 + Reporting honesty）

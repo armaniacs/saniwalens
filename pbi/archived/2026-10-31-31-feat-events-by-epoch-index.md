@@ -48,24 +48,24 @@ Scenario: インデックスの有無で結果は変わらない
 ```
 
 ## 受け入れ基準
-- [ ] `INDEX_SCHEMA`（src/store.rs:107-111）に
+- [x] `INDEX_SCHEMA`（src/store.rs:107-111）に
   `CREATE INDEX events_by_epoch ON events(started_epoch);` を 1 行追加する
-- [ ] 既存ストアへは次回 ReadWrite open で自動作成される
+- [x] 既存ストアへは次回 ReadWrite open で自動作成される
   （`reconcile_derived`、src/store.rs:1738-1748 付近）。
   `SCHEMA_VERSION` bump は不要で、機能テスト・公開 API に影響しない
-- [ ] spec 更新: `docs/specs/storage.md` DDL に同一の 1 行を追加し、
+- [x] spec 更新: `docs/specs/storage.md` DDL に同一の 1 行を追加し、
   「インデックスは planner の選択肢」の契約節（張る原則、events_by_epoch の
   根拠＝bench 実測、`events.source_path` は別変更である旨、ReadOnly open
   （`--frozen` / `sql`）では作られない旨、トリガー約 50〜100 万行）を
   同一変更で追記する
-- [ ] README の Notes と `docs/specs/cli.md` Period 節に利用者向け一言を
+- [x] README の Notes と `docs/specs/cli.md` Period 節に利用者向け一言を
   追記する（ストアは蓄積で育つ、行数の確認コマンド、`--frozen` / `sql` では
   未作成なら使われない）
-- [ ] テスト: インデックス存在の検証、窓付きクエリの結果不変（インデックス
+- [x] テスト: インデックス存在の検証、窓付きクエリの結果不変（インデックス
   有無でバイト同一）、in_memory でも green
-- [ ] bench は含めない（pbi/2026-10-31-27-test-analyze-bench が別で依存。
+- [x] bench は含めない（pbi/2026-10-31-27-test-analyze-bench が別で依存。
   同時実装すると RICE が下がるため、別 PBI のまま依存で並べる）
-- [ ] `just check` と `cargo test` が green
+- [x] `just check` と `cargo test` が green
 
 ## テスト戦略（t_wadaスタイル）
 
@@ -121,7 +121,7 @@ Scenario: インデックスの有無で結果は変わらない
   改善（現行入力経路では到達不能）。本 PBI の本体ではない
 
 ## Definition of Done
-- [ ] 全 BDD シナリオが自動テストとして実装されパスする
-- [ ] `just check` と `cargo test` が green
-- [ ] コードレビュー完了（task review + 最終 review）
-- [ ] docs/specs/storage.md、README、docs/specs/cli.md 更新済み
+- [x] 全 BDD シナリオが自動テストとして実装されパスする
+- [x] `just check` と `cargo test` が green
+- [x] コードレビュー完了（task review + 最終 review）
+- [x] docs/specs/storage.md、README、docs/specs/cli.md 更新済み
