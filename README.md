@@ -217,6 +217,10 @@ derived store.
   `${XDG_STATE_HOME:-~/.local/state}/saniwalens/` rather than a cache directory a
   cleaner may empty. Upgrading saniwalens across a schema change migrates the file
   in place; you never need to delete it.
+- The store grows with every analyze, and the windowed views read all of it.
+  The index that keeps those reads fast is created by the store itself on the
+  next read-write open; `--frozen` / `sql` (read-only) never create it. Watch
+  the size with `saniwalens sql "SELECT COUNT(*) FROM events"`.
 - `optimize` launches the harness's own interactive session (`claude` by
   default, `kilo --prompt` under `--harness kilocode`) seeded with the
   findings; the briefing is written to a private temp file, never passed on

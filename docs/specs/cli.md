@@ -210,6 +210,12 @@ compare against is undefined.
   `started_at`) are **excluded** from a windowed `session_stats` /
   `subagent_totals` figure (`store.rs`'s `<> ''` guard) rather than guessed
   into it; without the flags they still count.
+- Every windowed figure above reads the store through `started_epoch`, and the
+  store grows with every analyze. The store declares the index that keeps those
+  reads fast (`storage.md`) and creates it on the next read-write open;
+  `--frozen` / `sql` (read-only) never create it, so a store not opened
+  read-write since it was declared keeps scanning. Watch the size with
+  `saniwalens sql "SELECT COUNT(*) FROM events"`.
 
 ## Time bucketing
 

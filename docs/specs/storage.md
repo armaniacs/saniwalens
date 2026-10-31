@@ -64,6 +64,7 @@ CREATE TABLE events (
     attrs_json           TEXT
 );
 
+CREATE INDEX events_by_epoch ON events(started_epoch);
 CREATE INDEX events_by_surface ON events(surface_kind, surface_id);
 
 -- One row per subagent execution, from the subagent's own transcript and its
@@ -118,6 +119,37 @@ SELECT e.session_id, s.project,
 FROM events e JOIN sessions s ON e.session_id = s.id
 WHERE e.kind = 'tool_error';
 ```
+
+### Indexes are the planner's choices
+
+A declared index is an *option* the store hands SQLite's planner, not behavior:
+it never changes what a query returns, only how the rows are reached. Indexes
+are declared in `INDEX_SCHEMA` (`store.rs`) ― the DDL above mirrors it ― and
+reconciled into every existing store on the next ReadWrite open, so adding one
+is a non-migrating change: `SCHEMA_VERSION` does not move and no public API
+changes. Only `ReadWrite` migrates, though: a ReadOnly open (`--frozen` /
+`sql`) cannot create the index, so a store that has not been opened read-write
+since it was declared keeps running its windowed queries as scans.
+
+`events_by_epoch` (`events(started_epoch)`) backs the windowed readers ― the
+thirteen windowed methods over `events`, `trend_aggregates`' two windows (2 x 4
+queries), and the `optimize` / `doctor` findings' aggregates all bound on
+`started_epoch`. The 2026-10-31 why-why bench (SQLite 3.54.0, a synthetic
+fixture, a 7-day window) measured a 1M-row windowed query at 106-220ms without
+the index and 36-42ms with it (about 3-5x), the plan changing from
+`SCAN events` to `SEARCH USING INDEX`.
+
+The gain is **not immediate**: on a young store the planner keeps choosing
+`events_by_surface(surface_kind = ?)`, and this index pays off only as row
+counts and statistics grow ― from roughly 500k-1M rows (at 1M rows, one `trend`
+run costs about 500ms and `findings` about 1s, past the ~100ms felt threshold
+per operation; row count via `saniwalens sql "SELECT COUNT(*) FROM events"`).
+
+Two scoping notes are the contract, not defects. The ingest delete
+(`DELETE FROM events WHERE source_path = ?`) gains nothing from this index ―
+serving `source_path` is a separate change of the same shape, not this one. And
+the user-facing consequence of the ReadOnly asymmetry is stated where users
+read it (`cli.md`'s Period section, README's Notes).
 
 ### Column encoding is defined once
 
