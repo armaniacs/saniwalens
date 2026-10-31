@@ -49,8 +49,8 @@ fn span(skill: &str, epoch_secs: i64, out_tokens: u64) -> Span {
 }
 
 /// Write a synthetic store covering both windows of the comparison: the
-/// previous window ([-30_000, 56_399]) holds a session stamped at 1_500 with
-/// two skill spans and a `file_edit`; the current window ([56_400, 142_799])
+/// previous window ([-32_400, 53_999]) holds a session stamped at 1_500 with
+/// two skill spans and a `file_edit`; the current window ([54_000, 140_399])
 /// holds a session stamped at 100_000 with one skill span and a `file_edit`.
 /// The point kind (no spans' duration or tokens) exercises the unavailable
 /// form; the span kind and the totals exercise every direction.
