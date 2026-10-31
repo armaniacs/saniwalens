@@ -2,9 +2,9 @@
 
 saniwalens answers one question about a coding-agent setup: **where can the
 configuration be optimized, and how?** It does that by measuring, from real
-usage, the **cost** and **actual use** of every configuration surface — skills,
+usage, the **cost** and **actual use** of every configuration surface ― skills,
 rules, hooks, MCP servers and their tool schemas, agents, `CLAUDE.md` /
-`AGENTS.md` / memory, permissions — and surfacing the wedges between the two.
+`AGENTS.md` / memory, permissions ― and surfacing the wedges between the two.
 
 Skills are one surface among many. The tool is configuration-wide. AI-assisted
 optimization *proposals* are a planned later layer; the core measures and
@@ -28,7 +28,7 @@ The design follows from three facts about the problem:
 
 ```mermaid
 flowchart LR
-    raw["transcripts + config"] -->|analyze| db[("SQLite<br/>sessions · surfaces · events")]
+    raw["transcripts + config"] -->|analyze| db[("SQLite<br/>sessions ・ surfaces ・ events")]
     db -->|views / sql| out["CLI tables / Markdown"]
     db -->|optimize| ai["interactive claude session<br/>(AI optimization proposals)"]
 ```
@@ -36,26 +36,26 @@ flowchart LR
 - **`analyze`** reads both inputs and writes the normalized store. The verb is
   `analyze` (not `build`): the command *analyzes* raw input into facts, it does
   not build an artifact.
-- **The read commands** — the curated views and the arbitrary-query `sql` —
+- **The read commands** ― the curated views and the arbitrary-query `sql` ―
   query the store and render. See `cli.md`.
 
 The stages are decoupled *only* by the store. The read commands' **rendering**
 never reads raw input; `analyze` never renders. But the stages **compose**: a
 view runs the incremental `analyze` stage first by default (`cli.md`
-`--frozen`), the way `optimize` always has — otherwise the store silently goes
+`--frozen`), the way `optimize` always has ― otherwise the store silently goes
 stale and the user cannot notice. Composition is stage-before-stage, not a leak:
 the view's queries still see only the store. Consumers read the same store. Two
 were anticipated, and shape what `analyze` must capture:
 
-- **Optimization proposals** — turning the findings into concrete advice. This
+- **Optimization proposals** ― turning the findings into concrete advice. This
   is realized by `optimize` (`cli.md`): it composes the headline findings with a
   prescribed advisor prompt and hands them to an interactive `claude` session.
   The prompt composition is a pure transform (`core::optimize`); only the process
   launch is I/O. It reads aggregates; it needs nothing the store does not already
   hold.
-- **Skill extraction** — clustering recurring user prompts into candidate new
+- **Skill extraction** ― clustering recurring user prompts into candidate new
   skills (the "synthesize a new surface" goal, distinct from pruning existing
-  ones). This needs the **raw prompt text**, which the store does not keep — so
+  ones). This needs the **raw prompt text**, which the store does not keep ― so
   `analyze` records a pointer to it now (`events.prompt` → `(source_path,
   source_line)`; `storage.md`). The capability is reserved, not built: transcripts
   rotate, and the text is unrecoverable once gone, so the cheap pointer is laid
@@ -69,11 +69,11 @@ flowchart TD
     tx["transcripts"] -->|adapter| E["events<br/>(usage: what ran + runtime cost)"]
     S --> J["surface × usage join"]
     E --> J
-    J --> W["optimization wedges<br/>(unused · costly+rare · redundant · friction)"]
+    J --> W["optimization wedges<br/>(unused ・ costly+rare ・ redundant ・ friction)"]
 ```
 
 - A **surface** is one configurable thing (a skill, a rule, an MCP server, …)
-  with a **static cost** — the token weight of its definition, measured by
+  with a **static cost** ― the token weight of its definition, measured by
   reading the config file. See `surfaces.md` and `config-format.md`.
 - An **event** is one timestamped occurrence with a **runtime cost** (tokens,
   context growth, duration). A skill invocation is one event kind among many.
@@ -96,19 +96,19 @@ flowchart TD
 | Layer | Owns | Must NOT know |
 | --- | --- | --- |
 | **adapter** | The raw shapes of *both* inputs: transcript JSONL (record types, field names, `subagents/` layout) and config files (skill/rule frontmatter, `settings.json`, MCP schemas, `CLAUDE.md`). Maps them into the internal domain model. | The SQLite schema; how costs are computed. |
-| **core** | Event extraction, static-cost weighing inputs, the catalog×usage join, the briefing's findings assembly (`core::findings`), and aggregation — all **pure functions** over the domain model. No I/O, no clock, no DB. | Claude Code field names or config path conventions; SQL. |
+| **core** | Event extraction, static-cost weighing inputs, the catalog×usage join, the briefing's findings assembly (`core::findings`), and aggregation ― all **pure functions** over the domain model. No I/O, no clock, no DB. | Claude Code field names or config path conventions; SQL. |
 | **store** | Persisting and querying `sessions` / `surfaces` / `events` in SQLite. | Raw input shapes. |
 | **report** | Turning query results into tables / Markdown and ranking wedges. | Raw input shapes; SQL beyond the store's API. |
 
 The contract between adapter and everything else is the **internal domain
-model** — tool-centric names stable across Claude Code releases. Renaming an
+model** ― tool-centric names stable across Claude Code releases. Renaming an
 upstream field or moving a config file changes the adapter's mapping, nothing
 downstream. This boundary is enforced by `.claude/rules/format-isolation.md`; a
 format change whose diff escapes the adapter is a boundary bug.
 
 The per-harness routine that walks this pipeline sits behind one seam:
 `Harness::analyze` (`adapter::harness`) dispatches to each harness's own module
-— `adapter::claude`, `adapter::opencode`, `adapter::kilocode` — which owns that
+― `adapter::claude`, `adapter::opencode`, `adapter::kilocode` ― which owns that
 harness's input route, fingerprinting, and extraction wiring, and hands rows to
 `Store::ingest` (the store's API, never SQL). The analyzer-version key each
 harness stamps lives beside its mapping, and the store compares whatever pair it
@@ -117,7 +117,7 @@ not change (`harness.md`).
 
 ### Why a pure core
 
-The tool's value is its analysis logic — event boundaries, the compaction-safe
+The tool's value is its analysis logic ― event boundaries, the compaction-safe
 context metric, subagent attribution, the catalog×usage join. That logic is
 where bugs hide and where the specs make the most claims, so it must be
 exhaustively unit-testable. Keeping it free of I/O, clocks, and SQL lets every
@@ -130,7 +130,7 @@ walking, reading, tokenizing, SQLite, and "now" are thin shells; non-determinism
 The adapter deserializes defensively: it reads only the fields the tool needs,
 ignores unknown fields, tolerates missing optional ones. A new Claude Code field
 or config key must never break `analyze`. The concrete shapes the adapter
-depends on — and which are most likely to drift — are catalogued in
+depends on ― and which are most likely to drift ― are catalogued in
 `session-format.md` (transcripts) and `config-format.md` (config).
 
 ## What this tool deliberately is not
