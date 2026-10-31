@@ -1497,8 +1497,9 @@ fn doctor(sess: &Session, filter: &ScopeFilter, window: TimeRange, format: Forma
     Ok(())
 }
 
-/// `"3 unused surfaces, 4 always-on files costing ~8.5k tokens/session"` — the
-/// pruning line's plain-language phrase, zero parts dropped.
+/// View-only (doctor view): `"3 unused surfaces, 4 always-on files costing ~8.5k
+/// tokens/session"` — the pruning line's plain-language phrase, zero parts
+/// dropped; it moves with the doctor view, not with the shell.
 fn prune_phrase(
     unused: &[optimize_mod::SurfaceRef],
     always_on_heavy: &[optimize_mod::SurfaceRef],
@@ -1524,6 +1525,7 @@ fn prune_phrase(
     parts.join(", ")
 }
 
+/// View-only (doctor view): the singular/plural phrasing behind `prune_phrase` alone.
 fn plural(n: usize, noun: &str) -> String {
     if n == 1 {
         format!("1 {noun}")
@@ -1604,7 +1606,7 @@ fn doctor_agent_lines(
     lines
 }
 
-/// Humanize a token count: `6467406` → `6.5M`, `32139` → `32.1k`.
+/// View-only (doctor view): humanize a token count: `6467406` → `6.5M`, `32139` → `32.1k`.
 fn fmt_tokens(n: i64) -> String {
     if n >= 1_000_000 {
         format!("{:.1}M", n as f64 / 1e6)
@@ -1615,15 +1617,15 @@ fn fmt_tokens(n: i64) -> String {
     }
 }
 
-/// Shorten an absolute path under the home directory to `~/…` for display.
+/// View-only (doctor view): shorten an absolute path under the home directory to `~/…` for display.
 fn tilde_path(path: &str) -> String {
     shorten_to_tilde(path, home_dir())
 }
 
-/// The shortening itself, separated from the environment lookup so it stays
-/// pure and testable. A separator must follow the prefix, so `/home/metadata`
-/// is not mistaken for something under `/home/me`; either separator counts, so
-/// a Windows path shortens against a Windows home.
+/// View-only (doctor view, via `tilde_path`): the shortening itself, separated from
+/// the environment lookup so it stays pure and testable. A separator must follow the
+/// prefix, so `/home/metadata` is not mistaken for something under `/home/me`; either
+/// separator counts, so a Windows path shortens against a Windows home.
 fn shorten_to_tilde(path: &str, home: Option<&str>) -> String {
     let Some(home) = home.filter(|home| !home.is_empty()) else {
         return path.to_string();
@@ -2636,8 +2638,6 @@ fn waste(sess: &Session, filter: &ScopeFilter, window: TimeRange, format: Format
         }
     }
 
-    // Rank by real startup savings: measured tokens (desc), then unmeasured MCP
-    // schemas, then declutter-only.
     found.sort_by_key(|row| savings_rank(row.savings));
 
     if format == Format::Json {
@@ -2730,8 +2730,8 @@ fn waste(sess: &Session, filter: &ScopeFilter, window: TimeRange, format: Format
     Ok(())
 }
 
-/// Sort key: real measured savings first (largest first), then unmeasured MCP
-/// schemas, then declutter-only.
+/// View-only (waste view): sort key — real measured savings first (largest
+/// first), then unmeasured MCP schemas, then declutter-only.
 fn savings_rank(savings: StartupSavings) -> (u8, std::cmp::Reverse<u64>) {
     match savings {
         StartupSavings::Tokens(n) => (0, std::cmp::Reverse(n)),
@@ -2740,18 +2740,18 @@ fn savings_rank(savings: StartupSavings) -> (u8, std::cmp::Reverse<u64>) {
     }
 }
 
+/// View-only (waste view): the `saves@start` cell — a description-loaded surface
+/// is negligible but measured, and removing it reclaims only its description.
 fn savings_cell(savings: StartupSavings, startup_tokens: Option<u64>) -> String {
     match savings {
         StartupSavings::Tokens(n) => format!("{n}/sess"),
         StartupSavings::UnknownSchema => "schema?".to_string(),
-        // Negligible, but measured: a description-loaded surface still costs its
-        // description every session, and that is all removing it reclaims.
         StartupSavings::Declutter => format!("~{}/sess", startup_tokens.unwrap_or(0)),
     }
 }
 
-/// A suggestion honest about whether removal saves context or only declutters —
-/// naming the body cost as an invocation cost so it is not read as a saving.
+/// View-only (waste view): a suggestion honest about whether removal saves context or
+/// only declutters — naming the body cost as an invocation cost so it is not read as a saving.
 fn savings_suggestion(wedge: Wedge, savings: StartupSavings, on_demand: Option<u64>) -> String {
     let body = match on_demand {
         Some(n) => format!("body is {n} tok when invoked"),

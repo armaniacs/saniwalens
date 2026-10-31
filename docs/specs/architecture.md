@@ -98,7 +98,31 @@ flowchart TD
 | **adapter** | The raw shapes of *both* inputs: transcript JSONL (record types, field names, `subagents/` layout) and config files (skill/rule frontmatter, `settings.json`, MCP schemas, `CLAUDE.md`). Maps them into the internal domain model. | The SQLite schema; how costs are computed. |
 | **core** | Event extraction, static-cost weighing inputs, the catalog×usage join, the briefing's findings assembly (`core::findings`), and aggregation ― all **pure functions** over the domain model. No I/O, no clock, no DB. | Claude Code field names or config path conventions; SQL. |
 | **store** | Persisting and querying `sessions` / `surfaces` / `events` in SQLite. | Raw input shapes. |
-| **report** | Turning query results into tables / Markdown and ranking wedges. In `src/`: `cli/mod.rs` (the shell, every view except trend, and the public CLI API), `cli/trend.rs` (the trend view), `cli/window.rs` (the evaluation-window plumbing every view shares), `cli/report.rs` (format, renderer, framing). A new view becomes one file under `cli/views/`, created when the next view lands; views never re-grow a shared file. | Raw input shapes; SQL beyond the store's API. |
+| **report** | Turning query results into tables / Markdown and ranking wedges. In `src/`: `cli/mod.rs` (the shell, every view except trend, and the public CLI API), `cli/trend.rs` (the trend view), `cli/window.rs` (the evaluation-window plumbing every view shares), `cli/report.rs` (format, renderer, framing). A new view becomes one file under `cli/views/`, created when the next view lands; views never re-grow a shared file. The view-landing rule below makes that a per-PR obligation, not a remembered intention. | Raw input shapes; SQL beyond the store's API. |
+
+### The view-landing rule (per PR)
+
+The "next view" above is not left to memory. A PR that adds a `Command` variant
+― a new view ― is the PR that lands the split:
+
+- **`src/cli/views/` is created in that same PR**, and the view lands as one
+  file there. View helpers are born in the view's file, never appended to
+  `mod.rs`: the shell keeps dispatch, and nothing else.
+- **`cli/trend.rs` moves into `src/cli/views/` in the same commit** as the
+  first view landing there. Its move cost does not depend on the timing, so
+  the move rides along instead of staying a second, forgettable step.
+- **The line-budget tripwire** (`tests/cli_mod_line_budget.rs`) makes the
+  "never re-grow a shared file" half structural: growing `mod.rs` past its
+  measured budget fails `cargo test` with a message pointing at `cli/views/`.
+  Raising the budget is a review point, done in the same PR as the spec
+  update it forces.
+- **The spec update map when the split lands** ― two places change with it, in
+  the same PR: this rule, and the **report row of the layer table** above (it
+  names the current file layout). Both stop describing the future split and
+  describe the landed `src/cli/views/` instead.
+
+The acceptance-criteria template every view-addition PBI carries is
+`.claude/rules/cli-view-addition.md`.
 
 The contract between adapter and everything else is the **internal domain
 model** ― tool-centric names stable across Claude Code releases. Renaming an
