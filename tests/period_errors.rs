@@ -91,6 +91,92 @@ fn trend_rejects_a_span_whose_current_window_leaves_the_calendar() {
 }
 
 #[test]
+fn trend_rejects_a_previous_window_that_leaves_the_calendar() {
+    // The current window alone resolves (its start is inside the calendar);
+    // the derived previous window doubles the reach and would start below
+    // the calendar's floor — the disclosure would draw an empty previous
+    // since. The pair must refuse it as the same invalid-span error, before
+    // any store work or report renders.
+    let out = run("trend-previous", &["trend", "--last", "50000000d"]);
+    assert!(
+        !out.status.success(),
+        "trend must fail, not render: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        out.stdout.is_empty(),
+        "stdout must stay empty on the error path: {:?}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("invalid --last '50000000d'"),
+        "the invalid-span message is missing: {stderr}"
+    );
+    assert!(
+        !stderr.contains("trend windows:"),
+        "the window disclosure rode ahead of the error: {stderr}"
+    );
+}
+
+#[test]
+fn trend_rejects_an_ancient_since_whose_derived_previous_leaves_the_calendar() {
+    // clap equals form: the space form is refused by clap as a stray flag,
+    // which would make this a different bug. The date parses and the current
+    // window resolves, but the equal-length window derived before it reaches
+    // past the calendar's floor — refused with the empty-window error that
+    // names `--since`, never the invalid-`--last` wording a date did not
+    // earn.
+    let out = run("trend-since", &["trend", "--since=-200000-01-01"]);
+    assert!(
+        !out.status.success(),
+        "trend must fail, not render: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        out.stdout.is_empty(),
+        "stdout must stay empty on the error path: {:?}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("empty window: --since -200000-01-01"),
+        "the error must name --since: {stderr}"
+    );
+    assert!(
+        !stderr.contains("invalid --last"),
+        "a date-derived input must not be blamed on --last: {stderr}"
+    );
+    assert!(
+        !stderr.contains("trend windows:"),
+        "the window disclosure rode ahead of the error: {stderr}"
+    );
+}
+
+#[test]
+fn the_ordinary_trend_still_runs_and_discloses_both_windows() {
+    // The flags-absent default pair — 7d against the 7d before it — resolves
+    // and runs: the calendar refusal changes only what it cannot name. Both
+    // windows' disclosures carry a since and an until; no empty bound
+    // anywhere.
+    let out = run("trend-ordinary", &["trend"]);
+    assert!(
+        out.status.success(),
+        "trend must run: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("trend windows: current since "),
+        "the two-window disclosure is missing: {stderr}"
+    );
+    assert!(
+        !stderr.contains("since ,"),
+        "an empty bound leaked into the disclosure: {stderr}"
+    );
+}
+
+#[test]
 fn the_ordinary_last_still_runs() {
     // The ordinary span resolves and runs in the same synthetic setup: the
     // calendar check refuses only what it cannot name.

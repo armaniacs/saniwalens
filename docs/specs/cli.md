@@ -131,7 +131,7 @@ ranking.
 | `doctor` | The entry point: a one-screen health check **written for someone who has never seen saniwalens's vocabulary** ― every item says what happened, why it costs, and what to do. Sections: `WHAT TO FIX FIRST` (recurring problems as a prioritized to-do list, each routed to the owning config layer with the follow-up command), `COST` (the session-start context and output totals in plain words, humanized units, naming the agent types behind the subagent figure ― and, when the named rows cover only part of that figure, saying so first; see *Reporting honesty*), `CONFIG WORTH PRUNING` (dead or heavy config per owner), `LOOKS HEALTHY` (what explicitly needs no action). `--scope` narrows to one layer; the text form leads with actions, never a stats dump. |
 | `inventory` | The catalog×usage join per surface **row** (scope and owning project shown; usage attributed under per-project shadowing ― `surfaces.md`): startup cost, static cost, load mode, usage. `--scope` filters to one layer; orphaned usage (no scope to filter on) appears in the unfiltered view only. |
 | `usage` | Skill event rollups: per skill, or per time bucket (`--by`) ― frequency, tokens, `ctx_growth`, duration. Leads with a token-destination line (main-thread skill output vs subagent total) so the reader sees where tokens actually go before the table, then splits the subagent half **per agent type** (runs and output tokens, costliest first) ― the aggregate is usually the larger number and the split is the part that can be acted on. JSON carries the split's coverage as `agent_split` in every state. In text, a partial split prints its covered and uncovered figures between the total and the table, an unavailable split (no rows at all) is warned on stderr, and rows that cover the total need no note (see *Reporting honesty*). A section with no rows is omitted rather than rendered as bare headers. |
-| `trend` | How usage moved: each kind of event (count / output tokens / duration), each skill (invocations, largest movement first), and the session / subagent totals ― this window against the equal-length window right before it (default 7d vs the 7d before; `--last` or `--since` [+ `--until`] fixes the current one, the pair resolved by the Period section's rules). A kind renders the metrics it carries: point kinds render the count alone, because ingest writes their output tokens and duration as constant zeros (`events.md`: a span is currently `skill_invocation` only) ― their rows for those metrics are omitted rather than rendered as `0.0` / `n/a`, and `--format json` keeps every kind's three metrics (the machine contract; only the table omits what cannot apply). Every rendered row carries both windows' values, the delta, and the direction; a comparison is `n/a` / `"unavailable"` with no delta claimed only when the kind's previous side holds no events, never a drop to zero, and the n/a reason text rides only with a report that holds such a comparison (see *Reporting honesty*). Both windows' ranges are disclosed like every view's window is, and `--format json` carries them as `window.current` / `window.previous`. A section with no rows (e.g. no skill usage in either window) is omitted rather than rendered as bare headers. |
+| `trend` | How usage moved: each kind of event (count / output tokens / duration), each skill (invocations, largest movement first), and the session / subagent totals ― this window against the equal-length window right before it (default 7d vs the 7d before; `--last` or `--since` [+ `--until`] fixes the current one, the pair resolved by the Period section's rules). A kind renders the metrics it carries: point kinds render the count alone, because ingest writes their output tokens and duration as constant zeros (`events.md`: a span is currently `skill_invocation` only) ― their rows for those metrics are omitted rather than rendered as `0.0` / `n/a`, and `--format json` keeps every kind's three metrics (the machine contract; only the table omits what cannot apply). Every rendered row carries both windows' values, the delta, and the direction; a comparison is `n/a` / `"unavailable"` with no delta claimed only when the kind's previous side holds no events, never a drop to zero, and the n/a reason text rides only with a report that holds such a comparison (see *Reporting honesty*). Both windows' ranges ― the current one and the equal-length one **derived** one second before it ― are disclosed like every view's window is, and a pair whose either window leaves the calendar the Period section names is refused as a period error rather than disclosed with an empty bound; `--format json` carries them as `window.current` / `window.previous`. A section with no rows (e.g. no skill usage in either window) is omitted rather than rendered as bare headers. |
 | `waste` | Just the flagged opportunities (unused, costly+rare, always-on heavy, …) with their evidence and owning scope; `--scope` filters to one layer. |
 | `overhead` | Reconcile the empirical always-on floor (the leanest observed **session start**, not the context a skill happened to run at ― `surfaces.md`) against the readable always-on config; the residual is the system prompt + built-in tools + MCP schemas the catalog cannot weigh. The per-project table carries the session count behind each floor, because the floor is a minimum over observations and a project with few sessions may never have caught a fresh one. Reports the metric as unavailable when no session start was observed at all. |
 | `prompts` | How the user steers the session: the mix of steer / correct / question / instruct prompts (`core::prompt`, lexical heuristics), with a verdict ― heavy steering suggests more autonomy, frequent correction suggests clearer upfront specs. This is a behavioral signal, not a config metric; embeddings showed prompt *topics* do not map to reusable skills, so the value is in *how* you prompt, not *what about*. |
@@ -191,7 +191,16 @@ compare against is undefined.
   whose resolved window leaves it (e.g. `--last 100000000d`) has no date to
   name, so it is refused at the resolve entry with the same invalid-span error
   as an unparseable one. `trend`'s pair resolves through the same entry, so a
-  current window outside the calendar is refused there too.
+  current window outside the calendar is refused there too ― and so is the
+  **derived previous window**, the equal-length window the pair builds one
+  second before the current one: `--last` reaches back twice, so a span whose
+  current window still resolves can start the derived previous below the
+  calendar (e.g. `--last 50000000d`), refused with the same invalid-span
+  error. The date-derived pair has the same bound: a `--since` whose
+  equal-length derived previous leaves the calendar (e.g.
+  `--since=-200000-01-01`) is refused with the empty-window error naming
+  `--since` ― the input is the date, so the invalid-`--last` wording would
+  blame the wrong flag.
 - Errors are parse-time, before any report renders: an unparseable date fails
   on stderr with a non-zero exit and an empty stdout; `--since` after `--until`
   is an empty-window error rather than an empty-looking report. A `--last`
@@ -255,11 +264,13 @@ caveats in `events.md` / `surfaces.md`):
   under `--since` / `--until` / `--last` the row itself says `UNUSED (window)`
   (inventory; the other views' empty states read "in the evaluation window").
 - A window the input makes unresolvable is an **error**, never a silent
-  report: a `--last` whose resolved window leaves the calendar names dates
-  that do not exist, and fails at the resolve entry with the invalid-span
-  error. The alternative would be a disclosure line with an empty `since` and
-  a store bound (`started_at >= ''`) that silently passes every session ― a
-  successful-looking report that measures nothing.
+  report: a `--last` whose resolved window ― or, in `trend`, the equal-length
+  window **derived** one second before the current one ― leaves the calendar
+  names dates that do not exist, and fails with the invalid-span error; a
+  `--since` whose derived previous leaves it fails with the empty-window
+  error naming `--since`. The alternative would be a disclosure line with an
+  empty `since` and a store bound (`started_at >= ''`) that silently passes
+  every session ― a successful-looking report that measures nothing.
 - A subagent run whose agent type was never recorded is shown as `(unknown)`,
   never merged into a named type and never dropped ― the per-agent rows must
   keep summing to the subagent total the same report prints above them, for
