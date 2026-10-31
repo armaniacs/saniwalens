@@ -8,8 +8,8 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 
-use crate::adapter::harness::{Harness, home_dir};
-use crate::adapter::opencode as opencode_mod;
+use crate::adapter::harness::{Harness, RunLineRenderer, home_dir};
+use crate::adapter::opencode::RunEvent;
 use crate::core::bucket::{Bucket, JST_OFFSET_SECS, bucket_label};
 use crate::core::findings;
 use crate::core::friction::ErrorCategory;
@@ -28,6 +28,7 @@ use crate::session::{
 };
 use crate::store::{OpenMode, Store};
 
+pub mod heartbeat;
 pub(crate) mod report;
 pub(crate) mod trend;
 pub(crate) mod window;
@@ -439,14 +440,16 @@ enum DeliveryPayload<'a> {
     },
 }
 
-/// One delivery, assembled: mode, launch shape, payload. Built by `optimize`,
-/// run by `deliver` (`pbi/2026-10-29-06-feat-optimize-delivery-seam.md`).
+/// One delivery, assembled: mode, launch shape, the headless renderer the
+/// harness seam chose, payload. Built by `optimize`, run by `deliver`
+/// (`pbi/2026-10-29-06-feat-optimize-delivery-seam.md`).
 pub struct DeliveryPlan<'a> {
     mode: DeliveryMode,
     binary: &'static str,
     leading: &'static [&'static str],
     harness_name: &'static str,
     verbose: bool,
+    render: Option<RunLineRenderer>,
     payload: DeliveryPayload<'a>,
 }
 
@@ -461,19 +464,22 @@ impl<'a> DeliveryPlan<'a> {
             leading: &[],
             harness_name: "",
             verbose: false,
+            render: None,
             payload: DeliveryPayload::Full(prompt),
         }
     }
 
     /// A launch: the briefing travels behind a private pointer file, and
-    /// `pointer` assembles the argv prompt for that file's path.
+    /// `pointer` assembles the argv prompt for that file's path. The launch
+    /// shape — the binary plus its leading argv — travels as the one fact the
+    /// harness seam hands over (`Harness::launch_command`).
     pub fn launch(
-        binary: &'static str,
-        leading: &'static [&'static str],
+        (binary, leading): (&'static str, &'static [&'static str]),
         mode: DeliveryMode,
         briefing: String,
         harness_name: &'static str,
         verbose: bool,
+        render: Option<RunLineRenderer>,
         pointer: impl FnOnce(&Path) -> String + 'a,
     ) -> Self {
         Self {
@@ -482,6 +488,7 @@ impl<'a> DeliveryPlan<'a> {
             leading,
             harness_name,
             verbose,
+            render,
             payload: DeliveryPayload::Launch {
                 briefing,
                 pointer: Box::new(pointer),
@@ -503,12 +510,14 @@ pub trait AdvisorLaunch {
     ) -> Result<std::process::ExitStatus>;
 
     /// Spawn headless: the raw stream goes to a private log, the agent's text
-    /// to stdout. Returns the exit status and the log path.
+    /// to stdout, rendered line by line through the `render` the harness seam
+    /// chose. Returns the exit status and the log path.
     fn headless(
         &mut self,
         binary: &str,
         leading: &[&str],
         prompt: &str,
+        render: Option<RunLineRenderer>,
     ) -> Result<(std::process::ExitStatus, PathBuf)>;
 }
 
@@ -534,8 +543,9 @@ impl AdvisorLaunch for ProcessAdvisor {
         binary: &str,
         leading: &[&str],
         prompt: &str,
+        render: Option<RunLineRenderer>,
     ) -> Result<(std::process::ExitStatus, PathBuf)> {
-        run_headless(binary, leading, prompt)
+        run_headless(binary, leading, prompt, render)
     }
 }
 
@@ -552,6 +562,7 @@ pub fn deliver(plan: DeliveryPlan<'_>, advisor: &mut impl AdvisorLaunch) -> Resu
         leading,
         harness_name,
         verbose,
+        render,
         payload,
     } = plan;
     let (prompt, path) = match payload {
@@ -577,7 +588,7 @@ pub fn deliver(plan: DeliveryPlan<'_>, advisor: &mut impl AdvisorLaunch) -> Resu
     // to a private file and only the agent's text streams on stdout; verbose
     // keeps the raw streaming by handing the terminal over.
     let (result, run_log) = if mode == DeliveryMode::Headless && !verbose {
-        match advisor.headless(binary, leading, &prompt) {
+        match advisor.headless(binary, leading, &prompt, render) {
             Ok((status, log)) => (Ok(status), Some(log)),
             Err(err) => (Err(err), None),
         }
@@ -652,12 +663,12 @@ fn optimize(
             &copy,
         )),
         mode => DeliveryPlan::launch(
-            binary,
-            leading,
+            (binary, leading),
             mode,
             optimize_mod::render_briefing(&findings, filter, &copy),
             sess.harness.display_name(),
             verbose,
+            sess.harness.run_line_renderer(),
             |path| {
                 optimize_mod::launch_prompt(
                     &path.to_string_lossy(),
@@ -677,21 +688,22 @@ fn optimize(
 /// piped, write every raw line (and the child's stderr) to a private log, and
 /// surface only what the agent says — text parts on stdout (so a pipe like
 /// `| pbcopy` receives the narration and the plan), one-line progress markers
-/// on stderr. A heartbeat covers quiet stretches (a long tool call, model
-/// thinking) so the run never looks hung. Returns the log path so the caller
-/// can point at the full detail. The raw event shapes are unversioned
-/// upstream, so rendering is lenient: a line with no recognizable text stays
-/// in the log, and a run that renders nothing readable says so instead of
-/// leaving silence.
+/// on stderr. The `render_line` is the harness seam's choice
+/// (`Harness::run_line_renderer`), so this loop names no harness. A heartbeat
+/// covers quiet stretches (a long tool call, model thinking) so the run never
+/// looks hung. Returns the log path so the caller can point at the full
+/// detail. The raw event shapes are unversioned upstream, so rendering is
+/// lenient: a line with no recognizable text stays in the log, and a run that
+/// renders nothing readable says so instead of leaving silence.
 fn run_headless(
     binary: &str,
     leading: &[&str],
     prompt: &str,
+    render_line: Option<RunLineRenderer>,
 ) -> Result<(std::process::ExitStatus, PathBuf)> {
     use std::io::{BufRead, Write};
     use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-    use std::time::{Duration, Instant};
 
     let log_path = private_temp_path("saniwalens-run", "log");
     write_private_file(&log_path, "").context("create run log")?;
@@ -712,39 +724,16 @@ fn run_headless(
         ))
     );
 
-    // A dim beat every 30s while the advisor works: elapsed seconds and how
-    // many events have streamed, so silence reads as waiting, not a hang.
+    // A dim beat every 30s while the advisor works, so silence reads as
+    // waiting, not a hang — the quiet-stretch logic lives in `heartbeat`.
     let events = Arc::new(AtomicUsize::new(0));
     let stop = Arc::new(AtomicBool::new(false));
-    let heartbeat = {
-        let events = Arc::clone(&events);
-        let stop = Arc::clone(&stop);
-        std::thread::spawn(move || {
-            let start = Instant::now();
-            let mut next = 30u64;
-            loop {
-                if stop.load(Ordering::Relaxed) {
-                    return;
-                }
-                std::thread::sleep(Duration::from_millis(500));
-                if stop.load(Ordering::Relaxed) {
-                    return;
-                }
-                let elapsed = start.elapsed().as_secs();
-                if elapsed >= next {
-                    next += 30;
-                    eprintln!(
-                        "{}",
-                        Style::stderr().dim(&format!(
-                            "  … advisor working ({}s, {} events)",
-                            elapsed,
-                            events.load(Ordering::Relaxed)
-                        ))
-                    );
-                }
-            }
-        })
-    };
+    let (heartbeat, _beats) = heartbeat::spawn(
+        Arc::clone(&stop),
+        Arc::clone(&events),
+        heartbeat::CADENCE,
+        heartbeat::POLL,
+    );
 
     let mut launch = std::process::Command::new(binary);
     launch.args(leading).arg(prompt);
@@ -759,15 +748,15 @@ fn run_headless(
         let line = line.context("read the advisor's output")?;
         events.fetch_add(1, Ordering::Relaxed);
         writeln!(log, "{line}").context("write the run log")?;
-        match opencode_mod::render_run_line(&line) {
-            opencode_mod::RunEvent::Text(text) => {
+        match render_line.map_or(RunEvent::Silent, |render| render(&line)) {
+            RunEvent::Text(text) => {
                 readable = true;
                 println!("{text}");
             }
-            opencode_mod::RunEvent::Progress(tool) => {
+            RunEvent::Progress(tool) => {
                 eprintln!("{}", Style::stderr().dim(&format!("  → {tool}")));
             }
-            opencode_mod::RunEvent::Silent => {}
+            RunEvent::Silent => {}
         }
     }
     let status = child.wait()?;
@@ -2902,6 +2891,7 @@ mod tests {
             binary: &str,
             leading: &[&str],
             prompt: &str,
+            _render: Option<RunLineRenderer>,
         ) -> Result<(std::process::ExitStatus, PathBuf)> {
             self.headless.push((
                 binary.to_string(),
@@ -2930,12 +2920,12 @@ mod tests {
         use std::cell::RefCell;
         let seen_path: RefCell<Option<PathBuf>> = RefCell::new(None);
         let plan = DeliveryPlan::launch(
-            "claude",
-            &[],
+            ("claude", &[]),
             DeliveryMode::Interactive,
             "the rendered briefing".to_string(),
             "Claude Code",
             false,
+            None,
             |path| {
                 *seen_path.borrow_mut() = Some(path.to_path_buf());
                 "POINTER PROMPT".to_string()
@@ -2958,12 +2948,12 @@ mod tests {
     #[test]
     fn headless_routes_through_the_logged_adapter_unless_verbose() {
         let headless_plan = DeliveryPlan::launch(
-            "opencode",
-            &["run", "--format", "json"],
+            ("opencode", &["run", "--format", "json"]),
             DeliveryMode::Headless,
             "briefing".to_string(),
             "opencode",
             false,
+            Harness::Opencode.run_line_renderer(),
             |_| "pointer".to_string(),
         );
         let mut advisor = RecordingAdvisor::new();
@@ -2974,12 +2964,12 @@ mod tests {
         // `--verbose` inherits stdio for the raw streaming instead
         // (`docs/specs/harness.md`).
         let verbose_plan = DeliveryPlan::launch(
-            "opencode",
-            &["run", "--format", "json"],
+            ("opencode", &["run", "--format", "json"]),
             DeliveryMode::Headless,
             "briefing".to_string(),
             "opencode",
             true,
+            Harness::Opencode.run_line_renderer(),
             |_| "pointer".to_string(),
         );
         let mut advisor = RecordingAdvisor::new();

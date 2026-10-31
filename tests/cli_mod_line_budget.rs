@@ -10,12 +10,13 @@
 //! tripwire does not grow the very file it guards.
 
 /// The measured size of `src/cli/mod.rs` at the latest budget change (the
-/// PBI 40 measurement of 2026-11-01: 3,110 lines, after the windowed flag
-/// surface consolidated into `cli/window.rs`; the PBI 38 measurement was
-/// 3,322 and the PBI 34 landing measured 3,383), with no slack — raising
-/// this constant is a review point, done in the same PR as the spec update
-/// it forces (`docs/specs/architecture.md`).
-const MOD_RS_LINE_BUDGET: usize = 3110;
+/// PBI 42 measurement of 2026-11-01: 3,100 lines, after the headless
+/// heartbeat's quiet-stretch logic moved into `cli/heartbeat.rs`; the PBI 40
+/// measurement was 3,110, the PBI 38 measurement 3,322 and the PBI 34
+/// landing measured 3,383), with no slack — raising this constant is a
+/// review point, done in the same PR as the spec update it forces
+/// (`docs/specs/architecture.md`).
+const MOD_RS_LINE_BUDGET: usize = 3100;
 
 /// The remedy half of the tripwire's failure message, pinned here so its
 /// wording cannot drift away from what it prescribes.

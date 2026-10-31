@@ -468,4 +468,8 @@ data those prompts render from, so the shell never spells `HarnessCopy` field
 by field. The launch shape the mode defers to is per-harness **data on the
 seam** too (`Harness::launch_command` in `adapter::harness`, beside the
 harness's other arms), so a new harness's delivery lands there and this
-section's wiring stays put.
+section's wiring stays put. The headless run's raw lines render through
+per-harness data as well: the plan carries the renderer the harness seam
+chose (`Harness::run_line_renderer`), and the logged pipe applies it line by
+line, so the loop never names a harness and a new harness's stream needs no
+shell edit.
