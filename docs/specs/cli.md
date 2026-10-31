@@ -6,56 +6,56 @@ findings to an interactive `claude` session. This spec defines the command
 contract and the reporting model; exact flag spellings live with the
 implementation and stay in sync via `.claude/rules/spec-sync.md`.
 
-## `analyze` — populate the store
+## `analyze` ― populate the store
 
 ```
 saniwalens analyze [--projects <dir>] [--config <dir>] [--db <path>]
 ```
 
-Reads both Claude Code inputs — session transcripts (default
+Reads both Claude Code inputs ― session transcripts (default
 `~/.claude/projects/`) and live config (default `~/.claude/` plus the relevant
-project `.claude/`) — and writes the SQLite store (`storage.md`). That
+project `.claude/`) ― and writes the SQLite store (`storage.md`). That
 `~/.claude` root is `$CLAUDE_CONFIG_DIR` whenever that variable names a
-non-empty path — an empty value carries no location and is treated as unset —
+non-empty path ― an empty value carries no location and is treated as unset ―
 so saniwalens follows a config tree the user has relocated instead of reporting on
 an empty default. Incremental and idempotent: unchanged transcripts are skipped,
 changed ones replaced, the surface catalog rebuilt from current config
-(`storage.md`). The verb is `analyze`, not `build` — it analyzes raw input into
+(`storage.md`). The verb is `analyze`, not `build` ― it analyzes raw input into
 facts.
 
 `analyze` reads everything **read-only** and never copies input into the repo or
 the store beyond the derived facts (`.claude/rules/session-data-privacy.md`).
 
-### `--db` — one store per user, not per directory
+### `--db` ― one store per user, not per directory
 
-Shared by every command. The input is not scoped to the current directory —
-`analyze` walks *every* project's transcripts under `~/.claude/projects` — so a
+Shared by every command. The input is not scoped to the current directory ―
+`analyze` walks *every* project's transcripts under `~/.claude/projects` ― so a
 cwd-relative default would contradict the data it holds: it would build a
 separate copy of the same cross-project store per directory saniwalens is invoked
 from, and leave a database file inside unrelated Git working trees. The default
 is therefore user-level, `${XDG_STATE_HOME:-~/.local/state}/saniwalens/saniwalens.db`
 (`Session::open` in `session.rs`, which owns resolution, the legacy-store move,
 and the guarded open as one seam), with the directory created on demand by
-`Store::open` — owner-only, like the store itself (`storage.md`). A non-absolute
-`XDG_STATE_HOME` is invalid per the XDG spec and ignored — honoring one would
+`Store::open` ― owner-only, like the store itself (`storage.md`). A non-absolute
+`XDG_STATE_HOME` is invalid per the XDG spec and ignored ― honoring one would
 reintroduce exactly the cwd-relative store this default exists to avoid.
 
 State and not cache (`$XDG_CACHE_HOME`) because the store is not regenerable.
 It is built incrementally from the transcripts, but Claude Code prunes those on
 its own retention schedule, and the rows already extracted are then the only
-surviving record of those sessions — nothing on disk can rebuild them
+surviving record of those sessions ― nothing on disk can rebuild them
 (`storage.md`). A cache directory is by definition somewhere a cleaner may empty
 without asking, which is the one thing this file cannot survive; that the store
 migrates in place rather than being discarded on a schema change is the same
 premise applied to upgrades. A project-local store stays available by asking for
-it — `--db ./saniwalens.db`.
+it ― `--db ./saniwalens.db`.
 
-### `config.toml` — defaults and named profiles
+### `config.toml` ― defaults and named profiles
 
 The tool's own config file lives at
 `${XDG_CONFIG_HOME:-~/.config}/saniwalens/config.toml` (`config_file_path` in
 `session.rs`; a relative `XDG_CONFIG_HOME` is invalid and ignored, like its
-`XDG_STATE_HOME` sibling above). The file is optional — without it every
+`XDG_STATE_HOME` sibling above). The file is optional ― without it every
 invocation behaves exactly as before.
 
 ```toml
@@ -70,17 +70,17 @@ It holds two kinds of defaults plus named profiles `--profile` selects.
 Resolution order, strongest first: explicit flags, the selected profile, the
 file's top-level defaults, then the builtins (`claude`, the per-harness store
 path). Flag *values* (`--scope`, `--format`) are parsed before the session is
-built, so an invalid flag fails on its own — no store open, no freshness line
+built, so an invalid flag fails on its own ― no store open, no freshness line
 ahead of the error; `optimize` is the exception that resolves the store path
-first, exactly as the pre-`Session` dispatch did. A relative `db` joins the directory holding `config.toml` — never the
-current working directory — while an explicit `--db` is taken as is, even
+first, exactly as the pre-`Session` dispatch did. A relative `db` joins the directory holding `config.toml` ― never the
+current working directory ― while an explicit `--db` is taken as is, even
 when relative; `~` is not expanded. Unknown keys are ignored so a newer file
 never breaks an older binary. A missing file is silence, not an error; anything
 else wrong with the file (unparsable TOML, unknown harness, missing profile)
 fails the invocation with the file named, and an unknown `--profile` lists the
 available ones.
 
-## Views — read the store
+## Views ― read the store
 
 ```
 saniwalens <view> [--scope global|project[:<slug>]] [--by <bucket>] [--frozen]
@@ -88,26 +88,26 @@ saniwalens <view> [--scope global|project[:<slug>]] [--by <bucket>] [--frozen]
 ```
 
 Each view is its own top-level command; their queries only read the store, never
-raw input. The set is deliberately curated — a view earns a command by carrying
+raw input. The set is deliberately curated ― a view earns a command by carrying
 logic a one-line query cannot (a classification, an algorithm, a suggestion). Any
 *other* slice is a `sql` query (below), so thin "just count a column" views are
 not commands.
 
-### Freshness — reads auto-refresh
+### Freshness ― reads auto-refresh
 
 A stale store the user cannot notice was a real failure mode, so a read command
-**runs the incremental `analyze` stage first by default** — the same composition
+**runs the incremental `analyze` stage first by default** ― the same composition
 `optimize` always had (`architecture.md`). With `ingested_files` skipping
 unchanged transcripts (`storage.md`), an up-to-date store costs one stat per
 transcript. The refresh reuses the roots recorded in `meta` (`projects_dir`),
-and a missing db is simply created — "absent db" is an error only for `sql`.
+and a missing db is simply created ― "absent db" is an error only for `sql`.
 `--frozen` suppresses the refresh and reads the store as-is.
 
 Every read prints a **one-line freshness header on stderr** (stdout stays clean
-for pipes): what was refreshed, or — under `--frozen` / `sql` — how old the
+for pipes): what was refreshed, or ― under `--frozen` / `sql` ― how old the
 store is, with a re-analyze hint once it is older than a day.
 
-### Scope — route each finding to the config layer that owns the fix
+### Scope ― route each finding to the config layer that owns the fix
 
 "Optimize my global setup" and "optimize this project" are different tasks, and
 mixing them lets one busy project drown the global picture. Every finding is
@@ -117,7 +117,7 @@ routed (`core::scope`):
 - **Friction categories** route by concentration: a strict-majority project owns
   the category (fix in that project's config); a spread category is global (a
   cross-project habit).
-- **Thrash** routes to the project it happened in — carried on the episode
+- **Thrash** routes to the project it happened in ― carried on the episode
   itself, since an episode is scoped to one session and therefore to one project
   (`events.md`); **cd% / prompting / token totals** are behavioral, hence global.
 
@@ -128,17 +128,17 @@ ranking.
 
 | View | Answers |
 | --- | --- |
-| `doctor` | The entry point: a one-screen health check **written for someone who has never seen saniwalens's vocabulary** — every item says what happened, why it costs, and what to do. Sections: `WHAT TO FIX FIRST` (recurring problems as a prioritized to-do list, each routed to the owning config layer with the follow-up command), `COST` (the session-start context and output totals in plain words, humanized units, naming the agent types behind the subagent figure — and, when the named rows cover only part of that figure, saying so first; see *Reporting honesty*), `CONFIG WORTH PRUNING` (dead or heavy config per owner), `LOOKS HEALTHY` (what explicitly needs no action). `--scope` narrows to one layer; the text form leads with actions, never a stats dump. |
-| `inventory` | The catalog×usage join per surface **row** (scope and owning project shown; usage attributed under per-project shadowing — `surfaces.md`): startup cost, static cost, load mode, usage. `--scope` filters to one layer; orphaned usage (no scope to filter on) appears in the unfiltered view only. |
-| `usage` | Skill event rollups: per skill, or per time bucket (`--by`) — frequency, tokens, `ctx_growth`, duration. Leads with a token-destination line (main-thread skill output vs subagent total) so the reader sees where tokens actually go before the table, then splits the subagent half **per agent type** (runs and output tokens, costliest first) — the aggregate is usually the larger number and the split is the part that can be acted on. JSON carries the split's coverage as `agent_split` in every state. In text, a partial split prints its covered and uncovered figures between the total and the table, an unavailable split (no rows at all) is warned on stderr, and rows that cover the total need no note (see *Reporting honesty*). A section with no rows is omitted rather than rendered as bare headers. |
-| `trend` | How usage moved: each kind of event (count / output tokens / duration), each skill (invocations, largest movement first), and the session / subagent totals — this window against the equal-length window right before it (default 7d vs the 7d before; `--last` or `--since` [+ `--until`] fixes the current one, the pair resolved by the Period section's rules). Every row carries both windows' values, the delta, and the direction; the previous window's emptiness makes a comparison `n/a` / `"unavailable"` with no delta claimed, never a drop to zero (see *Reporting honesty*). Both windows' ranges are disclosed like every view's window is, and `--format json` carries them as `window.current` / `window.previous`. A section with no rows (e.g. no skill usage in either window) is omitted rather than rendered as bare headers. |
+| `doctor` | The entry point: a one-screen health check **written for someone who has never seen saniwalens's vocabulary** ― every item says what happened, why it costs, and what to do. Sections: `WHAT TO FIX FIRST` (recurring problems as a prioritized to-do list, each routed to the owning config layer with the follow-up command), `COST` (the session-start context and output totals in plain words, humanized units, naming the agent types behind the subagent figure ― and, when the named rows cover only part of that figure, saying so first; see *Reporting honesty*), `CONFIG WORTH PRUNING` (dead or heavy config per owner), `LOOKS HEALTHY` (what explicitly needs no action). `--scope` narrows to one layer; the text form leads with actions, never a stats dump. |
+| `inventory` | The catalog×usage join per surface **row** (scope and owning project shown; usage attributed under per-project shadowing ― `surfaces.md`): startup cost, static cost, load mode, usage. `--scope` filters to one layer; orphaned usage (no scope to filter on) appears in the unfiltered view only. |
+| `usage` | Skill event rollups: per skill, or per time bucket (`--by`) ― frequency, tokens, `ctx_growth`, duration. Leads with a token-destination line (main-thread skill output vs subagent total) so the reader sees where tokens actually go before the table, then splits the subagent half **per agent type** (runs and output tokens, costliest first) ― the aggregate is usually the larger number and the split is the part that can be acted on. JSON carries the split's coverage as `agent_split` in every state. In text, a partial split prints its covered and uncovered figures between the total and the table, an unavailable split (no rows at all) is warned on stderr, and rows that cover the total need no note (see *Reporting honesty*). A section with no rows is omitted rather than rendered as bare headers. |
+| `trend` | How usage moved: each kind of event (count / output tokens / duration), each skill (invocations, largest movement first), and the session / subagent totals ― this window against the equal-length window right before it (default 7d vs the 7d before; `--last` or `--since` [+ `--until`] fixes the current one, the pair resolved by the Period section's rules). Every row carries both windows' values, the delta, and the direction; the previous window's emptiness makes a comparison `n/a` / `"unavailable"` with no delta claimed, never a drop to zero (see *Reporting honesty*). Both windows' ranges are disclosed like every view's window is, and `--format json` carries them as `window.current` / `window.previous`. A section with no rows (e.g. no skill usage in either window) is omitted rather than rendered as bare headers. |
 | `waste` | Just the flagged opportunities (unused, costly+rare, always-on heavy, …) with their evidence and owning scope; `--scope` filters to one layer. |
-| `overhead` | Reconcile the empirical always-on floor (the leanest observed **session start**, not the context a skill happened to run at — `surfaces.md`) against the readable always-on config; the residual is the system prompt + built-in tools + MCP schemas the catalog cannot weigh. The per-project table carries the session count behind each floor, because the floor is a minimum over observations and a project with few sessions may never have caught a fresh one. Reports the metric as unavailable when no session start was observed at all. |
-| `prompts` | How the user steers the session: the mix of steer / correct / question / instruct prompts (`core::prompt`, lexical heuristics), with a verdict — heavy steering suggests more autonomy, frequent correction suggests clearer upfront specs. This is a behavioral signal, not a config metric; embeddings showed prompt *topics* do not map to reusable skills, so the value is in *how* you prompt, not *what about*. |
-| `failures` | Where the work stumbles: recurring tool failures by category (`core::friction` — edit-precondition, path-not-found, blocked-by-hook, …), ranked, each with what it suggests fixing and the originating-tool split. This analyses the *work*, not the config — where the real cost is. The classifier separates fixable friction from non-actionable noise (cancelled, transient). `--scope` follows the routing above: `global` = spread categories, `project` = each project's majority-owned categories, `project:<slug>` = everything in that one project (this subsumes the old `--project` flag). Denials are categorised from the transcript's own denial marker; everything else by lexical heuristics. |
-| `stuck` | Bursts of rapid re-edits to one file by one session (`core::thrash` — N+ edits within a few minutes), ranked. This isolates *where Claude got stuck and kept retrying* from healthy spread-out editing — an algorithmic signal a flat edit count cannot give. Observed: a file edited 25× in under 8 minutes. The table carries the project; `--format json` adds the session id and full path, which is what makes an episode investigable. |
+| `overhead` | Reconcile the empirical always-on floor (the leanest observed **session start**, not the context a skill happened to run at ― `surfaces.md`) against the readable always-on config; the residual is the system prompt + built-in tools + MCP schemas the catalog cannot weigh. The per-project table carries the session count behind each floor, because the floor is a minimum over observations and a project with few sessions may never have caught a fresh one. Reports the metric as unavailable when no session start was observed at all. |
+| `prompts` | How the user steers the session: the mix of steer / correct / question / instruct prompts (`core::prompt`, lexical heuristics), with a verdict ― heavy steering suggests more autonomy, frequent correction suggests clearer upfront specs. This is a behavioral signal, not a config metric; embeddings showed prompt *topics* do not map to reusable skills, so the value is in *how* you prompt, not *what about*. |
+| `failures` | Where the work stumbles: recurring tool failures by category (`core::friction` ― edit-precondition, path-not-found, blocked-by-hook, …), ranked, each with what it suggests fixing and the originating-tool split. This analyses the *work*, not the config ― where the real cost is. The classifier separates fixable friction from non-actionable noise (cancelled, transient). `--scope` follows the routing above: `global` = spread categories, `project` = each project's majority-owned categories, `project:<slug>` = everything in that one project (this subsumes the old `--project` flag). Denials are categorised from the transcript's own denial marker; everything else by lexical heuristics. |
+| `stuck` | Bursts of rapid re-edits to one file by one session (`core::thrash` ― N+ edits within a few minutes), ranked. This isolates *where Claude got stuck and kept retrying* from healthy spread-out editing ― an algorithmic signal a flat edit count cannot give. Observed: a file edited 25× in under 8 minutes. The table carries the project; `--format json` adds the session id and full path, which is what makes an episode investigable. |
 
-### Output formats — human vs machine
+### Output formats ― human vs machine
 
 Every command has both a human form and a machine form, strictly separated:
 
@@ -146,15 +146,15 @@ Every command has both a human form and a machine form, strictly separated:
   notes/PRs; `doctor` and `analyze` have their own text layouts instead of
   markdown). The output must explain itself: every table opens with a dimmed
   **framing block** saying what the view shows and how to read it (table
-  format only — markdown stays a bare table), headers are words rather than
-  abbreviations, and interpretation notes are dimmed footnotes. ANSI styling —
-  headings, dimmed context, highlighted counts and staleness warnings — turns
+  format only ― markdown stays a bare table), headers are words rather than
+  abbreviations, and interpretation notes are dimmed footnotes. ANSI styling ―
+  headings, dimmed context, highlighted counts and staleness warnings ― turns
   on only when stdout (stderr for the freshness line) is a terminal,
   `NO_COLOR` is unset, and `TERM` is not `dumb`; pipes and captures always get
   plain bytes. Styling is applied after column padding so it never skews table
   alignment.
 - **Machine** (`--format json`, on every command): a typed JSON document alone
-  on stdout — SQLite integers/reals/NULLs stay JSON numbers/null
+  on stdout ― SQLite integers/reals/NULLs stay JSON numbers/null
   (`Store::query_json`), `doctor` emits the routed findings structure
   (`core::optimize::Findings`, `projects` filtered by `--scope`), and each view
   emits its rows as named objects. All freshness/refresh chatter goes to
@@ -162,28 +162,28 @@ Every command has both a human form and a machine form, strictly separated:
   filtering. Human-only footnotes (row counts, heuristic caveats) are either
   folded into the JSON (`total`, …) or dropped, never mixed into it.
 
-Slices not covered here — the Bash command mix, the most-edited files, an error
-category broken down any way — are a `sql` one-liner; those once had thin
+Slices not covered here ― the Bash command mix, the most-edited files, an error
+category broken down any way ― are a `sql` one-liner; those once had thin
 `commands`/`hotspots` views, dropped once `sql` existed.
 
-### Period — narrow a report to a window of the history
+### Period ― narrow a report to a window of the history
 
 The nine report views above take `--since` / `--until` / `--last` so "what did
 the agent cost last week" is a view flag, not a `sql` query. The other commands
-(`analyze`, `sql`, `optimize`) take none — they are whole-history by contract.
+(`analyze`, `sql`, `optimize`) take none ― they are whole-history by contract.
 
-`trend` resolves the same flags as a **pair** — the current window plus the
+`trend` resolves the same flags as a **pair** ― the current window plus the
 equal-length window immediately before it (the previous ends one second before
 the current starts, so no event is counted in both). `--since` alone runs the
-current window to now — a bounded window, unlike the single-window views' open
-end — and `--until` alone is an error: with no current start, the window to
+current window to now ― a bounded window, unlike the single-window views' open
+end ― and `--until` alone is an error: with no current start, the window to
 compare against is undefined.
 
 - `--since DATE` / `--until DATE`: a named-day window over the history, each
-  date a whole day (`YYYY-MM-DD`, read in the presentation zone — **JST**, the
+  date a whole day (`YYYY-MM-DD`, read in the presentation zone ― **JST**, the
   same zone the bucketing table uses; the comparison is against the UTC epoch
   the store keeps). `--until` is **inclusive**: the whole named day counts.
-- `--last SPAN`: a rolling window ending now — `<N>d`, `<N>h`, `<N>w`.
+- `--last SPAN`: a rolling window ending now ― `<N>d`, `<N>h`, `<N>w`.
   Exclusive with the explicit dates (clap conflict), so "last 7 days" can never
   be silently reinterpreted by a stray `--since`.
 - Errors are parse-time, before any report renders: an unparseable date fails
@@ -191,12 +191,12 @@ compare against is undefined.
   is an empty-window error rather than an empty-looking report.
 - The window is **disclosed, never silent**: a dimmed `report window:` line
   rides with the freshness line on stderr (every format), the framing block
-  carries it as its last line (table only — markdown stays a bare table),
+  carries it as its last line (table only ― markdown stays a bare table),
   `doctor` prints it in-band under its heading, and `--format json` gains a
   `window` object (`since` / `until` as RFC 3339 with their offset). Without
   the flags every output is byte-identical to the pre-period behavior.
 - The catalog half of `inventory` is current config, so it is not windowed by
-  time — its **usage half** is. An unused row under a window says
+  time ― its **usage half** is. An unused row under a window says
   `UNUSED (window)` / `"unused-in-window"`, never plain "unused".
 - Sessions the writer could not stamp (no observable start, empty
   `started_at`) are **excluded** from a windowed `session_stats` /
@@ -207,7 +207,7 @@ compare against is undefined.
 
 `--by` groups by `year | month | week | day | hour`. Because the store keeps UTC
 (`storage.md`), bucketing converts to `--tz` first (**default JST**) so day/hour
-buckets mean the user's local day/hour — bucketing UTC would smear a local day
+buckets mean the user's local day/hour ― bucketing UTC would smear a local day
 across two buckets.
 
 A span is assigned **whole to its start-time bucket**; its cost is not split
@@ -239,23 +239,23 @@ caveats in `events.md` / `surfaces.md`):
   under `--since` / `--until` / `--last` the row itself says `UNUSED (window)`
   (inventory; the other views' empty states read "in the evaluation window").
 - A subagent run whose agent type was never recorded is shown as `(unknown)`,
-  never merged into a named type and never dropped — the per-agent rows must
+  never merged into a named type and never dropped ― the per-agent rows must
   keep summing to the subagent total the same report prints above them, for
   every run that could be extracted (the two cases below cover the runs that
   could not).
-- When they *cannot* sum to it — a store predating the per-agent split, read
-  with `--frozen` so the refresh that would fill it never ran — the report says
+- When they *cannot* sum to it ― a store predating the per-agent split, read
+  with `--frozen` so the refresh that would fill it never ran ― the report says
   so on stderr instead of letting an absent breakdown pass for a zero one
   (`storage.md`'s report-the-gap contract). It rides with the freshness line
   rather than in the table, so piped stdout and `--format json` stay clean.
-  Under a drawn window an empty split is usually the two time axes at work —
+  Under a drawn window an empty split is usually the two time axes at work ―
   the total reads the session's stamped start, the rows read each run's own
-  epoch — so the message names the window instead of pointing at a refresh
+  epoch ― so the message names the window instead of pointing at a refresh
   that cannot fill a straddle; the refresh hint stays without the flags.
-- When they sum to only *part* of it — sessions analyzed before runs were
+- When they sum to only *part* of it ― sessions analyzed before runs were
   extracted keep their totals (`storage.md`: the store outlives its inputs), but
   once Claude Code has pruned their transcripts no refresh can ever produce their
-  rows — the rows are labeled a **partial split** in-band, beside the numbers
+  rows ― the rows are labeled a **partial split** in-band, beside the numbers
   they qualify, because this is a property of the data and not a staleness a
   refresh could cure: `usage` prints the covered and uncovered figures between
   the total and the table, `doctor` states the gap before naming any agent, the
@@ -265,36 +265,36 @@ caveats in `events.md` / `surfaces.md`):
   uncovered tokens fall outside the report window instead of the
   pruned-transcript reason; without the flags the wording is unchanged.
   `doctor` introduces its top rows as "most of" the subagent output only when
-  they exceed half of the total — a long tail, or a partial split, gets a
+  they exceed half of the total ― a long tail, or a partial split, gets a
   wording that claims no more than the rows show.
 
 Meta-skills are not nested (`events.md`): a driver and the skills it ran are
 each their own span, so a child's cost lands on the child and no figure is
 silently double-counted.
 
-When **several caveats apply to one row** — e.g. a long `loop` span that is
+When **several caveats apply to one row** ― e.g. a long `loop` span that is
 trailing, holds equally-split subagent tokens, and is bucketed whole into one
-hour — the row is marked **low-confidence overall**, not merely tagged three
+hour ― the row is marked **low-confidence overall**, not merely tagged three
 times. Stacked approximations compound into exactly the kind of time-concentrated
 spike a reader over-trusts; one combined flag says "read this number loosely".
 
-## `sql` — query the store directly
+## `sql` ― query the store directly
 
 ```
 saniwalens sql [<query>] [--format table|markdown|json] [--db <path>]
 ```
 
-`sql` is the one read that never auto-refreshes — it opens the store strictly
+`sql` is the one read that never auto-refreshes ― it opens the store strictly
 read-only, so an ad-hoc query is reproducible and can never mutate anything.
 It prints the freshness header (store age) on stderr instead, so a stale read
 is at least visible.
 
 The store's own query surface: run an arbitrary read query and print the result.
-The query is the argument, or — when omitted — read from **stdin**, so both
+The query is the argument, or ― when omitted ― read from **stdin**, so both
 `saniwalens sql "SELECT …"` and `echo "SELECT …" | saniwalens sql` work (stdin
 sidesteps shell quoting for complex queries). This exists because the tool is a
-*session-analysis* tool: anyone wanting a slice the fixed views do not cover —
-notably the `optimize` session chasing a root cause — should query the analyzed
+*session-analysis* tool: anyone wanting a slice the fixed views do not cover ―
+notably the `optimize` session chasing a root cause ― should query the analyzed
 store, not re-parse the raw transcripts. The store is opened **read-only** so an
 ad-hoc query can never mutate the derived data, and an absent db is an error
 (run `analyze` first), not a silently-created empty one.
@@ -302,12 +302,12 @@ ad-hoc query can never mutate the derived data, and an absent db is an error
 A `tool_errors` view (`storage.md`) names the friction columns that are
 otherwise overloaded onto generic event columns (`category`, `excerpt`, `tool`,
 `target`, `project`), so a friction query reads cleanly without knowing the
-encoding — e.g. `SELECT target, COUNT(*) FROM tool_errors WHERE
+encoding ― e.g. `SELECT target, COUNT(*) FROM tool_errors WHERE
 category='edit-precondition' GROUP BY target` answers "which files keep failing
 to edit", which the error text alone cannot. `SELECT sql FROM sqlite_master`
 lists the full schema.
 
-## `optimize` — act on the findings with an advisor session
+## `optimize` ― act on the findings with an advisor session
 
 ```
 saniwalens optimize [--projects <dir>] [--db <path>] [--scope global|project[:<slug>]]
@@ -317,7 +317,7 @@ saniwalens optimize [--projects <dir>] [--db <path>] [--scope global|project[:<s
 The AI-proposal consumer (`architecture.md`): rather than emit static
 "recommendations" the tool cannot safely act on, `optimize` analyzes (unless
 `--frozen`, the same flag the views use), composes the findings with a prescribed advisor prompt, and
-launches the harness's agent seeded with it — `claude` for an interactive
+launches the harness's agent seeded with it ― `claude` for an interactive
 session that applies edits on agreement, `opencode run --format json` for a
 headless run that streams only the agent's text while the raw tool output
 logs to a private file (`--verbose` restores the raw stream) and prints the
@@ -326,7 +326,7 @@ the session **investigate autonomously to a conclusion**: it pins down each root
 cause and proposes a concrete fix, rather than handing the analysis back with a
 "which area do you want to start with?". It prioritises work friction over config
 size, verifies before recommending removal (an "unused" skill may be invoked by
-subagents) by inspecting rather than asking, and — in interactive runs — pauses for exactly one thing —
+subagents) by inspecting rather than asking, and ― in interactive runs ― pauses for exactly one thing ―
 approval of the concrete fix-plan before any file is edited. This "drive to a
 plan, gate only on applying it" shape is the design; if it changes, update
 `instructions` in `core::optimize` and this paragraph together.
@@ -334,9 +334,9 @@ plan, gate only on applying it" shape is the design; if it changes, update
 so the advisor identity, config locations, and raw-input pointers name the
 harness whose rows the briefing renders.
 
-Crucially the briefing is the **complete** analysis, not a headline — every
+Crucially the briefing is the **complete** analysis, not a headline ― every
 project's friction breakdown, the full Bash/hotspot/thrash detail, and the actual
-unused / always-on-heavy surface lists with startup-vs-body token costs — **routed the same way
+unused / always-on-heavy surface lists with startup-vs-body token costs ― **routed the same way
 the views are** (see "Scope"): global sections first, then one section per
 project, so the session fixes each finding in the layer that owns it. `--scope`
 restricts the briefing to one layer and prepends an explicit scope statement
@@ -344,14 +344,14 @@ restricts the briefing to one layer and prepends an explicit scope statement
 global setup" or "optimize this project" specifically. Each friction category
 also carries its **split across the originating tools** (`path-not-found` →
 `Bash 33, Read 29, Edit 9, playwright 7`) and a few **concrete example excerpts**
-— the actual failing paths/files behind the count (`events.md`: `tool_error`
-keeps the tool name and a short error-text excerpt) — so the fix is obvious from
+― the actual failing paths/files behind the count (`events.md`: `tool_error`
+keeps the tool name and a short error-text excerpt) ― so the fix is obvious from
 the briefing and the session need not re-mine the transcripts to attribute or
 locate the failures. The tool split also separates true file friction from a
 browser-automation miss that merely reads as "not found". The briefing is the
 *headline*; for any deeper slice (the full failing-path list, a worktree split,
 arbitrary groupings) the prompt directs the session to **query the store with
-`saniwalens sql`** rather than re-parse the raw transcripts in Python — the
+`saniwalens sql`** rather than re-parse the raw transcripts in Python ― the
 store is exactly the analysis surface saniwalens exists to provide. It still
 spends its effort on the evidence the store cannot hold (the real CLAUDE.md,
 rules, hooks). Embedding the headline plus pointing at the queryable store is
@@ -366,23 +366,23 @@ Private means **created exclusively** first and `0600` second: the temp dir is
 shared, so a same-user process that pre-creates the path as a symlink would
 capture the briefing no matter what mode was set afterwards. Where there is no
 mode to set (Windows), the per-user temp directory carries the guarantee
-instead. `--print` is the exception — it writes the full prompt (briefing inline)
+instead. `--print` is the exception ― it writes the full prompt (briefing inline)
 to stdout for piping / inspection, where the user has opted into seeing it.
 
 The split mirrors the rest of the tool: prompt composition is a pure transform
-(`core::optimize` — `render_briefing` for the Markdown report with empty sections
+(`core::optimize` ― `render_briefing` for the Markdown report with empty sections
 omitted and long lists capped, `instructions` for the role, `launch_prompt` for
 the argv pointer), and only the temp-file write and process launch are I/O.
 The findings themselves split the same way: the shell fetches the store's rows
 (`findings_input` in `cli.rs`) and hands them to the pure assembly in
-`core::findings` — the joins, the named caps (`TOP_COMMANDS_LIMIT`,
+`core::findings` ― the joins, the named caps (`TOP_COMMANDS_LIMIT`,
 `EXAMPLES_PER_CATEGORY`, `THRASH_LINES_PER_PROJECT`, …), the scope routing, and
-the ordering — so the briefing's wiring is unit-tested over small inputs and
+the ordering ― so the briefing's wiring is unit-tested over small inputs and
 only the queries and the print are I/O.
 
 The send is one seam: `deliver` runs a `DeliveryPlan` whose mode
 (`DeliveryMode::Print | Interactive | Headless`, chosen by `--print` over the
-harness's launch shape) picks the payload — `Print` writes the prompt to
+harness's launch shape) picks the payload ― `Print` writes the prompt to
 stdout, launch modes write the briefing to the private pointer file, hand the
 spawn to the `AdvisorLaunch` adapter, and remove the file the moment the run
 ends. Production wires `ProcessAdvisor` (inherited stdio, or `run_headless`'s
