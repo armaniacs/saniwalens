@@ -3,7 +3,7 @@
 //!
 //! `run()` arms used to repeat this wiring eleven times over: every command
 //! re-derived the same triple through free functions scattered across
-//! `cli.rs`. The last three real defects lived in that wiring, not in parsing
+//! `cli/mod.rs`. The last three real defects lived in that wiring, not in parsing
 //! or rendering, so it gets one module with one seam. See
 //! `docs/specs/cli.md`.
 

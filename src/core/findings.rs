@@ -1,6 +1,6 @@
 //! The briefing's findings assembly: pure wiring from fetched rows to
 //! `Findings`. The fetch (store queries) and the print stay with the shell
-//! (`cli.rs`); this module owns the HashMap joins, the caps, the routing, and
+//! (`cli/mod.rs`); this module owns the HashMap joins, the caps, the routing, and
 //! the sort — the parts whose bugs showed up as report glitches rather than
 //! wrong queries (`pbi/2026-10-29-04-feat-findings-assembly-core.md`).
 
@@ -31,7 +31,7 @@ pub const THRASH_GAP_SECS: i64 = 5 * 60;
 pub const THRASH_MIN_EDITS: u32 = 4;
 
 /// One catalog row as the assembly sees it: plain data, mapped from the
-/// store's row type by the fetch (`cli.rs`), so this module stays store-free.
+/// store's row type by the fetch (`cli/mod.rs`), so this module stays store-free.
 #[derive(Debug, Clone)]
 pub struct CatalogRow {
     pub kind: String,

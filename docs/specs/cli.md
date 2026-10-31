@@ -210,11 +210,13 @@ compare against is undefined.
   `started_at`) are **excluded** from a windowed `session_stats` /
   `subagent_totals` figure (`store.rs`'s `<> ''` guard) rather than guessed
   into it; without the flags they still count.
-- Every windowed figure above reads the store through `started_epoch`, and the
-  store grows with every analyze. The store declares the index that keeps those
-  reads fast (`storage.md`) and creates it on the next read-write open;
-  `--frozen` / `sql` (read-only) never create it, so a store not opened
-  read-write since it was declared keeps scanning. Watch the size with
+- The windowed readers that scan `events` read the store through
+  `started_epoch`, and the store grows with every analyze. The store declares
+  the index that keeps those reads fast (`storage.md`) and creates it on the
+  next read-write open; `--frozen` / `sql` (read-only) never create it, so a
+  store not opened read-write since it was declared keeps scanning. The
+  sessions-axis figures read `sessions.started_at` instead ― a small table no
+  index needs to serve. Watch the size with
   `saniwalens sql "SELECT COUNT(*) FROM events"`.
 
 ## Time bucketing
@@ -290,10 +292,11 @@ caveats in `events.md` / `surfaces.md`):
 - An `n/a` in `trend` states its real reason: the comparison's previous side
   holds no events of that kind, and the reason text is printed only when a
   report actually holds such a comparison. A metric a kind does not carry
-  renders no row at all ― the table omits it (`--format json` keeps every
-  kind's three metrics for its consumers) ― so the unavailable label is never
-  attached to a metric the store cannot measure, and a baseline that only
-  rounds to the displayed zero still compares.
+  renders no row at all ― the table omits it, so the unavailable label is
+  never attached to a metric the table does not show; `--format json` keeps
+  every kind's three metrics for its consumers, holding the same shape with a
+  null delta where the kind carries nothing, and a baseline that only rounds
+  to the displayed zero still compares.
 
 Meta-skills are not nested (`events.md`): a driver and the skills it ran are
 each their own span, so a child's cost lands on the child and no figure is
@@ -401,7 +404,7 @@ The split mirrors the rest of the tool: prompt composition is a pure transform
 omitted and long lists capped, `instructions` for the role, `launch_prompt` for
 the argv pointer), and only the temp-file write and process launch are I/O.
 The findings themselves split the same way: the shell fetches the store's rows
-(`findings_input` in `cli.rs`) and hands them to the pure assembly in
+(`findings_input` in `cli/mod.rs`) and hands them to the pure assembly in
 `core::findings` ― the joins, the named caps (`TOP_COMMANDS_LIMIT`,
 `EXAMPLES_PER_CATEGORY`, `THRASH_LINES_PER_PROJECT`, …), the scope routing, and
 the ordering ― so the briefing's wiring is unit-tested over small inputs and
