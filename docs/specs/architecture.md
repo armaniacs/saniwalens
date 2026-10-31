@@ -96,7 +96,7 @@ flowchart TD
 | Layer | Owns | Must NOT know |
 | --- | --- | --- |
 | **adapter** | The raw shapes of *both* inputs: transcript JSONL (record types, field names, `subagents/` layout) and config files (skill/rule frontmatter, `settings.json`, MCP schemas, `CLAUDE.md`). Maps them into the internal domain model. | The SQLite schema; how costs are computed. |
-| **core** | Event extraction, static-cost weighing inputs, the catalog×usage join, the briefing's findings assembly (`core::findings`), and aggregation ― all **pure functions** over the domain model. No I/O, no clock, no DB. | Claude Code field names or config path conventions; SQL. |
+| **core** | Event extraction, static-cost weighing inputs, the catalog×usage join, the trend view's two-window joins, the briefing's findings assembly (`core::findings`), and aggregation ― all **pure functions** over the domain model; a function that only shapes rows already fetched from the store is core's wherever it is called from today (the placement rule below). No I/O, no clock, no DB. | Claude Code field names or config path conventions; SQL. |
 | **store** | Persisting and querying `sessions` / `surfaces` / `events` in SQLite. | Raw input shapes. |
 | **report** | Turning query results into tables / Markdown and ranking wedges. In `src/`: `cli/mod.rs` (the shell, every view except trend, and the public CLI API), `cli/trend.rs` (the trend view and the one typed payload both its table and its JSON derive from), `cli/window.rs` (the windowed flag surface every view shares: the period flags declared once as clap args groups and the one windowed session-open dispatch the report arms resolve through), `cli/report.rs` (format, renderer, framing). A new view becomes one file under `cli/views/`, created when the next view lands; views never re-grow a shared file. The view-landing rule below makes that a per-PR obligation, not a remembered intention. | Raw input shapes; SQL beyond the store's API. |
 
@@ -123,6 +123,28 @@ The "next view" above is not left to memory. A PR that adds a `Command` variant
 
 The acceptance-criteria template every view-addition PBI carries is
 `.claude/rules/cli-view-addition.md`.
+
+### The pure-join placement rule (per PR)
+
+The core row's "shapes rows already fetched from the store" is not left to
+memory either. A pure join ― a pairing, ordering, or delta over in-memory
+values, no SQLite ― is core's wherever it is called from today
+(`.claude/rules/pure-join-placement.md`):
+
+- A new pure join is born in core, with its tests there; the store keeps the
+  query and the row hand-off, never the shaping. The one integration test
+  pinning the query→join window split
+  (`two_window_aggregation_splits_events_between_the_windows`) stays in
+  `store.rs` with the query it tests.
+- The trend view's two-window joins (`skill_deltas`, `TwoWindow`,
+  `SkillDelta`, `TrendWindowAggregates`) predate the rule and still sit in
+  `store.rs`. Their move is not a second, forgettable step: it rides the next
+  trend metric/view landing PR, and the 2nd SQLite-free function appearing in
+  `store.rs` fires the same obligation in the PR that lands it.
+- The trigger is grep-able, not a parser: the rule enumerates the symbols, and
+  `tests/pure_join_placement.rs` fails when the enumeration and `store.rs`
+  drift apart. When the move lands, the core row above, the rule's
+  enumeration, and the ledger's deferral note move with it in the same PR.
 
 The contract between adapter and everything else is the **internal domain
 model** ― tool-centric names stable across Claude Code releases. Renaming an

@@ -25,6 +25,7 @@ prematurely). A change to code maps to the spec that owns its concern:
 | Harness dispatch (`Harness::analyze`), per-harness input routes, and analyzer-version keys (the analyze seam) | `docs/specs/harness.md` |
 | Event extraction, metric computation, span/nesting, subagent attribution (the pure core) | `docs/specs/events.md` |
 | The configuration-surface catalog and the cost×usage join (optimization wedges) | `docs/specs/surfaces.md` |
+| Pure shaping of fetched rows (the trend two-window joins: pairing, ordering, deltas; core-bound by the placement rule even while they still sit in `src/store.rs`) | `docs/specs/cli.md` |
 | SQLite schema, incremental ingest, idempotency (the store layer) | `docs/specs/storage.md` |
 | CLI commands, flags, time bucketing, output formats | `docs/specs/cli.md` |
 | Layer boundaries, two-stage flow, resilience to upstream format changes (cross-cutting) | `docs/specs/architecture.md` |
