@@ -48,10 +48,10 @@ documents:
 - **Diagrams**: any Mermaid node that names a function, type, table, or file
   you just renamed or removed.
 - **Prose references**: renaming or moving a file dangles every prose path
-  that named it, in src doc comments, `docs/specs/`, README, and AGENTS.
-  Backticked `.rs` anchors in the current prose fail the reference gate
-  (`tests/prose_reference_gate.rs`) mechanically; doc comments and non-path
-  prose are invisible to it and still need the grep.
+  that named it, in src doc comments, `docs/specs/`, `.claude/rules/`, README,
+  and AGENTS. Backticked `.rs` anchors in the current prose fail the reference
+  gate (`tests/prose_reference_gate.rs`) mechanically; doc comments and
+  non-path prose are invisible to it and still need the grep.
 
 ## When the spec does NOT need to change
 

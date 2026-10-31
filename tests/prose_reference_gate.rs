@@ -1,5 +1,5 @@
-//! Prose reference-integrity gate for `docs/specs/*.md`, `README.md`, and
-//! `AGENTS.md` (PBI 35).
+//! Prose reference-integrity gate for `docs/specs/*.md`, `.claude/rules/*.md`,
+//! `README.md`, and `AGENTS.md` (PBI 35).
 //!
 //! A prose file-path reference lives outside the Rust symbol system, so nothing
 //! else fails when a file is renamed or moved and its prose anchors die: the
@@ -16,7 +16,9 @@
 //! they are skipped; double-backtick spans are not scanned. History
 //! (`docs/pr`, `docs/exploration`, `pbi/`, `CHANGELOG`) and src fixture strings
 //! are out of scope by construction — the scan list is the current prose only,
-//! so history stays untouched and cannot fail the gate.
+//! which is `docs/specs`, `.claude/rules`, README, and AGENTS (AGENTS.md points
+//! at `.claude/rules` as the project guardrails), so history stays untouched
+//! and cannot fail the gate.
 
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
@@ -100,20 +102,28 @@ fn file_misses(root: &Path, display: &str, text: &str) -> Vec<Miss> {
     misses
 }
 
-/// The current prose only: `docs/specs/*.md` plus `README.md` and `AGENTS.md`.
-/// `docs/pr`, `docs/exploration`, `pbi/`, and `CHANGELOG` are history and are
-/// deliberately absent — stale paths in history are records, not anchors.
-fn scan_files(root: &Path) -> Vec<PathBuf> {
-    let mut files = vec![root.join("README.md"), root.join("AGENTS.md")];
-    let specs = root.join("docs").join("specs");
-    let mut spec_files: Vec<PathBuf> = std::fs::read_dir(&specs)
-        .unwrap_or_else(|e| panic!("cannot list {}: {e}", specs.display()))
+/// Every `.md` file directly under one directory, sorted. Listing fails loud:
+/// a missing directory is a broken scan, not an empty one.
+fn md_files_under(root: &Path, dir: &Path) -> Vec<PathBuf> {
+    let base = root.join(dir);
+    let mut files: Vec<PathBuf> = std::fs::read_dir(&base)
+        .unwrap_or_else(|e| panic!("cannot list {}: {e}", base.display()))
         .filter_map(Result::ok)
         .map(|entry| entry.path())
         .filter(|path| path.extension().is_some_and(|ext| ext == OsStr::new("md")))
         .collect();
-    spec_files.sort();
-    files.extend(spec_files);
+    files.sort();
+    files
+}
+
+/// The current prose only: `docs/specs/*.md`, `.claude/rules/*.md`, plus
+/// `README.md` and `AGENTS.md`. `docs/pr`, `docs/exploration`, `pbi/`, and
+/// `CHANGELOG` are history and are deliberately absent — stale paths in
+/// history are records, not anchors.
+fn scan_files(root: &Path) -> Vec<PathBuf> {
+    let mut files = vec![root.join("README.md"), root.join("AGENTS.md")];
+    files.extend(md_files_under(root, Path::new("docs/specs")));
+    files.extend(md_files_under(root, Path::new(".claude/rules")));
     files
 }
 
@@ -135,8 +145,10 @@ fn collect_misses(root: &Path) -> Vec<Miss> {
 
 /// The miss list a failing gate prints: one line per anchor, then the remedy.
 fn format_misses(misses: &[Miss]) -> String {
-    let mut report =
-        String::from("dangling .rs references in prose (docs/specs/*.md, README.md, AGENTS.md):\n");
+    let mut report = String::from(
+        "dangling .rs references in prose (docs/specs/*.md, .claude/rules/*.md, \
+         README.md, AGENTS.md):\n",
+    );
     for miss in misses {
         report.push_str(&format!(
             "  {}:{}: `{}`\n",
@@ -145,8 +157,8 @@ fn format_misses(misses: &[Miss]) -> String {
     }
     report.push_str(
         "re-point each anchor at the renamed or moved file (src doc comments, \
-         docs/specs/, README, AGENTS); docs/pr, docs/exploration, pbi/ and \
-         CHANGELOG are history and out of scope.",
+         docs/specs/, .claude/rules/, README, AGENTS); docs/pr, \
+         docs/exploration, pbi/ and CHANGELOG are history and out of scope.",
     );
     report
 }
@@ -210,6 +222,9 @@ fn only_backticked_spans_are_anchors() {
     let refs = refs_in_line("plain foo.rs text, `cli/mod.rs` inline, `a.rs and b.rs` two names");
     assert_eq!(refs, vec!["cli/mod.rs"]);
     assert!(!is_rs_path(".rs"), "a bare .rs names no file");
+    // BDD: a double-backtick span (``src/foo.rs``) is no anchor either — the
+    // doubled backticks pair off into empty odd spans, so nothing is scanned.
+    assert_eq!(refs_in_line("``src/foo.rs``"), Vec::<&str>::new());
 }
 
 #[test]
@@ -252,15 +267,19 @@ fn the_scan_list_is_current_prose_only() {
     // `docs/exploration`, `pbi/`, and `CHANGELOG` hold stale paths as records;
     // the scan list never contains them, so history cannot fail the gate and
     // stays untouched. src fixture strings are .rs, never scanned at all.
+    // `.claude/rules` is current prose too (the guardrails AGENTS.md points
+    // at), so the scan list must contain it (PBI 36).
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let files = scan_files(root);
     assert!(files.contains(&root.join("README.md")));
     assert!(files.contains(&root.join("AGENTS.md")));
     assert!(files.contains(&root.join("docs/specs/harness.md")));
+    assert!(files.contains(&root.join(".claude/rules/spec-sync.md")));
     assert!(
         files.iter().all(|file| {
             let shown = file.to_string_lossy();
             shown.contains("docs/specs")
+                || shown.contains(".claude/rules")
                 || shown.ends_with("README.md")
                 || shown.ends_with("AGENTS.md")
         }),
