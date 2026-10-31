@@ -1,9 +1,9 @@
 # Storage Specification
 
 The store is the SQLite database `analyze` writes and every consumer reads
-(`architecture.md`). It holds the tables that mirror the catalog×usage model —
+(`architecture.md`). It holds the tables that mirror the catalog×usage model ―
 a shared `sessions` dimension, the `surfaces` catalog, the `events` spine, and
-`subagent_runs` for work that happened in its own transcript — plus
+`subagent_runs` for work that happened in its own transcript ― plus
 `ingested_files` for incremental rebuilds. This spec defines the schema and the
 ingest contract; the *meaning* of the columns lives in the specs that own them
 (`events.md`, `surfaces.md`, `config-format.md`).
@@ -109,7 +109,7 @@ CREATE TABLE meta (
 -- A clean read view over tool_error events for ad-hoc SQL (the `sql` command).
 -- The friction signal is overloaded onto generic event columns; the view names
 -- it and joins the project so a query need not know the encoding. The view
--- statement is generated from `EVENT_ENCODING` (`store.rs`) — the table below
+-- statement is generated from `EVENT_ENCODING` (`store.rs`) ― the table below
 -- is the definition, the view is a projection of it.
 CREATE VIEW tool_errors AS
 SELECT e.session_id, s.project,
@@ -121,7 +121,7 @@ WHERE e.kind = 'tool_error';
 
 ### Column encoding is defined once
 
-The generic columns carry kind-specific meanings — `tool_error`'s friction
+The generic columns carry kind-specific meanings ― `tool_error`'s friction
 category rides in `surface_id`, its excerpt in `source`, the originating tool
 in `model`; `file_edit` keeps the basename in `surface_id` and the full path in
 `target`; a prompt's behavioral class rides in `source`. That mapping is
@@ -130,7 +130,7 @@ from it: the `tool_errors` view is generated from the table, the readers take
 their column names from it (`encoding_column`), and the writer's `INSERT`
 columns for `tool_error` and `prompt` are spelled from it too. The work-event
 writer is the one place that fills physical columns without consulting the
-table — one statement spans several kinds, so the meaning a row's value carries
+table ― one statement spans several kinds, so the meaning a row's value carries
 depends on its `kind`, which is read back through the table.
 
 A new event kind is therefore a row in the table, not an edit scattered across
@@ -144,12 +144,12 @@ The `REFERENCES` annotations above record which column joins which table; they
 are **not declared constraints**. SQLite does not enforce foreign keys unless
 `PRAGMA foreign_keys` is on, and turning it on would constrain the order a
 delete-then-insert re-ingest may touch the tables in, for no integrity this
-single-writer store does not already have — so the schema states the
+single-writer store does not already have ― so the schema states the
 relationship and the ingest code maintains it (per `source_path`, below).
 
 The store is also a **read surface for arbitrary queries** (`cli.md`: `sql`).
 Because it is plain SQLite holding already-extracted facts, the session-analysis
-slices a consumer might want — the `optimize` agent chasing a root cause, say —
+slices a consumer might want ― the `optimize` agent chasing a root cause, say ―
 are a `SELECT` away, which is cheaper and less error-prone than re-parsing the
 raw transcripts. `sql` opens the db **read-only**
 (`Store::open(path, OpenMode::ReadOnly)`) so an
@@ -164,11 +164,11 @@ it often. This is what keeps "add a new surface" a non-migrating change.
 
 A `prompt` event stores `(source_path, source_line)`, not the prompt string. The
 future skill-extraction layer (clustering recurring prompts into candidate
-skills — `architecture.md`) recovers the text by re-reading that line on demand.
+skills ― `architecture.md`) recovers the text by re-reading that line on demand.
 This keeps personal data out of the store (`.claude/rules/session-data-privacy.md`)
 while reserving the capability now, so it survives transcript rotation: the
-pointer is cheap to keep and the alternative — discovering later that the text is
-gone — is unrecoverable. (If the source file is rotated away, the pointer simply
+pointer is cheap to keep and the alternative ― discovering later that the text is
+gone ― is unrecoverable. (If the source file is rotated away, the pointer simply
 resolves to nothing; the event's counts remain.)
 
 ### The store file is owner-only
@@ -176,8 +176,8 @@ resolves to nothing; the event's counts remain.)
 What survives ingestion is still sensitive: file paths, tool-error excerpts,
 project names, and pointers back into the raw transcripts. Since the default
 store is a single well-known user-level path shared by every project
-(`cli.md`), the umask default — commonly a group/world-readable `0755`
-directory and `0644` file — would expose that aggregate to other local
+(`cli.md`), the umask default ― commonly a group/world-readable `0755`
+directory and `0644` file ― would expose that aggregate to other local
 accounts. `Store::open` therefore creates the directory `0700` and the store
 `0600`, matching how the `optimize` briefing (carrying the same class of data)
 is written.
@@ -186,12 +186,12 @@ The store file is created by `Store::open` itself rather than chmod'ed after
 SQLite creates it, which is what keeps the guarantee airtight: the schema write
 would otherwise land in a file still carrying the umask mode, and SQLite copies
 the database's mode onto the rollback journal it writes beside it, so the
-journal inherits `0600` for free. An **existing** store is narrowed as well —
+journal inherits `0600` for free. An **existing** store is narrowed as well ―
 a store an older saniwalens created under the umask is the case that actually
 exists, and a permanently exposed one would mean this protection never reaches
 anyone who already ran the tool. Only a regular file is re-moded, so a `--db`
 pointing at a directory still fails at SQLite rather than being silently
-re-moded, and a store owned by another account is left as it is — re-moding it
+re-moded, and a store owned by another account is left as it is ― re-moding it
 is not this process's call, and refusing to run over it would break a store
 legitimately created under another user.
 
@@ -200,14 +200,14 @@ legitimately created under another user.
 `surfaces` is keyed `(kind, id, scope, project)` because the same logical
 surface can be installed globally and in **any number of projects** (e.g. a
 `git-commit` skill in `~/.claude/skills/` and in two projects'
-`.claude/skills/`). Events carry only `(surface_kind, surface_id)` — the
-transcript does not reveal which copy was loaded — but they *do* join a session
+`.claude/skills/`). Events carry only `(surface_kind, surface_id)` ― the
+transcript does not reveal which copy was loaded ― but they *do* join a session
 whose `project` is known, and Claude Code's own resolution makes a project's
 copy shadow the global one **inside that project only**.
 
 So the catalog×usage join is defined per session project: an event from project
 P joins P's project row for that `(kind, id)` when one exists, else the global
-row. The join stays strictly 1:N-safe — one event never matches two surface
+row. The join stays strictly 1:N-safe ― one event never matches two surface
 rows, and one project's usage never inflates another project's copy
 (`Store::effective_catalog`). Scope and project are retained on every catalog
 row so reports can route a finding to the config layer that owns the fix
@@ -236,7 +236,7 @@ every per-project wedge, not a presentation detail.
 
 `sessions.root` folds by the same rule one level down, on the real path rather
 than the slug. The two must agree: the slug form keys on a `--wt-` infix and is
-separator-free, so the path form accepts **either separator** — otherwise a
+separator-free, so the path form accepts **either separator** ― otherwise a
 worktree recorded on Windows folds by `project` while `root` stays split, and
 per-root config scanning (`config-format.md`) sees two roots where there is one
 checkout.
@@ -245,14 +245,14 @@ checkout.
 
 The store outlives its inputs. Claude Code prunes transcripts on its own
 retention schedule, and once a transcript is gone the rows extracted from it are
-the only surviving record of that session — nothing on disk can rebuild them.
+the only surviving record of that session ― nothing on disk can rebuild them.
 So an upgrade may never resolve schema drift by asking for the file to be
 deleted; `Store::open` migrates in place instead (`migrate` in `store.rs`).
 
 The declared schema is the single source of truth for the target shape: it is
 applied to a scratch in-memory database and read back through
 `PRAGMA table_info`, and the live store is reconciled against that. Adding a
-column to the declaration is therefore the whole of a routine migration — there
+column to the declaration is therefore the whole of a routine migration ― there
 is no parallel list of ALTER statements to keep in step, which is what made the
 previous "detect a missing column, refuse the file" check drift into a
 delete-and-lose-history instruction.
@@ -262,20 +262,20 @@ Drift is reconciled per object by what that object costs to lose:
 - `sessions`, `events`, `ingested_files`, `meta` hold history, so a missing
   column is appended with `ALTER TABLE ADD COLUMN`. Existing rows take the
   column's default, which the "report the gap, never substitute" contract below
-  already covers. A column that is already present is **compared, not skipped** —
+  already covers. A column that is already present is **compared, not skipped** ―
   matching on name alone would pass silently over a retype or a changed default,
   leaving the store permanently diverged from the declaration it is meant to
   converge on.
 - `surfaces` is a snapshot of live config rebuilt on every analyze, so a shape
-  change drops and recreates it. The shape is compared first — an unchanged
+  change drops and recreates it. The shape is compared first ― an unchanged
   catalog must survive reopening, or a `--frozen` read would report an empty one.
   When it *is* rebuilt, `analyzed_at` is cleared, so a `--frozen` read is routed
   to the freshness warning instead of printing an ordinary header over an empty
   catalog.
 - Indexes and views carry no data, so a drifted one is simply dropped and
   recreated. Only a *drifted* one: `CREATE INDEX / VIEW IF NOT EXISTS` would keep
-  a stale definition — a reader would then silently query yesterday's column
-  mapping — but reindexing `events` on every open is not free either, so the
+  a stale definition ― a reader would then silently query yesterday's column
+  mapping ― but reindexing `events` on every open is not free either, so the
   stored `CREATE` statement is compared against the declared one and matched
   objects are left untouched. Objects the declaration does not name are also left
   untouched: the store is meant to be explored with ad-hoc SQL, so a helper view
@@ -284,7 +284,7 @@ Drift is reconciled per object by what that object costs to lose:
 Indexes and views are **declared apart from the tables**, in their own constants,
 and applied only after column reconciliation. Declared alongside the table they
 would be replayed by the same `execute_batch` that creates missing tables, before
-any column was added — so an index over a column a future release introduces
+any column was added ― so an index over a column a future release introduces
 would hit `no such column` on a legacy store and take the whole migration down,
 which is the destructive refusal this design exists to remove. Deriving the names
 to reconcile from the declaration is also what removes a hand-kept list: such a
@@ -298,14 +298,14 @@ half-migrated is the outcome in-place upgrading exists to avoid.
 `PRAGMA user_version` carries `SCHEMA_VERSION`. Reconciliation only ever adds, so
 routine additive changes do not bump it; it exists to catch what reconciliation
 cannot express. A store stamped **newer** than this build is refused rather than
-written to — this build's shape would overwrite changes it does not understand,
+written to ― this build's shape would overwrite changes it does not understand,
 in a file the newer binary still reads correctly. The version is also the seam
 for a future change that reconciliation cannot cover (a column removed, retyped,
 or given a new meaning). Reconciliation now *fails* on such drift rather than
 ignoring it, so the seam cannot be skipped by accident; the migration written to
 fill it must state what it discards, because the answer is no longer "nothing".
 
-`Store::open(path, OpenMode::ReadOnly)` (the `sql` command) cannot migrate —
+`Store::open(path, OpenMode::ReadOnly)` (the `sql` command) cannot migrate ―
 the mode argument is the typed statement of which guarantee applies: `ReadWrite`
 creates the file, narrows it to owner-only, and migrates in place; `ReadOnly`
 does none of the three. An ad-hoc query against a store older than this build
@@ -320,13 +320,13 @@ Transcripts are append-only and **active sessions keep growing**, so re-running
 ### One transcript, one batch
 
 `Store::ingest(IngestBatch)` is the only way rows enter the store. A caller
-submits everything one transcript yielded — session meta, spans, usage events,
-prompts, subagent runs, tool errors, work events — and the store applies it in
+submits everything one transcript yielded ― session meta, spans, usage events,
+prompts, subagent runs, tool errors, work events ― and the store applies it in
 **one transaction, in its own order**: the session row (insert-or-replace), the
 delete of everything this file previously put in `events`, then each child set,
 then the spawn-cost settle that reads the spawn events it just wrote. The order
-the old five-function API demanded of its callers — `ingest_session` first, or
-its delete silently dropped the children — is no longer a convention to
+the old five-function API demanded of its callers ― `ingest_session` first, or
+its delete silently dropped the children ― is no longer a convention to
 remember: no entry point expresses it. Re-ingest of the same file is the same
 batch twice, which the replace contract below makes idempotent, and a batch's
 atomicity means a failure mid-ingest leaves the previous rows intact rather
@@ -338,27 +338,27 @@ than a half-replaced file.
   equals this file, then re-extract from the whole file and insert. This is why
   `events.source_path` exists. Replacing avoids duplicate rows when a still-open
   session is analyzed twice (the second pass simply supersedes the first).
-  `subagent_runs` replaces on the same key — the parent transcript's path, not
-  the subagent's — so one session's runs are rebuilt as a set, and a run whose
+  `subagent_runs` replaces on the same key ― the parent transcript's path, not
+  the subagent's ― so one session's runs are rebuilt as a set, and a run whose
   own transcript vanished does not survive as an orphan. The subagent files
   themselves are deliberately **not** fingerprinted: a subagent's completion
   appends its `tool_result` to the *main* transcript, so the parent's own
   fingerprint already moves when a child finishes, and the next run re-reads the
   whole directory. Stat-ing every file under `subagents/` on every run would buy
   only the case of a session killed between the child finishing and that
-  `tool_result` being written — where the session's data is incomplete anyway. Filling an
+  `tool_result` being written ― where the session's data is incomplete anyway. Filling an
   `agent_spawn` row's cost from those runs is scoped to that same key: a call id
   is unique **within** a session, and nothing guarantees it across sessions
   (a resumed or copied transcript can carry one over), so an unscoped join would
   pick an arbitrary row and sum another session's runs on top.
-- `surfaces` is rebuilt wholesale on each run from current config — the catalog
+- `surfaces` is rebuilt wholesale on each run from current config ― the catalog
   is a snapshot of *now*, not an accumulation. (Usage is historical; catalog is
-  current — `surfaces.md`.)
+  current ― `surfaces.md`.)
 
 The fingerprint is keyed on the *file*, not on what saniwalens knew how to extract
 from it. On its own that skip never expires: a session that has closed will never
 change again, so its rows would stay pinned to whatever the saniwalens that first read
-them understood — an event kind added later stays missing for that session, a
+them understood ― an event kind added later stays missing for that session, a
 field added later stays NULL, and a classifier that learned a new pattern never
 reaches it.
 
@@ -367,11 +367,11 @@ the stored rows were produced by; a run whose version differs from the store's
 ignores the fingerprint skip, re-ingests every transcript once (replace, per
 above, so this is safe to repeat), and stamps the new value. Bump it whenever
 extraction or classification changes what an *unchanged* transcript yields. It is
-deliberately not the crate version — a release that changes no analysis should not
+deliberately not the crate version ― a release that changes no analysis should not
 cost every user a full re-analyze. The Claude Code pair lives with its mapping in
 `adapter::transcript` (`CLAUDE_ANALYZER_META_KEY` / `CLAUDE_ANALYZER_VERSION`);
 each other harness carries its own beside its own mapping (`harness.md`), and
-`Store::is_analyzer_current(key, version)` compares whatever it is handed — the
+`Store::is_analyzer_current(key, version)` compares whatever it is handed ― the
 store owns no harness's key.
 
 Invalidation only recovers what the transcript actually holds. Where a signal was
@@ -399,7 +399,7 @@ if the cheap detector proves insufficient.
 Active sessions are appended to while `analyze` runs, so the reader must tolerate
 a **torn read**: a partial final line is skipped (JSONL append is not atomic at
 line granularity), never parsed as a broken record. The fingerprint stored in
-`ingested_files` is captured **after** the read completes — recording the size
+`ingested_files` is captured **after** the read completes ― recording the size
 actually consumed. A file that grew during the read therefore shows a changed
 `(mtime, size)` on the next run and is re-ingested, picking up the tail. Stamping
 the fingerprint before the read would record the post-growth size against
@@ -412,10 +412,10 @@ rules, hooks, MCP, or prompts without contortion, and it conflated the catalog
 (what is installed) with usage (what ran). Splitting into `sessions` (dimension)
 + `surfaces` (catalog) + `events` (usage) lets every configuration surface share
 one usage spine and one catalog shape, and makes the optimization analysis a
-join rather than a special case per surface — see `surfaces.md`.
+join rather than a special case per surface ― see `surfaces.md`.
 
 `subagent_runs` sits beside the spine rather than in it because a run is not an
-event *of the session* — it happened in another transcript, on another thread,
+event *of the session* ― it happened in another transcript, on another thread,
 and its cost was measured there. Putting it in `events` with `surface_kind =
 'agent'` would double-count every spawn in the catalog×usage join, which counts
 rows per surface. The spine keeps the main thread's spawn; the run keeps the

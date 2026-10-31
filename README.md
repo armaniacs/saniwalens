@@ -3,7 +3,7 @@
 A lens onto your coding-agent usage. `saniwalens` reads your agent session
 transcripts and
 live configuration, extracts them into a local SQLite store, and shows **where
-time, tokens, and effort are being wasted — and how to fix it**: unused or heavy
+time, tokens, and effort are being wasted ― and how to fix it**: unused or heavy
 config, recurring tool failures, where the work gets stuck, and the cost picture
 behind it all.
 
@@ -33,7 +33,7 @@ nix profile install github:armaniacs/saniwalens  # install `saniwalens` onto PAT
 nix profile install github:armaniacs/saniwalens/vX.Y.Z  # a specific release
 ```
 
-From source — dev tools are pinned by the Nix flake, tasks run via `just`:
+From source ― dev tools are pinned by the Nix flake, tasks run via `just`:
 
 ```sh
 nix develop          # enter the dev shell (pinned rust, just, sqlite, …)
@@ -65,14 +65,14 @@ carries the tag in it (see
 The tap covers Linux and macOS only; on Windows, take the `-pc-windows-msvc`
 archive for your arch from the release, or build from source. `CLAUDE_CONFIG_DIR`
 names the config tree directly when it is set to a non-empty path, as it does
-for Claude Code itself. Otherwise — including when the variable is set but
-empty — `~/.claude` is located through `HOME`, falling back to `USERPROFILE`
+for Claude Code itself. Otherwise ― including when the variable is set but
+empty ― `~/.claude` is located through `HOME`, falling back to `USERPROFILE`
 where Windows leaves `HOME` unset.
 
 ## Quick start
 
 ```sh
-# 1. Start here — a one-screen health check, split into what to fix globally
+# 1. Start here ― a one-screen health check, split into what to fix globally
 #    (~/.claude) vs per project. Analyzes automatically on first run.
 saniwalens doctor
 
@@ -85,11 +85,11 @@ saniwalens doctor --scope project:<slug>
 saniwalens optimize --scope global
 ```
 
-Analysis reads your transcripts (`~/.claude/projects`) and live config —
-`~/.claude/*` plus each analyzed project's own `.claude/` / `CLAUDE.md` —
+Analysis reads your transcripts (`~/.claude/projects`) and live config ―
+`~/.claude/*` plus each analyzed project's own `.claude/` / `CLAUDE.md` ―
 **read-only** and incrementally, writing the store. Nothing is sent anywhere;
 the store is a local file. Every command takes `--db <path>`; it defaults to
-`${XDG_STATE_HOME:-~/.local/state}/saniwalens/saniwalens.db` — one per-user store,
+`${XDG_STATE_HOME:-~/.local/state}/saniwalens/saniwalens.db` ― one per-user store,
 because what is analyzed spans every project, not the directory you run from.
 Pass `--db ./saniwalens.db` if you deliberately want a project-local one (and
 `.gitignore` it). Read commands refresh the store automatically before reporting
@@ -108,14 +108,14 @@ saniwalens optimize --harness kilocode     # opens an interactive `kilo --prompt
 ```
 
 Each harness keeps its own store (`saniwalens-opencode.db`, `saniwalens-kilocode.db`)
-and reads its own config — `~/.config/opencode/`, `~/.config/kilo/` plus each
-analyzed project's own files — so findings stay per harness, never mixed. The
+and reads its own config ― `~/.config/opencode/`, `~/.config/kilo/` plus each
+analyzed project's own files ― so findings stay per harness, never mixed. The
 flag is explicit and the default stays `claude`; [`docs/specs/harness.md`](docs/specs/harness.md)
 holds the per-harness contract.
 
 ## Config file
 
-Defaults live in `~/.config/saniwalens/config.toml` (optional — without it
+Defaults live in `~/.config/saniwalens/config.toml` (optional ― without it
 everything behaves as before):
 
 ```toml
@@ -136,7 +136,7 @@ the resolution order.
 
 | Command | What it does |
 | --- | --- |
-| `saniwalens doctor` | The health check, split global / per-project — **start here**. |
+| `saniwalens doctor` | The health check, split global / per-project ― **start here**. |
 | `saniwalens analyze` | Extract transcripts + config into the store (incremental). Reads run it automatically. |
 | `saniwalens sql '<query>'` | Run an arbitrary read-only SQL query against the store (see below). |
 | `saniwalens optimize` | Hand the findings to an interactive `claude` session to act on. |
@@ -145,14 +145,14 @@ the resolution order.
 `waste`, `inventory`, `optimize`) restricts a report to the config layer being
 optimized: an unused/heavy config finding routes by where that file is
 installed, and a recurring failure belongs to the project that owns a strict
-majority of it — otherwise it is a cross-project habit and shows up as global.
+majority of it ― otherwise it is a cross-project habit and shows up as global.
 
 ### Views
 
 Each is a curated lens that carries logic a raw query cannot (a classification,
 an algorithm, a suggestion). Add `--format markdown` to paste into a PR or
 note, or `--format json` (every command, `doctor` and `analyze` included) for
-typed machine-readable output — stdout carries nothing but the JSON, since all
+typed machine-readable output ― stdout carries nothing but the JSON, since all
 freshness chatter goes to stderr. Human output is colorized on a terminal;
 `NO_COLOR` or piping turns it off.
 
@@ -170,9 +170,9 @@ saniwalens prompts                # how you steer the session (steer/correct/que
 saniwalens stuck                 # files Claude got stuck re-editing in rapid bursts
 ```
 
-### `sql` — query the store directly
+### `sql` ― query the store directly
 
-Anything the curated views don't cover is a SQL query — the store is the whole
+Anything the curated views don't cover is a SQL query ― the store is the whole
 point. The query is an argument, or read from **stdin**:
 
 ```sh
@@ -192,26 +192,26 @@ derived store.
 
 ## What it covers
 
-- **Every configuration surface** — skills, rules, agents, MCP servers,
-  `CLAUDE.md` / `AGENTS.md` — catalogued with its startup and on-demand token costs and load
+- **Every configuration surface** ― skills, rules, agents, MCP servers,
+  `CLAUDE.md` / `AGENTS.md` ― catalogued with its startup and on-demand token costs and load
   mode, joined
   against actual usage to flag unused (delete), always-on heavy (slim), and
   costly+rare (trim).
-- **Where the work stumbles** — recurring tool failures by category and
+- **Where the work stumbles** ― recurring tool failures by category and
   originating tool (`failures`), files the agent got stuck re-editing (`stuck`),
   each with concrete examples and the project it concentrates in.
-- **Where tokens go** — main-thread skill output vs. subagent cost, the subagent
+- **Where tokens go** ― main-thread skill output vs. subagent cost, the subagent
   half split per agent type (which agents actually spent it, nested spawns
   included), and the always-on context floor reconciled against your readable
   config (the residual is system + tools + MCP you cannot trim from files).
-- **How you prompt** — the steer / correct / question / instruct mix.
+- **How you prompt** ― the steer / correct / question / instruct mix.
 
 ## Notes
 
 - Counts are usage signals for ranking, **not a billing ledger**; static cost is
   a token estimate, not a measured runtime figure.
 - The store outlives your transcripts. Claude Code prunes those on its own
-  retention schedule, and saniwalens keeps the rows it already extracted — so the db
+  retention schedule, and saniwalens keeps the rows it already extracted ― so the db
   holds history that `~/.claude/projects` no longer can, and deleting it is a
   real loss, not a cache flush. That is why it lives under
   `${XDG_STATE_HOME:-~/.local/state}/saniwalens/` rather than a cache directory a
@@ -222,5 +222,5 @@ derived store.
   findings; the briefing is written to a private temp file, never passed on
   the command line.
 - Not yet implemented (see [`docs/specs/`](docs/specs/)): meta-skill (`loop`)
-  nesting — a pending design decision on detecting parent/child from the
+  nesting ― a pending design decision on detecting parent/child from the
   transcript.
