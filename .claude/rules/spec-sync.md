@@ -4,24 +4,25 @@ paths:
   - "docs/specs/**/*.md"
 ---
 
-# Spec Sync — Update `docs/specs/` Together With Code
+# Spec Sync ― Update `docs/specs/` Together With Code
 
 The specs under `docs/specs/` capture **design intent** (the *why* and the
 contract). When code drifts and the spec is not updated in the same change, the
 spec turns into misinformation that future you (or a coding agent) will rely on.
-Treat the spec as part of the source — not as documentation that "someone will
+Treat the spec as part of the source ― not as documentation that "someone will
 fix later."
 
 ## Code → Spec Map
 
 The mapping is convention-based, by **concern**, not by an enumerated module
-list (the module layout is still emerging — do not pin it down here
+list (the module layout is still emerging ― do not pin it down here
 prematurely). A change to code maps to the spec that owns its concern:
 
 | Concern in code | Owning spec |
 | --- | --- |
 | Raw transcript parsing (record types, field names, file layout) | `docs/specs/session-format.md` |
 | Config parsing (skills, rules, `settings.json`, MCP schemas, `CLAUDE.md`) and static-cost weighing | `docs/specs/config-format.md` |
+| Harness dispatch (`Harness::analyze`), per-harness input routes, and analyzer-version keys (the analyze seam) | `docs/specs/harness.md` |
 | Event extraction, metric computation, span/nesting, subagent attribution (the pure core) | `docs/specs/events.md` |
 | The configuration-surface catalog and the cost×usage join (optimization wedges) | `docs/specs/surfaces.md` |
 | SQLite schema, incremental ingest, idempotency (the store layer) | `docs/specs/storage.md` |
@@ -46,25 +47,32 @@ documents:
   two-stage flow.
 - **Diagrams**: any Mermaid node that names a function, type, table, or file
   you just renamed or removed.
+- **Prose references**: renaming or moving a file dangles every prose path
+  that named it, in src doc comments, `docs/specs/`, README, and AGENTS.
+  Backticked `.rs` anchors in the current prose fail the reference gate
+  (`tests/prose_reference_gate.rs`) mechanically; doc comments and non-path
+  prose are invisible to it and still need the grep.
 
 ## When the spec does NOT need to change
 
 Spec-clean edits: bug fixes preserving the documented contract, internal
 refactors invisible from outside the module, test additions, comment/formatting,
 performance work with no behavior or surface change. If unsure, default to
-updating — a small unnecessary edit costs far less than stale docs.
+updating ― a small unnecessary edit costs far less than stale docs.
 
 ## How to update the spec
 
 Edit the relevant existing section in place; do not append a new section at the
-end. Lead with **why** — for "what" details, link into the source
+end. Lead with **why** ― for "what" details, link into the source
 (`see {file}.rs`). When a documented name is renamed or removed, grep
-`docs/specs/` for the old name before finishing — Mermaid diagrams embed names
-as plain strings and slip past `cargo check`.
+`docs/specs/` for the old name before finishing ― Mermaid diagrams embed names
+as plain strings and slip past `cargo check`; backticked `.rs` paths are
+prose, not symbols, so the reference gate (`tests/prose_reference_gate.rs`)
+is the guarantee that catches the dangling ones.
 
 ## Anti-patterns
 
 - No "being updated, see #1234" stubs. Either update the spec or revert the code.
-- No TODO comments parked in the spec — spec TODOs become permanent.
+- No TODO comments parked in the spec ― spec TODOs become permanent.
 - Don't duplicate a doc comment verbatim; the spec adds the context the comment
   cannot (why this design beat alternatives, what it deliberately omits).
