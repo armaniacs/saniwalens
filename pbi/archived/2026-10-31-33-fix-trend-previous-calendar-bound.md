@@ -60,28 +60,28 @@ Scenario: 通常の trend は何も変わらない
 ```
 
 ## 受け入れ基準
-- [ ] `resolve_pair` の `--last` 分岐で `previous_start` の `checked_sub`
+- [x] `resolve_pair` の `--last` 分岐で `previous_start` の `checked_sub`
   チェーンに `.filter(|p| in_calendar(*p))` を加え、同一の
   `invalid_span_error` で拒む（1 行の対称拡張、chokepoint 維持）
-- [ ] `previous.end` の冗長検査は加えない（current 側で推移的に暦内に収まる。
+- [x] `previous.end` の冗長検査は加えない（current 側で推移的に暦内に収まる。
   足すなら defensive である旨を PBI の判断として明記）
-- [ ] タイリング不変 `previous.end == current.start - 1`
+- [x] タイリング不変 `previous.end == current.start - 1`
   （src/core/period.rs:464 付近）と +1 シフト（:136 付近）を壊さない
-- [ ] `--since` 経路の太古入力は、`--since` を名指す empty-window 系エラーで
+- [x] `--since` 経路の太古入力は、`--since` を名指す empty-window 系エラーで
   拒む（invalid --last の文言を使わない。日付由来の入力に嘘をつけない）
-- [ ] 性質テスト `every_accepted_window_renders_non_empty_bounds`
+- [x] 性質テスト `every_accepted_window_renders_non_empty_bounds`
   （src/core/period.rs:617-642 付近、現状は例ベースで Ok 腕が小窓のみ）を
   now 注入の両暦端スイープに拡張し、offset 描画込みで非空 bounds を pin する
   （UTC 対 tz のエッジの観測面も同時に閉じる）
-- [ ] spec 3 箇所更新: `docs/specs/cli.md` の期間解釈節（導出される previous
+- [x] spec 3 箇所更新: `docs/specs/cli.md` の期間解釈節（導出される previous
   窓の語彙、192-194 行目付近）、Reporting honesty（導出窓を含める、256-262
   行目付近）、Views 表（tiling 行、134 行目付近の「Both windows' ranges are
   disclosed」が導出窓を含む旨）
-- [ ] テスト: `resolve_pair(None, None, Some("50000000d"))` が Err（現状 Ok で
+- [x] テスト: `resolve_pair(None, None, Some("50000000d"))` が Err（現状 Ok で
   Red から）、now 注入での境界 pin（PBI 29 の edges テストのペア版）、
   `--since=-200000-01-01` がエラー（必ず equals 形）、E2E は
   `tests/period_errors.rs` に隣接追加
-- [ ] `just check` と `cargo test` が green
+- [x] `just check` と `cargo test` が green
 
 ## テスト戦略（t_wadaスタイル）
 
@@ -146,7 +146,7 @@ Scenario: 通常の trend は何も変わらない
   （入口で既に守られている）
 
 ## Definition of Done
-- [ ] 全 BDD シナリオが自動テストとして実装されパスする
-- [ ] `just check` と `cargo test` が green（既存期間系テスト含む）
-- [ ] コードレビュー完了（task review + 最終 review）
-- [ ] docs/specs/cli.md 更新済み（期間解釈 + Reporting honesty + Views 表）
+- [x] 全 BDD シナリオが自動テストとして実装されパスする
+- [x] `just check` と `cargo test` が green（既存期間系テスト含む）
+- [x] コードレビュー完了（task review + 最終 review）
+- [x] docs/specs/cli.md 更新済み（期間解釈 + Reporting honesty + Views 表）

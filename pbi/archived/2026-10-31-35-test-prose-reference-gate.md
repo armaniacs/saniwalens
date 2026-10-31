@@ -66,28 +66,28 @@ Scenario: 履歴と fixture は対象外である
 ```
 
 ## 受け入れ基準
-- [ ] `docs/specs/harness.md:202` を現行錨に張り替える（単純置換で終わらせず、
+- [x] `docs/specs/harness.md:202` を現行錨に張り替える（単純置換で終わらせず、
   guard の所在も述べる形: `cli/mod.rs` の `run_analyze` と `session.rs` の
   `guard_harness`）。:226 を `cli/mod.rs` に張り替える
-- [ ] 参照整合 gate を実装する: docs/specs/*.md + README.md + AGENTS.md 内の
+- [x] 参照整合 gate を実装する: docs/specs/*.md + README.md + AGENTS.md 内の
   バッククォートで括られた .rs 参照を抽出し、src/ と src/adapter/ で存在
   確認、miss で非ゼロ終了 + miss 一覧の出力
-- [ ] gate は **cargo test** として実装する（`tests/` 配下の 1 ファイル。
+- [x] gate は **cargo test** として実装する（`tests/` 配下の 1 ファイル。
   CI の 5 job が全 cargo ベースで `just` に依存しない。CARGO_MANIFEST_DIR か
   workspace 相対で docs を解決する）
-- [ ] 曖昧 3 件（config.rs x 2、transcript.rs x 1）の解決規則を固定し、
+- [x] 曖昧 3 件（config.rs x 2、transcript.rs x 1）の解決規則を固定し、
   docs/specs/ 内の表記を統一する（src/ 配下か src/adapter/ 配下かを docs 側
   で明記）
-- [ ] `.claude/rules/spec-sync.md` 更新: MUST-change に「改名 / 移動した
+- [x] `.claude/rules/spec-sync.md` 更新: MUST-change に「改名 / 移動した
   ファイルへの prose 参照（src doc comments、docs/specs/、README、AGENTS）」
   を明記し、Code→Spec map に harness.md 行を追加する
-- [ ] gate のスコープを厳守する: docs/pr、docs/exploration、pbi、CHANGELOG、
+- [x] gate のスコープを厳守する: docs/pr、docs/exploration、pbi、CHANGELOG、
   src 内 fixture 文字列（adapter/transcript.rs、adapter/opencode.rs の
   `cli.rs` はテストフィクスチャ）は対象外
-- [ ] 未着手 PBI 04 / 05 / 06 / 12-15 の「src/cli.rs」指示を同一 docs pass で
+- [x] 未着手 PBI 04 / 05 / 06 / 12-15 の「src/cli.rs」指示を同一 docs pass で
   揃える価値を判断する（触れるなら実装指示として現行パスに。完了 PBI と
   CHANGELOG は履歴として触れない）
-- [ ] `just check` と `cargo test` が green（gate 通過）
+- [x] `just check` と `cargo test` が green（gate 通過）
 
 ## テスト戦略（t_wadaスタイル）
 
@@ -147,9 +147,9 @@ PBI 過剰だが、gate と規約更新を含むため PBI 1 本が妥当 ― PB
 - `.claude/rules/` の .md も docs-charset の対象（CP932 範囲、em dash 禁止）
 
 ## Definition of Done
-- [ ] 全 BDD シナリオが gate テストとして実装されパスする
-- [ ] harness.md の stale 錨が解消され gate が green で着地
-- [ ] `just check` と `cargo test` が green
-- [ ] コードレビュー完了（task review + 最終 review）
-- [ ] docs/specs/harness.md、.claude/rules/spec-sync.md、docs/specs/ 内の
+- [x] 全 BDD シナリオが gate テストとして実装されパスする
+- [x] harness.md の stale 錨が解消され gate が green で着地
+- [x] `just check` と `cargo test` が green
+- [x] コードレビュー完了（task review + 最終 review）
+- [x] docs/specs/harness.md、.claude/rules/spec-sync.md、docs/specs/ 内の
   曖昧参照更新済み

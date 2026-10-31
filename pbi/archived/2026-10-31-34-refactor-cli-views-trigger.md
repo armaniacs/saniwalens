@@ -54,22 +54,22 @@ Scenario: view 追加の PR は views/ を作る
 ```
 
 ## 受け入れ基準
-- [ ] `docs/specs/architecture.md:101` 付近を発火 PR 単位の行動規範に強化する
+- [x] `docs/specs/architecture.md:101` 付近を発火 PR 単位の行動規範に強化する
   （Command variant を追加する PR は同一 PR で `src/cli/views/` を作成、
   `src/cli/trend.rs` を同コミットで移動、view を 1 ファイルで着地、view 関数
   は mod.rs に追記しない）+ 発火時 spec 更新マップ（層表と移行規約の 2 箇所）
-- [ ] mod.rs 上限 tripwire テストを追加する
+- [x] mod.rs 上限 tripwire テストを追加する
   （`include_str!("mod.rs")` 由来の行数、上限は現実測の 3,383 をそのまま、
   超過メッセージが views/ を指す。余裕を持たせない）
-- [ ] `.claude/rules/` に view 追加 PBI の受け入れ基準テンプレート 1 節を
+- [x] `.claude/rules/` に view 追加 PBI の受け入れ基準テンプレート 1 節を
   追加する（views/ 作成 + trend 同コミット移動 + mod.rs 追記なし +
   spec 同時更新 + golden 規則）
-- [ ] view 専用ヘルパ（fmt_tokens / plural / prune_phrase / tilde_path /
+- [x] view 専用ヘルパ（fmt_tokens / plural / prune_phrase / tilde_path /
   shorten_to_tilde、savings_*）の doc comment に専用マーカーを付ける
   （「共有」の名目と実態の乖離を名指しする）
-- [ ] 待つ判断の撤回条件を PBI / 台帳の運用メモに明記する
+- [x] 待つ判断の撤回条件を PBI / 台帳の運用メモに明記する
   （tripwire bump で shell 部が +300 行成長したら views/ 化を前倒しする）
-- [ ] `just check` と `cargo test` が green（tripwire は通る状態で着地）
+- [x] `just check` と `cargo test` が green（tripwire は通る状態で着地）
 
 ## テスト戦略（t_wadaスタイル）
 
@@ -129,8 +129,8 @@ Scenario: view 追加の PR は views/ を作る
 - `.claude/rules/` の .md も docs-charset の対象（CP932 範囲、em dash 禁止）
 
 ## Definition of Done
-- [ ] 全 BDD シナリオが自動テストとして実装されパスする
-- [ ] tripwire が現状 green で着地し、メッセージが views/ を指す
-- [ ] `just check` と `cargo test` が green
-- [ ] コードレビュー完了（task review + 最終 review）
-- [ ] docs/specs/architecture.md、.claude/rules/、台帳の運用メモ更新済み
+- [x] 全 BDD シナリオが自動テストとして実装されパスする
+- [x] tripwire が現状 green で着地し、メッセージが views/ を指す
+- [x] `just check` と `cargo test` が green
+- [x] コードレビュー完了（task review + 最終 review）
+- [x] docs/specs/architecture.md、.claude/rules/、台帳の運用メモ更新済み
