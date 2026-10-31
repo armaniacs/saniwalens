@@ -34,7 +34,7 @@ criteria:
   view-landing rule), plus `docs/specs/cli.md` for the view's command
   contract.
 - **A golden test pins the view's JSON machine contract** (`docs/specs/cli.md`
-  calls the JSON output "the machine contract"). None exist yet, so the first
-  view PBI establishes the first golden, and every later view PBI adds its
-  own ― a move without a golden is validated by capture alone, which is not
-  the contract.
+  calls the JSON output "the machine contract"). The first one exists (PBI 39
+  pins trend's emitted JSON in `tests/trend_json_golden.rs`), and every later
+  view PBI adds its own ― a move without a golden is validated by capture
+  alone, which is not the contract.

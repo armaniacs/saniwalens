@@ -157,7 +157,13 @@ Every command has both a human form and a machine form, strictly separated:
   on stdout ― SQLite integers/reals/NULLs stay JSON numbers/null
   (`Store::query_json`), `doctor` emits the routed findings structure
   (`core::optimize::Findings`, `projects` filtered by `--scope`), and each view
-  emits its rows as named objects. All freshness/refresh chatter goes to
+  emits its rows as named objects. `trend`'s rows and its JSON are two forms
+  of one typed payload (`trend_payload` in `cli/trend.rs`): both derive from
+  it, so a metric's delta and direction are judged once ― float metrics at
+  the display's 0.1 precision, so a drift smaller than the shown 0.1 (an
+  ms-derived duration's addition error) reads as `same` in both forms; a
+  golden test (`tests/trend_json_golden.rs`) pins the emitted JSON. All
+  freshness/refresh chatter goes to
   **stderr** (see above), so `saniwalens <cmd> --format json | jq` needs no
   filtering. Human-only footnotes (row counts, heuristic caveats) are either
   folded into the JSON (`total`, …) or dropped, never mixed into it.
