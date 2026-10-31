@@ -1737,6 +1737,16 @@ impl Direction {
     }
 }
 
+/// Which way a metric moved between two sides both of which are present —
+/// the pure comparison [`direction_of`] guards with its empty-side sentinel.
+fn direction_between<T: PartialOrd>(previous: T, current: T) -> Direction {
+    match current.partial_cmp(&previous) {
+        Some(std::cmp::Ordering::Greater) => Direction::Up,
+        Some(std::cmp::Ordering::Less) => Direction::Down,
+        _ => Direction::Same,
+    }
+}
+
 /// Which way a metric moved between the two windows. An empty previous side
 /// (0 events) is 比較不能 — the store holds no baseline for the row, so no
 /// direction is claimed whatever the current value is; a delta against an
@@ -1745,11 +1755,7 @@ fn direction_of<T: PartialOrd + Default>(previous: T, current: T) -> Direction {
     if previous == T::default() {
         return Direction::Unavailable;
     }
-    match current.partial_cmp(&previous) {
-        Some(std::cmp::Ordering::Greater) => Direction::Up,
-        Some(std::cmp::Ordering::Less) => Direction::Down,
-        _ => Direction::Same,
-    }
+    direction_between(previous, current)
 }
 
 /// One integer metric's JSON cell: both windows' values, the delta, and the
@@ -1785,8 +1791,10 @@ fn metric_json_float(previous: f64, current: f64) -> serde_json::Value {
 }
 
 /// The two windows' per-kind rollups paired by kind — a kind present in only
-/// one window keeps None on the other side, which reads downstream as an
-/// empty (0-event) side. Sorted by kind, the aggregation's own order.
+/// one window keeps None on the other side. The table rows carry that Option
+/// to the n/a judgment ([`trend_kind_rows`]); the JSON contract folds a None
+/// side to the default value (`trend_json`), whose shape stays every kind ×
+/// three metrics. Sorted by kind, the aggregation's own order.
 fn kind_pairs(
     agg: &TwoWindow<TrendWindowAggregates>,
 ) -> Vec<(String, Option<KindRollup>, Option<KindRollup>)> {
@@ -1883,57 +1891,89 @@ fn display_precise(value: f64) -> f64 {
     format!("{value:.1}").parse().unwrap_or(value)
 }
 
-/// A table cell pair for a float metric — the duration form of
-/// [`delta_cells_int`]. The direction is judged at display precision: float
-/// drift smaller than the shown 0.1 must not claim a move the table renders
-/// as ±0.0, so direction and displayed delta never disagree.
-fn delta_cells_float(previous: f64, current: f64) -> (String, String) {
-    let (previous, current) = (display_precise(previous), display_precise(current));
-    match direction_of(previous, current) {
-        Direction::Unavailable => ("n/a".to_string(), "n/a".to_string()),
-        direction => (
-            format!("{:+.1}", current - previous),
-            direction.label().to_string(),
+/// A table cell pair for an integer metric whose emptiness rides the type:
+/// n/a only when the previous side holds no rollup (the kind had no events in
+/// the window), never because a present rollup's value is the default — a
+/// measured zero baseline is a fact, not 比較不能. The current side reads a
+/// kind the window does not hold as zero events, which is what it is.
+fn delta_cells_int_opt(previous: Option<i64>, current: i64) -> (String, String) {
+    match previous {
+        None => ("n/a".to_string(), "n/a".to_string()),
+        Some(previous) => (
+            format!("{:+}", current - previous),
+            direction_between(previous, current).label().to_string(),
         ),
     }
 }
 
-/// The per-kind section's rows: one row per kind and metric (events, output
-/// tokens, seconds), so each row carries one comparison and one direction.
-/// Both windows' values keep their columns even when the comparison is n/a.
+/// The float form of [`delta_cells_int_opt`]: direction judged at display
+/// precision, so float drift smaller than the shown 0.1 must not claim a move
+/// the table renders as ±0.0, and n/a only for a missing previous side — a
+/// baseline that rounds to the displayed 0.0 (a real 0.04s) still compares.
+fn delta_cells_float_opt(previous: Option<f64>, current: f64) -> (String, String) {
+    match previous {
+        None => ("n/a".to_string(), "n/a".to_string()),
+        Some(previous) => {
+            let (previous, current) = (display_precise(previous), display_precise(current));
+            (
+                format!("{:+.1}", current - previous),
+                direction_between(previous, current).label().to_string(),
+            )
+        }
+    }
+}
+
+/// Whether a kind's events carry a duration and output tokens — the metrics
+/// the trend renders beside the count. Ingest writes both columns as constant
+/// zeros for every other kind (`store.rs`'s event writers; `events.md`: a span
+/// is currently `skill_invocation` only), so those rows for a point kind would
+/// always read `0.0 | 0.0 | n/a | n/a` — the n/a's stated reason (an empty
+/// previous side) false for a row whose real reason is that the metric does
+/// not apply. Only a span kind carries them; an unknown kind gets the count
+/// row alone, so a new point kind never renders a false reason.
+fn carries_span_metrics(kind: &str) -> bool {
+    kind == "skill_invocation"
+}
+
+/// The per-kind section's rows: one row per kind and *applicable* metric, so
+/// each row carries one comparison and one direction — a point kind renders
+/// its count alone ([`carries_span_metrics`]), the row-level form of the usage
+/// view's empty-section convention. Both windows' values keep their columns
+/// even when the comparison is n/a, and the emptiness rides the type: a
+/// present rollup compares even at a measured zero ([`delta_cells_int_opt`]).
 fn trend_kind_rows(agg: &TwoWindow<TrendWindowAggregates>) -> Vec<Vec<String>> {
     let mut rows = Vec::new();
     for (kind, current, previous) in kind_pairs(agg) {
         let (c, p) = (current.as_ref(), previous.as_ref());
-        let (p_events, c_events) = (p.map_or(0, |r| r.events), c.map_or(0, |r| r.events));
-        let (p_tokens, c_tokens) = (p.map_or(0, |r| r.out_tokens), c.map_or(0, |r| r.out_tokens));
-        let (p_secs, c_secs) = (
-            p.map_or(0.0, |r| r.duration_sec),
-            c.map_or(0.0, |r| r.duration_sec),
-        );
-        let (delta, direction) = delta_cells_int(p_events, c_events);
+        let (p_events, c_events) = (p.map(|r| r.events), c.map_or(0, |r| r.events));
+        let (delta, direction) = delta_cells_int_opt(p_events, c_events);
         rows.push(vec![
             kind.clone(),
             "events".to_string(),
-            p_events.to_string(),
+            p_events.map_or("0".to_string(), |events| events.to_string()),
             c_events.to_string(),
             delta,
             direction,
         ]);
-        let (delta, direction) = delta_cells_int(p_tokens, c_tokens);
+        if !carries_span_metrics(&kind) {
+            continue;
+        }
+        let (p_tokens, c_tokens) = (p.map(|r| r.out_tokens), c.map_or(0, |r| r.out_tokens));
+        let (delta, direction) = delta_cells_int_opt(p_tokens, c_tokens);
         rows.push(vec![
             kind.clone(),
             "out tokens".to_string(),
-            p_tokens.to_string(),
+            p_tokens.map_or("0".to_string(), |tokens| tokens.to_string()),
             c_tokens.to_string(),
             delta,
             direction,
         ]);
-        let (delta, direction) = delta_cells_float(p_secs, c_secs);
+        let (p_secs, c_secs) = (p.map(|r| r.duration_sec), c.map_or(0.0, |r| r.duration_sec));
+        let (delta, direction) = delta_cells_float_opt(p_secs, c_secs);
         rows.push(vec![
             kind,
             "seconds".to_string(),
-            format!("{p_secs:.1}"),
+            format!("{:.1}", p_secs.unwrap_or(0.0)),
             format!("{c_secs:.1}"),
             delta,
             direction,
@@ -1990,16 +2030,25 @@ fn trend_total_rows(agg: &TwoWindow<TrendWindowAggregates>) -> Vec<Vec<String>> 
     .collect()
 }
 
-/// The trend preamble's text: what the report compares and how to read an
-/// n/a, plus the previous window's range — the current one comes from
-/// `framed`. Table format only.
-fn trend_preamble(pair: WindowPair) -> String {
-    format!(
-        "Usage trend — this window against the equal-length window right before it.\n\
-         A delta marked n/a: the previous side holds no events, so the comparison is\n\
-         unavailable — not a drop. previous window: {}",
-        period::display(pair.previous, JST_OFFSET_SECS)
-    )
+/// The trend preamble's text: what the report compares, plus the previous
+/// window's range — the current one comes from `framed`. The n/a reason
+/// sentence rides only with a report that actually holds an n/a comparison:
+/// with the non-applicable rows omitted, every rendered n/a's previous side
+/// really is empty, and a report whose previous side holds every rendered
+/// kind prints no reason at all rather than one that cannot occur. Table
+/// format only.
+fn trend_preamble(pair: WindowPair, has_unavailable: bool) -> String {
+    let mut text =
+        String::from("Usage trend — this window against the equal-length window right before it.");
+    if has_unavailable {
+        text.push_str(
+            "\nA delta marked n/a: the previous side holds no events, so the comparison is\n\
+             unavailable — not a drop.",
+        );
+    }
+    text.push_str("\nprevious window: ");
+    text.push_str(&period::display(pair.previous, JST_OFFSET_SECS));
+    text
 }
 
 /// The trend's two-window disclosure — stderr beside the freshness line,
@@ -2059,8 +2108,17 @@ fn trend(sess: &Session, pair: WindowPair, format: Format) -> Result<()> {
         println!("no usage in either comparison window — run `saniwalens analyze` first");
         return Ok(());
     }
-    preamble(format, &framed(&trend_preamble(pair), pair.current));
     let kind_rows = trend_kind_rows(&agg);
+    // The reason text's condition: some rendered kind's previous side holds
+    // no rollup — exactly the comparisons the rows mark n/a, so the preamble
+    // never states a reason the report cannot show.
+    let has_unavailable = kind_pairs(&agg)
+        .iter()
+        .any(|(_, _, previous)| previous.is_none());
+    preamble(
+        format,
+        &framed(&trend_preamble(pair, has_unavailable), pair.current),
+    );
     if !kind_rows.is_empty() {
         render(
             &[
@@ -4230,18 +4288,26 @@ mod tests {
         // The unrounded seconds can differ by float drift smaller than the
         // display's 0.1: the direction must not claim a move the table shows
         // as ±0.0 — direction and displayed delta never disagree.
-        let (delta, direction) = delta_cells_float(3.3, 3.3000000000000003);
+        let (delta, direction) = delta_cells_float_opt(Some(3.3), 3.3000000000000003);
         assert_eq!(direction, "same", "drift above zero is not a move");
         assert_eq!(delta, "+0.0");
         // A sub-0.05 real move rounds to ±0.0 too: no direction is claimed
         // for a move the table cannot show.
-        let (delta, direction) = delta_cells_float(1.0, 1.0 - 1e-9);
+        let (delta, direction) = delta_cells_float_opt(Some(1.0), 1.0 - 1e-9);
         assert_eq!(direction, "same", "drift below zero is not a move");
         assert_eq!(delta, "+0.0");
         // A move the table CAN show still reads as one.
-        let (delta, direction) = delta_cells_float(1.0, 2.0);
+        let (delta, direction) = delta_cells_float_opt(Some(1.0), 2.0);
         assert_eq!(direction, "up");
         assert_eq!(delta, "+1.0");
+        // A missing previous side is the only 比較不能: the emptiness rides
+        // the type, not the value.
+        let (delta, direction) = delta_cells_float_opt(None, 2.0);
+        assert_eq!((delta.as_str(), direction.as_str()), ("n/a", "n/a"));
+        // A present baseline that rounds to 0.0 still compares — it is a
+        // measured zero, not an empty side.
+        let (delta, direction) = delta_cells_float_opt(Some(0.04), 2.0);
+        assert_eq!((delta.as_str(), direction.as_str()), ("+2.0", "up"));
     }
 
     #[test]
@@ -4377,6 +4443,23 @@ mod tests {
         assert_eq!(edit["events"]["current"], 1);
         assert_eq!(edit["events"]["delta"], 0);
         assert_eq!(edit["events"]["direction"], "same");
+        // The machine contract keeps every kind × three metrics: a point
+        // kind's output tokens / duration carry the same shape even at the
+        // constant zeros ingest writes — only the table omits what cannot
+        // apply, never the JSON.
+        assert_eq!(edit["out_tokens"]["previous"], 0);
+        assert_eq!(edit["out_tokens"]["current"], 0);
+        assert_eq!(edit["out_tokens"]["delta"], serde_json::Value::Null);
+        assert_eq!(edit["out_tokens"]["direction"], "unavailable");
+        assert_eq!(edit["duration_sec"]["previous"], 0.0);
+        assert_eq!(edit["duration_sec"]["current"], 0.0);
+        assert_eq!(edit["duration_sec"]["delta"], serde_json::Value::Null);
+        assert_eq!(edit["duration_sec"]["direction"], "unavailable");
+        // A span kind's duration compares: 4.0s of spans -> 2.0s.
+        assert_eq!(skill["duration_sec"]["previous"], 4.0);
+        assert_eq!(skill["duration_sec"]["current"], 2.0);
+        assert_eq!(skill["duration_sec"]["delta"], -2.0);
+        assert_eq!(skill["duration_sec"]["direction"], "down");
 
         // Skills are ordered by movement: review (0 <- 1) before commit (1, 1).
         let skills = json["skills"].as_array().unwrap();
@@ -4468,7 +4551,9 @@ mod tests {
     #[test]
     fn the_trend_preamble_discloses_both_windows() {
         let pair = trend_pair();
-        let text = trend_preamble(pair);
+        // An empty previous side (the one-sided stores) is what turns the
+        // reason sentence on.
+        let text = trend_preamble(pair, true);
         assert!(
             text.contains("previous window: since 1970-01-01T09:16:40+09:00"),
             "the previous window is named in the preamble: {text:?}"
@@ -4480,6 +4565,50 @@ mod tests {
             framed_text.contains("report window: since 1970-01-01T09:33:21+09:00"),
             "the current window is disclosed too: {framed_text:?}"
         );
+    }
+
+    #[test]
+    fn the_trend_preamble_states_the_na_reason_only_when_a_side_is_empty() {
+        let pair = trend_pair();
+        // The reason text rides only with a report that actually holds an n/a
+        // comparison — a previous side that holds every rendered kind prints
+        // no reason at all rather than one that cannot occur.
+        let without = trend_preamble(pair, false);
+        assert!(
+            !without.contains("holds no events"),
+            "a report with no empty side states no reason: {without:?}"
+        );
+        assert!(
+            without.contains("previous window: since 1970-01-01T09:16:40+09:00"),
+            "the previous window is still named: {without:?}"
+        );
+        let with = trend_preamble(pair, true);
+        assert!(
+            with.contains("A delta marked n/a: the previous side holds no events"),
+            "the reason text rides with an empty side: {with:?}"
+        );
+    }
+
+    #[test]
+    fn the_span_metric_judgment_follows_the_kind() {
+        // Point kinds — every kind ingest writes without a duration or
+        // output tokens — carry the count alone; a span kind carries all
+        // three metrics.
+        for kind in [
+            "session_start",
+            "prompt",
+            "agent_spawn",
+            "tool_use",
+            "tool_error",
+            "bash_cmd",
+            "file_edit",
+        ] {
+            assert!(!carries_span_metrics(kind), "{kind} is a point kind");
+        }
+        assert!(carries_span_metrics("skill_invocation"));
+        // An unknown kind gets the count row alone, so a new point kind never
+        // renders a row whose stated reason does not apply.
+        assert!(!carries_span_metrics("mcp_call"));
     }
 
     #[test]
@@ -4519,6 +4648,85 @@ mod tests {
         assert_eq!(gone[3], "0");
         assert_eq!(gone[4], "-1", "a negative delta: {rows:?}");
         assert_eq!(gone[5], "down");
+    }
+
+    #[test]
+    fn trend_kind_rows_render_only_applicable_metrics() {
+        // Usage in both windows: two skill spans and one file_edit in the
+        // previous, one of each in the current. A point kind carries no
+        // duration or output tokens — ingest writes both as constant zeros —
+        // so its rows for them would always read `0.0 | 0.0 | n/a | n/a`:
+        // omitted, not rendered. A span kind renders all three metrics.
+        let agg = two_window_store().trend_aggregates(trend_pair()).unwrap();
+        let rows = trend_kind_rows(&agg);
+        let edit: Vec<_> = rows.iter().filter(|r| r[0] == "file_edit").collect();
+        assert_eq!(
+            edit.len(),
+            1,
+            "a point kind renders its count alone: {rows:?}"
+        );
+        assert_eq!(edit[0][1], "events");
+        assert_eq!(
+            (edit[0][4].as_str(), edit[0][5].as_str()),
+            ("+0", "same"),
+            "the point kind's count still compares"
+        );
+        let span: Vec<_> = rows.iter().filter(|r| r[0] == "skill_invocation").collect();
+        assert_eq!(
+            span.len(),
+            3,
+            "a span kind renders all three metrics: {rows:?}"
+        );
+        for metric in ["events", "out tokens", "seconds"] {
+            assert!(
+                span.iter().any(|r| r[1] == metric),
+                "the span kind's {metric} row is missing: {rows:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn trend_kind_rows_do_not_read_a_measured_zero_baseline_as_unavailable() {
+        // A real 0.04s baseline rounds to the displayed 0.0: the comparison
+        // is still one — up, at display precision — never 比較不能. The
+        // sentinel fold (`map_or(0.0)`) used to turn it into an empty side,
+        // so the row read as n/a whatever the current window held.
+        let mut store = Store::in_memory().unwrap();
+        let mut past = trend_session("past");
+        past.start = Some(SessionStart {
+            timestamp_ms: 1_500 * 1000,
+            ctx: 9_000,
+        });
+        let mut span = trend_span("commit", 1_500, 50);
+        span.duration_sec = 0.04;
+        store.ingest(IngestBatch::new(&past, &[span], &[])).unwrap();
+        let mut present = trend_session("present");
+        present.start = Some(SessionStart {
+            timestamp_ms: 2_500 * 1000,
+            ctx: 10_000,
+        });
+        store
+            .ingest(IngestBatch::new(
+                &present,
+                &[trend_span("commit", 2_500, 300)],
+                &[],
+            ))
+            .unwrap();
+
+        let seconds = trend_kind_rows(&store.trend_aggregates(trend_pair()).unwrap())
+            .into_iter()
+            .find(|r| r[0] == "skill_invocation" && r[1] == "seconds")
+            .expect("a span kind renders its seconds row");
+        assert_eq!(
+            (seconds[2].as_str(), seconds[3].as_str()),
+            ("0.0", "2.0"),
+            "both sides display at the table's precision: {seconds:?}"
+        );
+        assert_eq!(
+            (seconds[4].as_str(), seconds[5].as_str()),
+            ("+2.0", "up"),
+            "a measured zero baseline compares: {seconds:?}"
+        );
     }
 
     #[test]
