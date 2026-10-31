@@ -183,6 +183,16 @@ compare against is undefined.
   date a whole day (`YYYY-MM-DD`, read in the presentation zone ― **JST**, the
   same zone the bucketing table uses; the comparison is against the UTC epoch
   the store keeps). `--until` is **inclusive**: the whole named day counts.
+  The resolved instants carry the same calendar bound the rolling span has,
+  checked at the same resolve entry: the day end adds its +86,399 after the
+  zone conversion, so a west offset (the `--tz` zone Time bucketing declares,
+  not wired into the period path) can resolve `NaiveDate::MAX`'s last second
+  past the calendar's ceiling, and a date whose resolved midnight or last
+  second leaves the calendar is refused with the empty-window error naming
+  its flag. Under **JST** the named-day path stays inside the calendar on its
+  own ― `NaiveDate::MIN`'s midnight sits below the floor, where the zone
+  conversion refuses it as a local time ― which is why the bound is
+  established at the entry instead of trusted to the zone's sign.
 - `--last SPAN`: a rolling window ending now ― `<N>d`, `<N>h`, `<N>w`.
   Exclusive with the explicit dates (clap conflict), so "last 7 days" can never
   be silently reinterpreted by a stray `--since`. The span's resolved window
@@ -204,14 +214,19 @@ compare against is undefined.
 - Errors are parse-time, before any report renders: an unparseable date fails
   on stderr with a non-zero exit and an empty stdout; `--since` after `--until`
   is an empty-window error rather than an empty-looking report. A `--last`
-  whose resolved window leaves the calendar is that same invalid-span error ―
-  non-zero, empty stdout, before any report renders or store work runs.
+  whose resolved window leaves the calendar is that same invalid-span error,
+  and a named day whose resolved midnight or last second leaves it is the
+  empty-window error naming its flag ― non-zero, empty stdout, before any
+  report renders or store work runs.
 - The window is **disclosed, never silent**: a dimmed `report window:` line
   rides with the freshness line on stderr (every format), the framing block
   carries it as its last line (table only ― markdown stays a bare table),
   `doctor` prints it in-band under its heading, and `--format json` gains a
-  `window` object (`since` / `until` as RFC 3339 with their offset). Without
-  the flags every output is byte-identical to the pre-period behavior.
+  `window` object (`since` / `until` as RFC 3339 with their offset). Every
+  accepted window renders a date that exists: an in-calendar instant renders
+  in any valid zone, so the bounds renderer has no empty-string fallback to
+  absorb an out-of-calendar bound with. Without the flags every output is
+  byte-identical to the pre-period behavior.
 - The catalog half of `inventory` is current config, so it is not windowed by
   time ― its **usage half** is. An unused row under a window says
   `UNUSED (window)` / `"unused-in-window"`, never plain "unused".
@@ -268,9 +283,15 @@ caveats in `events.md` / `surfaces.md`):
   window **derived** one second before the current one ― leaves the calendar
   names dates that do not exist, and fails with the invalid-span error; a
   `--since` whose derived previous leaves it fails with the empty-window
-  error naming `--since`. The alternative would be a disclosure line with an
-  empty `since` and a store bound (`started_at >= ''`) that silently passes
-  every session ― a successful-looking report that measures nothing.
+  error naming `--since`; and a named day whose resolved midnight or last
+  second leaves it fails with the empty-window error naming its own flag.
+  The alternative would be a disclosure line with an empty `since` and a
+  store bound (`started_at >= ''`) that silently passes every session ― a
+  successful-looking report that measures nothing. The bounds renderer keeps
+  no empty-string fallback to absorb an unrenderable instant with: an
+  accepted window's instants are in-calendar by the resolve entry's check,
+  so a bound always renders a date that exists and the disclosure line and
+  the JSON `window` cannot carry an empty string.
 - A subagent run whose agent type was never recorded is shown as `(unknown)`,
   never merged into a named type and never dropped ― the per-agent rows must
   keep summing to the subagent total the same report prints above them, for
