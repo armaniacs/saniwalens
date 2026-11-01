@@ -201,7 +201,7 @@ is pinned by `cli::heartbeat` unit tests). At most one beat is sent between
 the flag being set and the second stop check observing it: a structural
 invariant of the loop's two checks, not an observed quantity ― a beat queued
 before the stop is indistinguishable from one sent after it.
-`CADENCE` (30s) is the minimum spacing between beats and `POLL` (500ms) is how
+`CADENCE` (30s) is the minimum scheduled spacing between beats and `POLL` (500ms) is how
 often the thread wakes to re-check `stop` and to see whether the next beat is
 due. A beat fires when the observed elapsed time reaches its deadline, and the
 following deadline is then counted one cadence from that observation, not from

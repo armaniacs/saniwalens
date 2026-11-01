@@ -393,7 +393,7 @@ impl Harness {
 
     /// The renderer for a headless run's raw stdout lines: the adapter fn
     /// turning one raw line into a [`RunEvent`](opencode::RunEvent), handed to
-    /// the shell's headless loop as seam data (`run_headless` in `cli/mod.rs`),
+    /// the shell's headless loop as seam data (`run_headless` in `cli/headless.rs`),
     /// so the loop neither names a harness nor matches on one. `opencode run
     /// --format json` streams unversioned JSON events, so the renderer is the
     /// lenient one; kilo is an OpenCode fork and shares the stream, so a

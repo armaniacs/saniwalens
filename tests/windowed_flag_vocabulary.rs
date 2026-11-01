@@ -11,16 +11,32 @@ use std::path::{Path, PathBuf};
 use saniwalens::core::surface::{LoadMode, Scope, Surface};
 use saniwalens::store::{OpenMode, Store};
 
+mod common;
+use common::ScratchDir;
+
 /// A per-test scratch dir holding an empty synthetic transcript root, so a
 /// non-frozen read walks a real (empty) tree instead of the user's.
-fn scratch_dir(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!(
-        "saniwalens-flag-vocabulary-{}-{name}",
-        std::process::id()
-    ));
-    let _ = std::fs::remove_dir_all(&dir);
+fn scratch_dir(name: &str) -> ScratchDir {
+    let dir = ScratchDir::new("saniwalens-flag-vocabulary", name);
     std::fs::create_dir_all(dir.join(".claude").join("projects")).unwrap();
     dir
+}
+
+/// The windowed views whose `--format` vocabulary is the shared three-value
+/// one, derived from clap and minus doctor (whose human form is its own text
+/// layout). The same `--last` discriminator the help-golden tripwire uses.
+fn table_markdown_views() -> Vec<String> {
+    use clap::CommandFactory;
+    saniwalens::cli::Cli::command()
+        .get_subcommands()
+        .filter(|command| {
+            command
+                .get_arguments()
+                .any(|arg| arg.get_long() == Some("last"))
+        })
+        .map(|command| command.get_name().to_string())
+        .filter(|name| name != "doctor")
+        .collect()
 }
 
 /// One catalog row: a skill installed in `scope`, weighing 40 tokens.
@@ -137,7 +153,6 @@ fn the_scope_flag_changes_the_rows_inventory_reports() {
         "--scope project kept a global row: {project:?}"
     );
     assert_ne!(global, project, "the flag changed nothing");
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
@@ -148,17 +163,12 @@ fn only_doctor_refuses_markdown() {
     // widening it back) fails here.
     let dir = scratch_dir("markdown-values");
     let db = write_store(&dir);
-    for view in [
-        "usage",
-        "trend",
-        "inventory",
-        "waste",
-        "overhead",
-        "prompts",
-        "failures",
-        "stuck",
-    ] {
-        let out = run(&dir, &db, &[view, "--format", "markdown", "--frozen"]);
+    for view in table_markdown_views() {
+        let out = run(
+            &dir,
+            &db,
+            &[view.as_str(), "--format", "markdown", "--frozen"],
+        );
         assert!(
             out.status.success(),
             "{view} --format markdown must run: {}",
@@ -172,7 +182,6 @@ fn only_doctor_refuses_markdown() {
         "doctor must name its own values: {}",
         String::from_utf8_lossy(&out.stderr)
     );
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
@@ -213,5 +222,4 @@ fn doctor_rejects_markdown_before_the_store_opens() {
         "the store was created before the flag was refused: {}",
         db.display()
     );
-    let _ = std::fs::remove_dir_all(&dir);
 }

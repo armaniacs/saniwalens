@@ -402,8 +402,9 @@ caveats in `events.md` / `surfaces.md`):
   text names that row scope ("that row's previous side") because one sentence
   covers the kind, skill, and totals sections, and it is printed only when a
   report actually holds such a comparison; the footnote about an empty
-  previous window is printed only when that window holds neither events nor a
-  session. A metric a kind does not carry renders no row at all ― the table
+  previous window is printed when that window holds no event of any kind. A
+  session alone does not suppress it: the note speaks about events, and the
+  totals rows may still compare while the kind rows are n/a. A metric a kind does not carry renders no row at all ― the table
   omits it, so the unavailable label is never attached to a metric the table
   does not show. `--format json` keeps every kind's three metrics for its
   consumers, holding the same shape with a null delta and

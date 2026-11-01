@@ -580,7 +580,7 @@ pub fn deliver(plan: DeliveryPlan<'_>, advisor: &mut impl AdvisorLaunch) -> Resu
     };
 
     let launch_note = format!(
-        "launch `{binary} {}` — is {harness_name} installed?",
+        "launch `{binary} {}` — is {harness_name} installed and on PATH?",
         leading.join(" ").trim_end()
     );
     // Headless harnesses run piped unless --verbose: the raw stream is logged

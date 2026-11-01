@@ -440,7 +440,7 @@ fn kind_pairs(
 /// A float rounded to the display's precision — the same rounding the
 /// `{:.1}` cells show (round via the format itself, so the rounded value is
 /// by construction the one the table displays). The one precision rule
-/// ([`float_comparison`]) judges at this rounding.
+/// ([`float_judge`]) judges at this rounding.
 fn display_precise(value: f64) -> f64 {
     format!("{value:.1}").parse().unwrap_or(value)
 }
@@ -1672,5 +1672,21 @@ mod tests {
         assert_eq!(started[3], "0");
         assert_eq!(started[4], "-1");
         assert_eq!(started[5], "down");
+    }
+
+    #[test]
+    fn the_unavailable_reason_serializes_as_the_machine_contract() {
+        // The JSON value is a consumer contract: a rename or a lost
+        // `rename_all` must fail here, not only in a downstream consumer.
+        let no_baseline =
+            serde_json::to_value(unavailable(0, 3, UnavailableReason::NoBaseline)).unwrap();
+        assert_eq!(no_baseline["reason"], "no_baseline");
+        assert_eq!(no_baseline["direction"], "unavailable");
+        assert!(no_baseline["delta"].is_null());
+
+        let not_applicable =
+            serde_json::to_value(unavailable(0, 0, UnavailableReason::NotApplicable)).unwrap();
+        assert_eq!(not_applicable["reason"], "not_applicable");
+        assert_eq!(not_applicable["direction"], "unavailable");
     }
 }

@@ -83,9 +83,10 @@ pub(crate) struct WindowedRead {
 }
 
 /// What one scoped windowed report arm's open call resolves: a
-/// [`WindowedRead`] plus the config layer `--scope` selected. Only the four
-/// views that declare `--scope` (inventory, waste, failures, doctor) take
-/// this, and only through [`WindowedDispatch::open_scoped`].
+/// [`WindowedRead`] plus the config layer `--scope` selected. Only the three
+/// views that share the default scoped entry (inventory, waste, failures)
+/// take this, and only through [`WindowedDispatch::open_scoped`]; doctor has
+/// its own `open_scoped_table_json` entry for the narrower `--format` set.
 #[derive(Debug)]
 pub(crate) struct ScopedRead {
     pub(crate) read: WindowedRead,
@@ -139,10 +140,12 @@ impl WindowedDispatch<'_> {
         self.open_in(ViewFormat::TableMarkdownJson, format, period, read, analyze)
     }
 
-    /// The one open for the four windowed views with `--scope` (inventory,
-    /// waste, failures, doctor): scope, then the format, then the period, then
-    /// the store. Scope is resolved **here**, before delegating, which is what
-    /// keeps it winning over a bad format without any arm ordering it by hand
+    /// The one open for the three windowed views with `--scope` that take the
+    /// default `--format` vocabulary (inventory, waste, failures); doctor
+    /// reaches the same body through `open_scoped_table_json`. Scope, then the
+    /// format, then the period, then the store: scope is resolved **here**,
+    /// before delegating, which is what keeps it winning over a bad format
+    /// without any arm ordering it by hand
     /// (`the_scoped_open_resolves_flags_in_the_arms_order`).
     pub(crate) fn open_scoped(
         &self,
