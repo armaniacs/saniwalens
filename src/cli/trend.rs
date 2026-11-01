@@ -183,16 +183,17 @@ impl TrendPayload {
             .any(|reason| reason == Some(UnavailableReason::NoBaseline))
     }
 
-    /// Whether the previous window holds nothing at all — no event of any kind
-    /// and no session on the totals axis. The note about an empty previous
-    /// window reads this one window-level fact instead of the aggregates, so
-    /// no view code reaches around the payload's judgment.
-    fn previous_window_is_empty(&self) -> bool {
-        self.sessions.reason == Some(UnavailableReason::NoBaseline)
-            && self
-                .kinds
-                .iter()
-                .all(|kind| kind.events.reason == Some(UnavailableReason::NoBaseline))
+    /// Whether the previous window holds no event of any kind — the judgment
+    /// the note's text ("holds no events") states, and the same fact the
+    /// aggregates' former `by_kind.is_empty()` read. This is the **events**
+    /// axis only, not the totals axis: a previous window that holds a session
+    /// but no events still fires the note, because the note speaks about
+    /// events, and its totals rows may well compare while its kind rows are
+    /// n/a.
+    fn previous_events_are_empty(&self) -> bool {
+        self.kinds
+            .iter()
+            .all(|kind| kind.events.reason == Some(UnavailableReason::NoBaseline))
     }
 }
 
@@ -261,7 +262,11 @@ fn metric<T: Default + Copy>(
         Baseline::Absent => unavailable(T::default(), current, UnavailableReason::NoBaseline),
         Baseline::Measured(previous) => {
             let (delta, direction) = judge(previous, current);
-            debug_assert_ne!(
+            // `judge` is one of the two comparisons below, neither of which
+            // can return `Unavailable` — the reason a measured baseline always
+            // carries none. Asserted, not debug-asserted, so a release build
+            // enforces the same invariant.
+            assert_ne!(
                 direction,
                 Direction::Unavailable,
                 "a measured baseline always compares"
@@ -696,7 +701,7 @@ pub(crate) fn trend(sess: &Session, pair: WindowPair, format: Format) -> Result<
         &trend_total_rows(&payload),
         format,
     );
-    if payload.previous_window_is_empty() {
+    if payload.previous_events_are_empty() {
         note(&format!(
             "the previous window ({}) holds no events in this store — comparisons\n\
              marked n/a have nothing to compare against, so no change is claimed for them",
@@ -1319,8 +1324,10 @@ mod tests {
         // The two explanations a report can print must agree with the n/a rows
         // it actually renders: a rendered n/a row is a `NoBaseline` metric, the
         // reason sentence turns on for it, and the note turns on only when the
-        // whole previous window is empty. A point kind's inapplicable metric
-        // never turns the sentence on — its row is omitted.
+        // previous window holds no event of any kind (the events axis — the
+        // note says "holds no events", not "holds no sessions"). A point
+        // kind's inapplicable metric never turns the sentence on — its row is
+        // omitted.
         let shapes = [
             ("two windows", two_window_store()),
             ("one sided", one_sided_store()),
@@ -1340,7 +1347,7 @@ mod tests {
                 .chain(&total_rows)
                 .filter(|row| row[row.len() - 1] == "n/a")
                 .count();
-            let empty_previous = payload.previous_window_is_empty();
+            let empty_previous = payload.previous_events_are_empty();
             let no_baseline = payload.has_no_baseline();
             assert_eq!(
                 rendered_na > 0,
@@ -1352,8 +1359,8 @@ mod tests {
                     no_baseline,
                     "{label}: an empty previous window is a report of n/a rows"
                 );
-                // The note speaks about the window as a whole, so every
-                // rendered n/a row in it has an absent baseline.
+                // The note speaks about the events axis, so every kind's
+                // previous side is absent.
                 assert!(
                     payload
                         .kinds
@@ -1369,14 +1376,76 @@ mod tests {
             &two_window_store().trend_aggregates(trend_pair()).unwrap(),
         );
         assert!(!payload.has_no_baseline());
-        assert!(!payload.previous_window_is_empty());
+        assert!(!payload.previous_events_are_empty());
         // The one-sided shape holds n/a rows and an empty previous window.
         let payload = trend_payload(
             trend_pair(),
             &one_sided_store().trend_aggregates(trend_pair()).unwrap(),
         );
         assert!(payload.has_no_baseline());
-        assert!(payload.previous_window_is_empty());
+        assert!(payload.previous_events_are_empty());
+        // The straddling shape: the previous window holds a session *and* the
+        // `session_start` event ingest stamps at that start, so the events
+        // axis is not empty and the note stays off. The condition is the
+        // events axis alone — the shape it must keep firing for is a store
+        // whose previous window holds a session but no event at all (a store
+        // predating `session_start` events, read with `--frozen`), which
+        // `IngestBatch` cannot synthesize without touching the store layer.
+        let payload = trend_payload(
+            trend_pair(),
+            &straddling_store().trend_aggregates(trend_pair()).unwrap(),
+        );
+        assert!(
+            !payload.previous_events_are_empty(),
+            "the stamped session_start is an event in the previous window"
+        );
+        assert_ne!(
+            payload.sessions.reason,
+            Some(UnavailableReason::NoBaseline),
+            "the previous window does hold a session, so the totals axis is not empty"
+        );
+    }
+
+    #[test]
+    fn the_note_fires_on_an_empty_events_axis_even_with_a_session() {
+        // The reachable shape for this payload is a store read with
+        // `--frozen` that predates `session_start` events: the previous
+        // window holds a session (so the totals compare) but no event of any
+        // kind (so every kind row is n/a). The note is about the events axis,
+        // and it must fire there — otherwise markdown prints n/a rows with no
+        // explanation at all.
+        let payload = TrendPayload {
+            window: PayloadWindows {
+                current: WindowBounds {
+                    since: None,
+                    until: None,
+                },
+                previous: WindowBounds {
+                    since: None,
+                    until: None,
+                },
+            },
+            kinds: vec![KindPayload {
+                kind: "file_edit".to_string(),
+                events: metric(Baseline::Absent, 1, int_judge),
+                out_tokens: unavailable(0, 0, UnavailableReason::NotApplicable),
+                duration_sec: unavailable(0.0, 0.0, UnavailableReason::NotApplicable),
+            }],
+            skills: Vec::new(),
+            sessions: metric(Baseline::Measured(1), 0, int_judge),
+            subagent_runs: metric(Baseline::Measured(0), 0, int_judge),
+            sub_tokens: metric(Baseline::Measured(0), 0, int_judge),
+        };
+        assert!(
+            payload.previous_events_are_empty(),
+            "no event of any kind in the previous window, whatever the sessions axis holds"
+        );
+        assert!(payload.has_no_baseline(), "the kind row is n/a");
+        assert_ne!(
+            payload.sessions.reason,
+            Some(UnavailableReason::NoBaseline),
+            "the totals axis compares: the previous window holds a session"
+        );
     }
 
     #[test]
