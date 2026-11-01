@@ -4,7 +4,7 @@ paths:
   - "tests/**/*.rs"
 ---
 
-# TDD — Test-First, t-wada Style
+# TDD ― Test-First, t-wada Style
 
 Every behavior change starts as a failing test. Follow the red → green →
 refactor loop one behavior at a time; do not write production code without a
@@ -12,12 +12,12 @@ test that currently fails for the reason you are about to fix.
 
 ## The loop
 
-1. **Red** — write one small test that names the behavior and fails. Run it;
+1. **Red** ― write one small test that names the behavior and fails. Run it;
    confirm it fails for the expected reason (not a compile error in unrelated
    code).
-2. **Green** — write the minimum code to pass. Resist adding unrequested
+2. **Green** ― write the minimum code to pass. Resist adding unrequested
    generality.
-3. **Refactor** — clean up with the test green. Re-run after each step.
+3. **Refactor** ― clean up with the test green. Re-run after each step.
 
 `cargo test` MUST be green before a change is considered done. `cargo fmt` and
 `cargo clippy` must also pass.
@@ -29,7 +29,7 @@ them directly unit-testable:
 
 - `records → events` (event/span extraction), the `surfaces × events` cost×usage
   join, and `events → aggregates` (bucketing / rollups) take owned/borrowed data
-  and return data — no filesystem, no DB, no clock reads inside them.
+  and return data ― no filesystem, no DB, no clock reads inside them.
 - File walking, JSONL reading, config reading, static-token weighing, SQLite
   writing, and the current time are thin shells around the pure core. Test them
   sparingly; test the core thoroughly.
@@ -40,7 +40,7 @@ them directly unit-testable:
 
 - Unit tests for pure functions live in `#[cfg(test)] mod tests` next to the
   code; cross-module / CLI behavior lives under `tests/`.
-- Drive event, join, and aggregation logic with **small synthetic fixtures** —
+- Drive event, join, and aggregation logic with **small synthetic fixtures** ―
   a handful of transcript records or config snippets that isolate one rule (a
   span that ends at the next human turn, one that ends at the next sibling skill
   call, a `compact_boundary` mid-span, a subagent linked by `promptId`, a
@@ -49,9 +49,21 @@ them directly unit-testable:
 - One assertion focus per test. The test name states the *what*; the body shows
   the example.
 
+## Scratch dirs
+
+A test that needs a temp directory uses the `ScratchDir` guard: `tests/common/mod.rs`
+for integration binaries, `src/scratch.rs` for unit tests (two copies, because
+`cfg(test)` items are invisible to integration binaries; keep their contracts in
+step). Scratch dirs are synthetic only, live under `std::env::temp_dir()`, and are
+never placed in the repository. The guard's `new` removes a leftover dir of the
+same name and then calls `create_dir` (never `create_dir_all`), so a previous
+run's `store.db` is not silently reused; `Drop` removes the dir on normal exit
+and on unwind, so no trailing `remove_dir_all` belongs at the end of a test. Set
+`SANIWALENS_KEEP_SCRATCH=1` to keep the dirs for post-mortem inspection.
+
 ## Anti-patterns
 
 - No production code ahead of a failing test "because we'll need it."
-- No tests that assert on a real `~/.claude/projects` file — they are
+- No tests that assert on a real `~/.claude/projects` file ― they are
   non-deterministic and leak private data.
 - Don't weaken an assertion to make a flaky test pass; fix the determinism.

@@ -8,5 +8,7 @@
 pub mod adapter;
 pub mod cli;
 pub mod core;
+#[cfg(test)]
+mod scratch;
 pub mod session;
 pub mod store;

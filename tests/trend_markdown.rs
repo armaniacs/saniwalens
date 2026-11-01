@@ -7,6 +7,9 @@ use saniwalens::core::span::{SessionStart, Source, Span};
 use saniwalens::store::{IngestBatch, OpenMode, SessionMeta, Store};
 use std::path::{Path, PathBuf};
 
+mod common;
+use common::ScratchDir;
+
 /// A synthetic session stamped at `epoch_secs` (1970) with no subagent use.
 fn session(id: &str, epoch_secs: i64) -> SessionMeta {
     SessionMeta {
@@ -107,17 +110,6 @@ fn trend_output(dir: &Path, db: &Path, format: &str) -> String {
     String::from_utf8(out.stdout).unwrap()
 }
 
-/// A per-test scratch dir, cleaned up afterwards — synthetic only.
-fn scratch_dir(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!(
-        "saniwalens-trend-markdown-{}-{name}",
-        std::process::id()
-    ));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).unwrap();
-    dir
-}
-
 #[test]
 fn trend_markdown_omits_an_empty_section_instead_of_bare_headers() {
     // Both windows hold file_edit events but no skill usage anywhere: the
@@ -125,7 +117,7 @@ fn trend_markdown_omits_an_empty_section_instead_of_bare_headers() {
     // windows: current 1970-01-02 JST ([56_400, 142_799]) holds the 100_000
     // session; the equal-length window right before it ([−30_000, 56_399])
     // holds the 1_000 one.
-    let dir = scratch_dir("empty-skills");
+    let dir = ScratchDir::new("saniwalens-trend-markdown", "empty-skills");
     let db = write_store(&dir, &[("past", 1_000), ("present", 100_000)]);
     let out = trend_output(&dir, &db, "markdown");
 
@@ -144,7 +136,6 @@ fn trend_markdown_omits_an_empty_section_instead_of_bare_headers() {
         out.contains("| total |"),
         "the totals table is gone: {out:?}"
     );
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
@@ -152,7 +143,7 @@ fn trend_note_names_the_previous_window_that_holds_no_events() {
     // Only the current window holds events: the previous side of every
     // comparison is empty, so the note explains what n/a means and names the
     // previous window with its range.
-    let dir = scratch_dir("one-sided");
+    let dir = ScratchDir::new("saniwalens-trend-markdown", "one-sided");
     let db = write_store(&dir, &[("present", 100_000)]);
     let out = trend_output(&dir, &db, "markdown");
 
@@ -164,7 +155,6 @@ fn trend_note_names_the_previous_window_that_holds_no_events() {
         out.contains("previous window (since "),
         "the note does not name the previous window: {out:?}"
     );
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
@@ -175,7 +165,7 @@ fn trend_markdown_omits_a_point_kinds_non_applicable_metric_rows() {
     // `0.0 | 0.0 | n/a | n/a` — the n/a's stated reason (an empty previous
     // side) false for a row whose real reason is that the metric does not
     // apply. The rows are omitted, not rendered.
-    let dir = scratch_dir("point-kinds");
+    let dir = ScratchDir::new("saniwalens-trend-markdown", "point-kinds");
     let db = write_store(&dir, &[("past", 1_000), ("present", 100_000)]);
     let out = trend_output(&dir, &db, "markdown");
 
@@ -191,7 +181,6 @@ fn trend_markdown_omits_a_point_kinds_non_applicable_metric_rows() {
         !out.contains("| file_edit | seconds |"),
         "the seconds row rendered: {out:?}"
     );
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
@@ -201,9 +190,9 @@ fn trend_states_the_na_reason_only_when_a_previous_side_is_empty() {
     // prints nowhere — the table format renders the preamble. The one-sided
     // store does hold an empty previous side, and there the reason text
     // explains its n/a rows.
-    let dir = scratch_dir("reason-two-sided");
-    let db = write_store(&dir, &[("past", 1_000), ("present", 100_000)]);
-    let out = trend_output(&dir, &db, "table");
+    let two_sided = ScratchDir::new("saniwalens-trend-markdown", "reason-two-sided");
+    let db = write_store(&two_sided, &[("past", 1_000), ("present", 100_000)]);
+    let out = trend_output(&two_sided, &db, "table");
     assert!(
         !out.contains("A delta marked n/a"),
         "the n/a reason rendered without an n/a row: {out:?}"
@@ -213,9 +202,9 @@ fn trend_states_the_na_reason_only_when_a_previous_side_is_empty() {
         "the empty-side note rendered without an empty side: {out:?}"
     );
 
-    let dir = scratch_dir("reason-one-sided");
-    let db = write_store(&dir, &[("present", 100_000)]);
-    let out = trend_output(&dir, &db, "table");
+    let one_sided = ScratchDir::new("saniwalens-trend-markdown", "reason-one-sided");
+    let db = write_store(&one_sided, &[("present", 100_000)]);
+    let out = trend_output(&one_sided, &db, "table");
     assert!(
         out.contains("A delta marked n/a"),
         "the n/a reason is missing where a previous side is empty: {out:?}"
@@ -224,7 +213,6 @@ fn trend_states_the_na_reason_only_when_a_previous_side_is_empty() {
         out.contains("holds no events in this store"),
         "the empty-side note is missing: {out:?}"
     );
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
@@ -234,7 +222,7 @@ fn trend_compares_a_previous_window_that_measured_zero() {
     // compares (0 -> 300, +300, up) instead of collapsing to n/a with no
     // stated reason. The store is legal — a span's out_tokens is whatever its
     // assistant records reported, and 0 is a measurement, not an absence.
-    let dir = scratch_dir("present-zero");
+    let dir = ScratchDir::new("saniwalens-trend-markdown", "present-zero");
     let db = write_span_store(
         &dir,
         &[("past", 1_000, 0, 2.0), ("present", 100_000, 300, 2.0)],
@@ -263,5 +251,4 @@ fn trend_compares_a_previous_window_that_measured_zero() {
         !out.contains("holds no events in this store"),
         "the empty-side note rendered without an empty side: {out:?}"
     );
-    let _ = std::fs::remove_dir_all(&dir);
 }

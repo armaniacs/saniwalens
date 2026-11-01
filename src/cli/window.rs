@@ -674,16 +674,6 @@ mod tests {
         }
     }
 
-    /// A temp-dir environment for the dispatch pins: state home under the
-    /// dir, no config file — synthetic only.
-    fn example_dir(sub: &str) -> std::path::PathBuf {
-        let dir =
-            std::env::temp_dir().join(format!("saniwalens-window-{sub}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        dir
-    }
-
     fn panic_analyzer()
     -> impl FnOnce(&Harness, Option<PathBuf>, &Path) -> anyhow::Result<AnalyzeStats> {
         |_, _, _| panic!("the analyzer must not run on this path")
@@ -694,7 +684,11 @@ mod tests {
         // The four views without --scope resolve format, then the period,
         // then the store — a flag failure never opens the store or runs the
         // analyzer, and the resolved read carries no filter to ignore.
-        let dir = example_dir("windowed-open");
+        // The scratch guard is declared before `opened`: locals drop in
+        // reverse declaration order, so the store's handle closes before its
+        // dir is removed (a directory cannot be removed under an open store
+        // on Windows).
+        let dir = crate::scratch::ScratchDir::new("saniwalens-window", "windowed-open");
         let env = SessionEnv {
             state_home: Some(&dir),
             home: None,
@@ -747,7 +741,6 @@ mod tests {
         assert_eq!(opened.format, Format::Table);
         assert_eq!(opened.window, TimeRange::ALL);
         assert_eq!(opened.sess.db_path, dir.join("store.db"));
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -756,7 +749,7 @@ mod tests {
         // period, then the store. Scope is parsed inside the entry, so a bad
         // scope wins over a bad format without the arm ordering the two
         // calls by hand.
-        let dir = example_dir("scoped-open");
+        let dir = crate::scratch::ScratchDir::new("saniwalens-window", "scoped-open");
         let env = SessionEnv {
             state_home: Some(&dir),
             home: None,
@@ -830,7 +823,6 @@ mod tests {
             .open_scoped(None, None, &period, &read, panic_analyzer())
             .expect("the flags resolve and the store opens");
         assert_eq!(opened.filter, ScopeFilter::All);
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -838,7 +830,7 @@ mod tests {
         // doctor's --format set is table|json: the refusal is part of the
         // open, so it lands before the analyzer and the store's creation.
         // `md` resolves to markdown elsewhere; here it is simply unaccepted.
-        let dir = example_dir("doctor-open");
+        let dir = crate::scratch::ScratchDir::new("saniwalens-window", "doctor-open");
         let env = SessionEnv {
             state_home: Some(&dir),
             home: None,
@@ -881,7 +873,6 @@ mod tests {
             assert_eq!(opened.read.format, expected);
             assert_eq!(opened.filter, ScopeFilter::Project(None));
         }
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -889,7 +880,7 @@ mod tests {
         // trend's open: format, then the pair, then the store — the same
         // flags-before-store order, with the pair resolution where the
         // single-window views' period sits.
-        let dir = example_dir("pair-open");
+        let dir = crate::scratch::ScratchDir::new("saniwalens-window", "pair-open");
         let env = SessionEnv {
             state_home: Some(&dir),
             home: None,
@@ -943,6 +934,5 @@ mod tests {
             opened.pair.current.start.unwrap()
         );
         assert_eq!(opened.sess.db_path, dir.join("store.db"));
-        let _ = std::fs::remove_dir_all(&dir);
     }
 }

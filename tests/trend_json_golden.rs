@@ -10,6 +10,9 @@ use saniwalens::core::span::{SessionStart, Source, Span};
 use saniwalens::store::{IngestBatch, OpenMode, SessionMeta, Store};
 use std::path::{Path, PathBuf};
 
+mod common;
+use common::ScratchDir;
+
 /// A synthetic session stamped at `epoch_secs` (1970) with subagent use.
 fn session(id: &str, epoch_secs: i64, sub_tokens: i64, sub_agents: i64) -> SessionMeta {
     SessionMeta {
@@ -143,17 +146,6 @@ fn trend_output(dir: &Path, db: &Path, format: &str) -> String {
         String::from_utf8_lossy(&out.stderr)
     );
     String::from_utf8(out.stdout).unwrap()
-}
-
-/// A per-test scratch dir, cleaned up afterwards — synthetic only.
-fn scratch_dir(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!(
-        "saniwalens-trend-json-golden-{}-{name}",
-        std::process::id()
-    ));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).unwrap();
-    dir
 }
 
 /// The captured JSON machine contract: both windows' ranges under `window`,
@@ -291,14 +283,13 @@ const GOLDEN: &str = r#"{
 
 #[test]
 fn the_trend_json_contract_is_pinned_golden() {
-    let dir = scratch_dir("contract");
+    let dir = ScratchDir::new("saniwalens-trend-json-golden", "contract");
     let db = write_store(&dir);
     let out = trend_output(&dir, &db, "json");
     assert_eq!(
         out, GOLDEN,
         "the trend JSON contract drifted — actual:\n{out}"
     );
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
@@ -309,7 +300,7 @@ fn the_trend_json_reason_separates_a_measured_zero_from_an_absent_baseline() {
     // `"reason": "no_baseline"` and a null delta. The totals carry a measured
     // zero the same way: a previous session that ran no subagent measured 0
     // runs, which compares (0 -> 0, same), not an unavailable row.
-    let dir = scratch_dir("present-zero");
+    let dir = ScratchDir::new("saniwalens-trend-json-golden", "present-zero");
     let db = write_present_zero_store(&dir);
     let out = trend_output(&dir, &db, "json");
     let json: serde_json::Value = serde_json::from_str(&out).expect("the contract is JSON");
@@ -368,5 +359,4 @@ fn the_trend_json_reason_separates_a_measured_zero_from_an_absent_baseline() {
         !out.contains("\"no_baseline\""),
         "a measured zero is not an absent baseline: {out}"
     );
-    let _ = std::fs::remove_dir_all(&dir);
 }
