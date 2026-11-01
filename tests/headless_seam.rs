@@ -116,7 +116,7 @@ impl Drop for StopOnDrop {
 }
 
 #[test]
-fn the_heartbeat_beats_on_the_cadence_and_stops() {
+fn the_heartbeat_samples_events_and_stops_cleanly() {
     // Synthetic run state — no process, no log: the quiet-stretch logic alone.
     let stop = Arc::new(AtomicBool::new(false));
     let events = Arc::new(AtomicUsize::new(0));
@@ -161,9 +161,11 @@ fn the_heartbeat_beats_on_the_cadence_and_stops() {
     }
 
     // Flipping `stop` ends the thread: its sender drops and the receiver
-    // disconnects. A beat produced before the stop may still arrive, and the
-    // loop sends at most one after it observes the stop — a structural
-    // invariant of its two checks, not a quantity this test can count.
+    // disconnects. A beat produced before the stop may still arrive, and at
+    // most one beat is sent between the flag being set and the second stop
+    // check observing it — a structural invariant of the two checks, not a
+    // quantity this test can count.
+    // The disconnect cannot tell a stop-honoring exit from an early self-destruction.
     stop.store(true, Ordering::Relaxed);
     let deadline = Instant::now() + OBSERVE;
     loop {
