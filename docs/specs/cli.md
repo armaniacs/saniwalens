@@ -477,7 +477,10 @@ launches the harness's agent seeded with it ― `claude` for an interactive
 session that applies edits on agreement, `opencode run --format json` for a
 headless run that streams only the agent's text while the raw tool output
 logs to a private file (`--verbose` restores the raw stream) and prints the
-plan without editing. The prompt makes
+plan without editing. The private log lives for the whole run and is named in
+any failure, so a failed advisor still leaves its full output reachable; the
+run's child and heartbeat thread are torn down on every exit path, not only on
+success (`cli/headless.rs`). The prompt makes
 the session **investigate autonomously to a conclusion**: it pins down each root
 cause and proposes a concrete fix, rather than handing the analysis back with a
 "which area do you want to start with?". It prioritises work friction over config

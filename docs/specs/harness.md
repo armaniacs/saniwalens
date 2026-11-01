@@ -159,7 +159,10 @@ the plan) on stdout, one-line tool markers on stderr ― while every raw line
 and the child's stderr go to a private (`0600`) log file whose path is
 printed up front. Rendering is lenient (the upstream event shapes are
 unversioned): a line with no recognizable text stays in the log, and a run
-that renders nothing readable says so instead of leaving silence.
+that renders nothing readable says so instead of leaving silence. Every exit
+from the run ― success, a failed read, a failed spawn, or a failed wait ―
+stops the beat and reaps the child; a failure is reported with the raw log's
+path so the full output is still reachable (`cli/headless.rs`).
 `--verbose` inherits stdio for the raw streaming instead.
 
 Under kilocode the briefing composes from the store either way, so `--print`

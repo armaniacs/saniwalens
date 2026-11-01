@@ -9,7 +9,6 @@ use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 
 use crate::adapter::harness::{Harness, RunLineRenderer, home_dir};
-use crate::adapter::opencode::RunEvent;
 use crate::core::bucket::{Bucket, JST_OFFSET_SECS, bucket_label};
 use crate::core::findings;
 use crate::core::friction::ErrorCategory;
@@ -28,6 +27,7 @@ use crate::session::{
 };
 use crate::store::{OpenMode, Store};
 
+pub(crate) mod headless;
 pub mod heartbeat;
 pub(crate) mod report;
 pub(crate) mod trend;
@@ -548,7 +548,7 @@ impl AdvisorLaunch for ProcessAdvisor {
         prompt: &str,
         render: Option<RunLineRenderer>,
     ) -> Result<(std::process::ExitStatus, PathBuf)> {
-        run_headless(binary, leading, prompt, render)
+        headless::run_headless(binary, leading, prompt, render, headless::Beat::default())
     }
 }
 
@@ -687,98 +687,8 @@ fn optimize(
     Ok(())
 }
 
-/// Run the headless advisor with its raw output logged: spawn with stdout
-/// piped, write every raw line (and the child's stderr) to a private log, and
-/// surface only what the agent says — text parts on stdout (so a pipe like
-/// `| pbcopy` receives the narration and the plan), one-line progress markers
-/// on stderr. The `render_line` is the harness seam's choice
-/// (`Harness::run_line_renderer`), so this loop names no harness. A heartbeat
-/// covers quiet stretches (a long tool call, model thinking) so the run never
-/// looks hung. Returns the log path so the caller can point at the full
-/// detail. The raw event shapes are unversioned upstream, so rendering is
-/// lenient: a line with no recognizable text stays in the log, and a run that
-/// renders nothing readable says so instead of leaving silence.
-fn run_headless(
-    binary: &str,
-    leading: &[&str],
-    prompt: &str,
-    render_line: Option<RunLineRenderer>,
-) -> Result<(std::process::ExitStatus, PathBuf)> {
-    use std::io::{BufRead, Write};
-    use std::sync::Arc;
-    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-
-    let log_path = private_temp_path("saniwalens-run", "log");
-    write_private_file(&log_path, "").context("create run log")?;
-    let mut log = fs::OpenOptions::new()
-        .append(true)
-        .open(&log_path)
-        .context("open run log")?;
-    let child_err = fs::OpenOptions::new()
-        .append(true)
-        .open(&log_path)
-        .context("open run log for the advisor")?;
-
-    eprintln!(
-        "{}",
-        Style::stderr().dim(&format!(
-            "advisor running headlessly — raw progress: {}",
-            log_path.display()
-        ))
-    );
-
-    // A dim beat every 30s while the advisor works, so silence reads as
-    // waiting, not a hang — the quiet-stretch logic lives in `heartbeat`.
-    let events = Arc::new(AtomicUsize::new(0));
-    let stop = Arc::new(AtomicBool::new(false));
-    let (heartbeat, _beats) = heartbeat::spawn(
-        Arc::clone(&stop),
-        Arc::clone(&events),
-        heartbeat::CADENCE,
-        heartbeat::POLL,
-    );
-
-    let mut launch = std::process::Command::new(binary);
-    launch.args(leading).arg(prompt);
-    launch
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::from(child_err));
-    let mut child = launch.spawn()?;
-    let stdout = child.stdout.take().context("pipe the advisor's stdout")?;
-
-    let mut readable = false;
-    for line in std::io::BufReader::new(stdout).lines() {
-        let line = line.context("read the advisor's output")?;
-        events.fetch_add(1, Ordering::Relaxed);
-        writeln!(log, "{line}").context("write the run log")?;
-        match render_line.map_or(RunEvent::Silent, |render| render(&line)) {
-            RunEvent::Text(text) => {
-                readable = true;
-                println!("{text}");
-            }
-            RunEvent::Progress(tool) => {
-                eprintln!("{}", Style::stderr().dim(&format!("  → {tool}")));
-            }
-            RunEvent::Silent => {}
-        }
-    }
-    let status = child.wait()?;
-    stop.store(true, Ordering::Relaxed);
-    heartbeat.join().ok();
-    if status.success() && !readable {
-        eprintln!(
-            "{}",
-            Style::stderr().dim(&format!(
-                "the advisor produced no readable text — full output: {}",
-                log_path.display()
-            ))
-        );
-    }
-    Ok((status, log_path))
-}
-
 /// A fresh private temp path for `prefix`, unique per process and call.
-fn private_temp_path(prefix: &str, ext: &str) -> PathBuf {
+pub(crate) fn private_temp_path(prefix: &str, ext: &str) -> PathBuf {
     // The clock is here to avoid a collision with a leftover file, not to be
     // unguessable — exclusive creation is what makes guessing the name useless.
     let nanos = std::time::SystemTime::now()
@@ -809,7 +719,7 @@ fn write_private_tempfile(contents: &str) -> Result<PathBuf> {
 /// users out, so the guarantee there rests on the directory rather than the
 /// file. Setting an explicit ACL would mean a new dependency for a second lock
 /// on a door that is already locked.
-fn write_private_file(path: &Path, contents: &str) -> Result<()> {
+pub(crate) fn write_private_file(path: &Path, contents: &str) -> Result<()> {
     use std::io::Write;
 
     let mut opts = fs::OpenOptions::new();

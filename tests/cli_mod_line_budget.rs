@@ -10,14 +10,13 @@
 //! tripwire does not grow the very file it guards.
 
 /// The measured size of `src/cli/mod.rs` at the latest budget change (the
-/// PBI 49 measurement of 2026-11-02: 3,089 lines, after the period-flags
-/// test's hand-written view list moved onto the clap-derived set in
-/// `cli/window.rs`; the PBI 42 measurement was 3,100, the PBI 40 measurement
-/// 3,110, the PBI 38 measurement 3,322 and the PBI 34 landing measured
-/// 3,383), with no slack — raising this constant is a review point, done in
-/// the same PR as the spec update it forces
-/// (`docs/specs/architecture.md`).
-const MOD_RS_LINE_BUDGET: usize = 3089;
+/// PBI 52 measurement of 2026-11-02: 3,000 lines, after `run_headless` and its
+/// guard moved to `cli/headless.rs`; the PBI 49 measurement was 3,089, the
+/// PBI 42 measurement 3,100, the PBI 40 measurement 3,110, the PBI 38
+/// measurement 3,322 and the PBI 34 landing measured 3,383), with no slack —
+/// raising this constant is a review point, done in the same PR as the spec
+/// update it forces (`docs/specs/architecture.md`).
+const MOD_RS_LINE_BUDGET: usize = 3000;
 
 /// The remedy half of the tripwire's failure message, pinned here so its
 /// wording cannot drift away from what it prescribes.
