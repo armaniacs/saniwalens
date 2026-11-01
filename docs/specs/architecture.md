@@ -152,8 +152,8 @@ rule's enumeration, the ledger's deferral note, and the tripwire itself. The
 tripwire's direction flips with the move ― its move-side test stops asserting
 that the definitions still sit in `src/store.rs` and starts asserting that they
 sit in core and no longer in the store, while the constant keeps every entry.
-The flip is not a follow-up: an emptied constant makes the tripwire pass
-without checking anything, and a tombstone comment satisfies a raw `contains`.
+The flip is not a follow-up: an emptied array makes both sides of the tripwire
+pass vacuously, and a tombstone comment satisfies a raw `contains`.
 Retiring the tripwire instead rewrites the two prose anchors that name it (the
 rule and this section) in the same PR.
 

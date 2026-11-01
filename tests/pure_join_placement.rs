@@ -64,20 +64,25 @@ fn move_message(definition: &str) -> String {
 }
 
 /// The symbols the rule names as the 1st pattern, parsed from its enumeration
-/// paragraph rather than from the definition markers: dropping one entry on
-/// either side must fail the set comparison below.
+/// bullet rather than from the definition markers: dropping one entry on
+/// either side must fail the set comparison below. The bullet is cut at the
+/// next bullet or paragraph boundary, so the follow-on contract bullets cannot
+/// leak identifiers into the set.
 fn rule_named_symbols(rule: &str) -> std::collections::BTreeSet<&str> {
-    const MARKER: &str = "The 1st pattern, named:";
+    const MARKER: &str = "- The 1st pattern, named:";
     let start = rule
         .find(MARKER)
         .unwrap_or_else(|| panic!("the rule must carry the 1st pattern's enumeration"))
         + MARKER.len();
-    let paragraph = rule[start..]
+    let bullet = rule[start..]
+        .split("\n- ")
+        .next()
+        .expect("the enumeration bullet is never empty")
         .split("\n\n")
         .next()
-        .expect("the enumeration paragraph is never empty");
+        .expect("the enumeration bullet is never empty");
     let mut symbols = std::collections::BTreeSet::new();
-    let mut rest = paragraph;
+    let mut rest = bullet;
     while let Some(open) = rest.find('`') {
         let after = &rest[open + 1..];
         let close = after
