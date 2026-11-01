@@ -189,7 +189,13 @@ shares the event stream, so a headless kilo run is the same arm ― still gated
 on `--auto` by the launch shape above. The quiet-stretch logic the loop leans
 on lives in one place too (`heartbeat`, `cli/heartbeat.rs`), so the due
 decision is a pure function and the beat model in its tests drives the same
-decision as the spawn.
+decision as the spawn. What the seam's test pins is the sample sequence and
+the stop, not the spacing: a beat carries the count it reads when it fires (0
+before any event streams, then the count at that moment), and after `stop`
+flips the thread exits and the receiver disconnects. The cadence itself is not
+pinned by a test. That a stopped loop sends at most one more beat is a
+structural invariant of its two stop checks, not an observed quantity ― a beat
+queued before the stop is indistinguishable from one sent after it.
 `CADENCE` (30s) is the minimum spacing between beats and `POLL` (500ms) is how
 often the thread wakes to re-check `stop` and to see whether the next beat is
 due. A beat fires when the observed elapsed time reaches its deadline, and the

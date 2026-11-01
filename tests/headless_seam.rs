@@ -1,14 +1,16 @@
 //! The headless run's seam, end to end through the delivery: the renderer the
 //! harness chose reaches the advisor, and the heartbeat's quiet-stretch logic
-//! — the beat cadence and the stop handling — is pinned in one place. No
-//! process spawns here; the fixtures are synthetic and the streams they stand
-//! for never touch real data.
+//! is observed through a sample sequence. A beat samples the run state when it
+//! fires; the number of beats and their timing are outside the test's control,
+//! so the test waits for the samples it needs instead of assuming an order.
+//! No process spawns here; the fixtures are synthetic and the streams they
+//! stand for never touch real data.
 
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::RecvTimeoutError;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use saniwalens::adapter::harness::{Harness, RunLineRenderer};
@@ -97,44 +99,85 @@ fn the_quiet_headless_delivery_hands_the_advisor_the_seam_renderer() {
     assert_eq!(render(TOOL_LINE), RunEvent::Progress("read".to_string()));
 }
 
+/// The budget for one phase of the observation, far above one poll (5ms), so a
+/// descheduled test thread still reaches the sample it is waiting for. It is a
+/// total budget, not a per-receive timeout: a loop that keeps receiving the
+/// wrong sample must still fail instead of spinning.
+const OBSERVE: Duration = Duration::from_secs(2);
+
+/// Stop the heartbeat thread on the way out, panic or not. Without it a failed
+/// assertion leaves the thread beating to stderr for the rest of the binary.
+struct StopOnDrop(Arc<AtomicBool>);
+
+impl Drop for StopOnDrop {
+    fn drop(&mut self) {
+        self.0.store(true, Ordering::Relaxed);
+    }
+}
+
 #[test]
 fn the_heartbeat_beats_on_the_cadence_and_stops() {
     // Synthetic run state — no process, no log: the quiet-stretch logic alone.
     let stop = Arc::new(AtomicBool::new(false));
     let events = Arc::new(AtomicUsize::new(0));
     // Shrunk to keep the test quick and degenerate on purpose: cadence (1ms)
-    // is below poll (5ms), so the beat follows the poll. The cadence and the
-    // dropped-slot contract are pinned by the pure decision function and its
-    // beat model in `cli::heartbeat` tests; this test only needs one beat and
-    // the stop.
+    // is below poll (5ms), so the beat follows the poll. The due decision and
+    // the dropped-slot contract are pinned by the pure decision function and
+    // its beat model in `cli::heartbeat` tests; this test only observes the
+    // samples it needs.
     let (handle, beats) = heartbeat::spawn(
         Arc::clone(&stop),
         Arc::clone(&events),
         Duration::from_millis(1),
         Duration::from_millis(5),
     );
+    let _stop_on_drop = StopOnDrop(Arc::clone(&stop));
 
-    // A beat fires on the cadence and carries the streamed-event count, so a
-    // quiet stretch reads as waiting, not a hang.
-    events.fetch_add(3, Ordering::Relaxed);
-    let (_, count) = beats
-        .recv_timeout(Duration::from_secs(2))
+    // The first beat samples the run before any event has streamed, so it
+    // carries 0. Waiting for it here makes the order deterministic: the add
+    // below can only happen after a beat has already read the empty count.
+    let (_, first) = beats
+        .recv_timeout(OBSERVE)
         .expect("a beat while the run works");
-    assert!(count >= 3, "the beat counts the streamed events");
+    assert_eq!(first, 0, "the first beat samples the run before any event");
 
-    // Flipping `stop` ends the thread: its sender drops, and at most one beat
-    // already in flight precedes the disconnect.
-    stop.store(true, Ordering::Relaxed);
-    let mut stragglers = 0;
+    // Only now add events. A beat carrying the new count proves the loop
+    // re-reads the counter at every beat instead of caching it at thread start.
+    events.fetch_add(3, Ordering::Relaxed);
+    let deadline = Instant::now() + OBSERVE;
     loop {
-        match beats.recv_timeout(Duration::from_secs(2)) {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            panic!("no beat carried the new count within {OBSERVE:?}");
+        }
+        match beats.recv_timeout(remaining) {
+            Ok((_, count)) => {
+                if count == 3 {
+                    break;
+                }
+            }
+            Err(e) => panic!("no beat carried the new count: {e:?}"),
+        }
+    }
+
+    // Flipping `stop` ends the thread: its sender drops and the receiver
+    // disconnects. A beat produced before the stop may still arrive, and the
+    // loop sends at most one after it observes the stop — a structural
+    // invariant of its two checks, not a quantity this test can count.
+    stop.store(true, Ordering::Relaxed);
+    let deadline = Instant::now() + OBSERVE;
+    loop {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            panic!("the heartbeat kept running past the stop flag");
+        }
+        match beats.recv_timeout(remaining) {
             Err(RecvTimeoutError::Disconnected) => break,
-            Ok(_) => stragglers += 1,
+            Ok(_) => {}
             Err(RecvTimeoutError::Timeout) => {
                 panic!("the heartbeat kept running past the stop flag")
             }
         }
-        assert!(stragglers <= 1, "the heartbeat kept beating past the stop");
     }
-    handle.join().unwrap();
+    handle.join().expect("the heartbeat thread exits cleanly");
 }

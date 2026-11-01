@@ -7,8 +7,8 @@
 //! A beat missed while the thread is starved is dropped, not replayed: the
 //! next deadline counts from the observation, so the resume beat is followed
 //! by a full [`CADENCE`].
-//! The loop lives here, apart from the spawn and the log, so the beat cadence
-//! and the stop handling are pinned in one place (`docs/specs/harness.md`).
+//! The loop lives here, apart from the spawn and the log, so the beat decision
+//! and the stop handling live in one place (`docs/specs/harness.md`).
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -44,9 +44,12 @@ fn take_beat(elapsed: Duration, next: &mut Duration, cadence: Duration) -> bool 
 
 /// Spawn the heartbeat thread: a dim beat to stderr every `cadence` while the
 /// advisor works — elapsed seconds and how many events have streamed, so
-/// silence reads as waiting, not a hang — until `stop` flips. Each beat also
-/// arrives on the returned receiver, which disconnects the moment the thread
-/// exits: the observation point that pins the cadence and the stop handling.
+/// silence reads as waiting, not a hang — until `stop` flips. The beats are a
+/// sample sequence: the caller sees only the samples the receiver buffered,
+/// not how many were produced or when. The returned receiver disconnects when
+/// the thread exits, which is the stop the seam's test observes; a stopped
+/// loop sends at most one more beat, a structural invariant of its two checks,
+/// not an observed count.
 pub fn spawn(
     stop: Arc<AtomicBool>,
     events: Arc<AtomicUsize>,
