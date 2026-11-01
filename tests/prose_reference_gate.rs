@@ -154,28 +154,52 @@ fn is_history(relative: &Path) -> bool {
         || HISTORY_FILES.iter().any(|file| relative == Path::new(file))
 }
 
-/// Whether a root-relative path is current prose: `docs/specs/*.md`,
-/// `.claude/rules/*.md`, `README.md`, or `AGENTS.md`. The positive twin of
-/// `is_history`, matched the same way, so neither side can drift into the
-/// other through a lookalike prefix.
+/// Whether a root-relative path is current prose: a `.md` directly under one of
+/// `CURRENT_PROSE_DIRS`, or one of `CURRENT_PROSE_FILES` at the root. Depth and
+/// extension are part of the contract, so `docs/specs/nested/x.md` and a
+/// non-`.md` lookalike are not current prose.
 fn is_current_prose(relative: &Path) -> bool {
-    CURRENT_PROSE_DIRS
+    if !relative
+        .extension()
+        .is_some_and(|extension| extension == OsStr::new("md"))
+    {
+        return false;
+    }
+    CURRENT_PROSE_FILES
         .iter()
-        .any(|dir| relative.starts_with(dir))
-        || CURRENT_PROSE_FILES
+        .any(|file| relative == Path::new(file))
+        || CURRENT_PROSE_DIRS
             .iter()
-            .any(|file| relative == Path::new(file))
+            .any(|dir| relative.parent() == Some(Path::new(dir)))
 }
 
-/// The current prose only: `docs/specs/*.md`, `.claude/rules/*.md`, plus
-/// `README.md` and `AGENTS.md`. History (`docs/pr`, `docs/exploration`, `pbi/`,
-/// `CHANGELOG.md`) is deliberately absent: stale paths in history are records,
-/// not anchors. `is_current_prose` re-checks every returned path relative to
-/// the root, so this list cannot drift into history unnoticed.
+/// `rel`, but a file outside the root is a broken scan: fail the gate with the
+/// offending path instead of displaying it as an absolute path or classifying
+/// it by its checkout location.
+fn rel_or_fail<'a>(root: &Path, file: &'a Path) -> &'a Path {
+    rel(root, file).unwrap_or_else(|| {
+        panic!(
+            "gate failure: scan file {} is outside the manifest root {}",
+            file.display(),
+            root.display()
+        )
+    })
+}
+
+/// The current prose only, built from the same constants `is_current_prose`
+/// checks: `CURRENT_PROSE_FILES` at the root plus the `.md` files directly under
+/// `CURRENT_PROSE_DIRS`. History (`HISTORY_DIRS`, `HISTORY_FILES`) is
+/// deliberately absent: stale paths in history are records, not anchors. The
+/// `the_scan_list_is_current_prose_only` test re-checks every returned path
+/// relative to the root, so this list cannot drift into history unnoticed.
 fn scan_files(root: &Path) -> Vec<PathBuf> {
-    let mut files = vec![root.join("README.md"), root.join("AGENTS.md")];
-    files.extend(md_files_under(root, Path::new("docs/specs")));
-    files.extend(md_files_under(root, Path::new(".claude/rules")));
+    let mut files: Vec<PathBuf> = CURRENT_PROSE_FILES
+        .iter()
+        .map(|file| root.join(file))
+        .collect();
+    for &dir in CURRENT_PROSE_DIRS {
+        files.extend(md_files_under(root, Path::new(dir)));
+    }
     files
 }
 
@@ -185,16 +209,7 @@ fn collect_misses(root: &Path) -> Vec<Miss> {
     for path in scan_files(root) {
         let text = std::fs::read_to_string(&path)
             .unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()));
-        // A scan file outside the root is a broken scan, not a display
-        // problem: report it as a gate failure instead of showing an absolute
-        // path and classifying it by its checkout location.
-        let display = rel(root, &path).unwrap_or_else(|| {
-            panic!(
-                "gate failure: scan file {} is outside the manifest root {}",
-                path.display(),
-                root.display()
-            )
-        });
+        let display = rel_or_fail(root, &path);
         misses.extend(file_misses(root, &display.to_string_lossy(), &text));
     }
     misses
@@ -212,11 +227,14 @@ fn format_misses(misses: &[Miss]) -> String {
             miss.file, miss.line, miss.reference
         ));
     }
-    report.push_str(
+    let mut history: Vec<String> = HISTORY_DIRS.iter().map(|dir| format!("{dir}/")).collect();
+    history.extend(HISTORY_FILES.iter().map(|file| (*file).to_string()));
+    report.push_str(&format!(
         "re-point each anchor at the renamed or moved file (src doc comments, \
-         docs/specs/, .claude/rules/, README, AGENTS); docs/pr, \
-         docs/exploration, pbi/ and CHANGELOG.md are history and out of scope.",
-    );
+         docs/specs/, .claude/rules/, README, AGENTS); {} are history and out of \
+         scope.",
+        history.join(", ")
+    ));
     report
 }
 
@@ -333,13 +351,7 @@ fn the_scan_list_is_current_prose_only() {
     // root-relative path, so the checkout location cannot move it out of the
     // current prose or into history.
     for file in &files {
-        let relative = rel(root, file).unwrap_or_else(|| {
-            panic!(
-                "gate failure: scan file {} is outside the manifest root {}",
-                file.display(),
-                root.display()
-            )
-        });
+        let relative = rel_or_fail(root, file);
         assert!(
             is_current_prose(relative),
             "{} is not current prose",
@@ -368,7 +380,7 @@ fn the_scan_list_is_current_prose_only() {
         assert!(
             !files
                 .iter()
-                .any(|file| rel(root, file).is_some_and(|relative| relative.starts_with(history))),
+                .any(|file| rel_or_fail(root, file).starts_with(history)),
             "{history} must not be scanned: {files:?}"
         );
     }
@@ -380,7 +392,7 @@ fn the_scan_list_is_current_prose_only() {
         assert!(
             !files
                 .iter()
-                .any(|file| rel(root, file) == Some(Path::new(history))),
+                .any(|file| rel_or_fail(root, file) == Path::new(history)),
             "{history} must not be scanned: {files:?}"
         );
     }
@@ -407,10 +419,13 @@ fn classification_is_by_component_not_by_absolute_path_substring() {
         ("docs/privacy.md", false, false),
         ("pbi-notes.md", false, false),
         ("docs/specs-history/x.md", false, false),
+        // Depth and extension are part of the current-prose contract: the scan
+        // lists one level of `.md` files, not whole subtrees.
+        ("docs/specs/nested/x.md", false, false),
+        ("docs/specs/x.txt", false, false),
     ] {
         let file = root.join(path);
-        let relative = rel(root, &file)
-            .unwrap_or_else(|| panic!("gate failure: {path} is outside the synthetic root"));
+        let relative = rel_or_fail(root, &file);
         assert_eq!(relative, Path::new(path), "{path} must stay root-relative");
         assert_eq!(
             is_current_prose(relative),
@@ -457,19 +472,20 @@ fn parent_dir_is_not_history() {
 }
 
 #[test]
-fn native_separators_are_absorbed_by_path_components() {
+fn native_separator_paths_are_classified_component_wise() {
     // Windows joins with `\`, and `Path` splits it into components there; this
-    // pin is built with `push`, so it carries `\` on Windows and `/` here.
-    // The verdict comes from components, never from a rendered string, where
+    // pin is built with `push`, so it carries `\` on Windows and `/` here. The
+    // verdict comes from components, never from a rendered string, where
     // `docs\pr` would miss a `docs/pr` substring and leave the exclusion
-    // empty.
+    // empty. On Unix `\` is an ordinary character, so the `\`-separated case
+    // itself is only exercised on Windows (PBI 02 lands that host).
     let root = PathBuf::from("pbi-work").join("saniwalens");
 
     let mut history = root.clone();
     history.push("docs");
     history.push("pr");
     history.push("2026-01-01-01-x.md");
-    let relative = rel(&root, &history).expect("a file under the root has a relative path");
+    let relative = rel_or_fail(&root, &history);
     assert_eq!(relative, Path::new("docs/pr/2026-01-01-01-x.md"));
     assert!(is_history(relative), "{relative:?} must be history");
 
@@ -477,7 +493,7 @@ fn native_separators_are_absorbed_by_path_components() {
     prose.push("docs");
     prose.push("specs");
     prose.push("architecture.md");
-    let relative = rel(&root, &prose).expect("a file under the root has a relative path");
+    let relative = rel_or_fail(&root, &prose);
     assert!(
         is_current_prose(relative),
         "{relative:?} must be current prose"
