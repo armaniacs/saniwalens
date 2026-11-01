@@ -216,7 +216,7 @@ The windowed report views above take `--since` / `--until` / `--last` so "what d
 the agent cost last week" is a view flag, not a `sql` query. The other commands
 (`analyze`, `sql`, `optimize`) take none ― they are whole-history by contract.
 Which commands are windowed is derived from the subcommand tree (a command
-carrying the shared `--last`), never a hand-maintained list: every subcommand
+carrying `--last`), never a hand-maintained list: every subcommand
 must resolve to windowed or whole-history, and `tests/cli_help_golden.rs` pins
 that partition beside the `--help` captures.
 

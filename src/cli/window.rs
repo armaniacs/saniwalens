@@ -351,12 +351,13 @@ pub(crate) fn unused_label(window: TimeRange) -> &'static str {
 }
 
 /// The windowed views, derived from clap's subcommand tree: a subcommand is
-/// windowed iff it carries the shared `--last` (the period group's
-/// discriminator, `PairArgs` included). Derived, not listed: the conflict and
+/// windowed iff it carries `--last` (the period group's discriminator;
+/// trend's pair declares its own). Derived, not listed: the conflict and
 /// period tests below follow a view added to `Command` without a list to
 /// update. `Cli::command()` is deliberately not `build()`t — build pushes the
 /// `help` subcommand in, and the partition test in `tests/cli_help_golden.rs`
-/// would then see a command it cannot classify.
+/// would then see a command it cannot classify. Keep in sync with
+/// `windowed_views()` there (the same derivation, for the capture tripwire).
 #[cfg(test)]
 pub(crate) fn windowed_views() -> Vec<String> {
     use clap::CommandFactory;
@@ -623,8 +624,9 @@ mod tests {
         // doctor — are asserted here rather than left to the core's second
         // defense, whose wording and exit code differ from the clap
         // conflict's). trend's pair carries the same conflicts on its own
-        // declaration; the loop includes it so the set stays clap's, and the
-        // flag extraction below exercises the pair arm too.
+        // declaration; the loop below runs on every windowed view (the
+        // derived set, trend included) so the set stays clap's, and the flag
+        // extraction below exercises the pair arm too.
         for view in windowed_views() {
             let view = view.as_str();
             let err =

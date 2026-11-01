@@ -184,11 +184,13 @@ Options:
 "#;
 
 /// The windowed views, derived from the subcommand tree: a subcommand is a
-/// windowed view iff it carries the shared `--last` (the period group's
-/// discriminator). The tree is the single source of truth — a view added to
-/// `Command` appears here without a list to update. `Cli::command()` is
-/// deliberately not `build()`t: build pushes the `help` subcommand in, which
-/// would land in the partition check below.
+/// windowed view iff it carries `--last` (the period group's discriminator;
+/// trend's pair declares its own). The tree is the single source of truth — a
+/// view added to `Command` appears here without a list to update.
+/// `Cli::command()` is deliberately not `build()`t: build pushes the `help`
+/// subcommand in, which would land in the partition check below. Keep in sync
+/// with `cli::window::windowed_views()` in `src/cli/window.rs` (the same
+/// derivation, for the conflict and period pins).
 fn windowed_views() -> Vec<String> {
     saniwalens::cli::Cli::command()
         .get_subcommands()
@@ -298,11 +300,17 @@ fn every_subcommand_is_either_windowed_or_whole_history() {
     }
     all.sort();
     covered.sort();
+    // Name the two ways the partition can fail, so the failure itself says
+    // which side to fix: a subcommand no set claims (uncovered), or a name
+    // `WHOLE_HISTORY` lists that the CLI no longer has (stale).
+    let uncovered: Vec<&String> = all.iter().filter(|name| !covered.contains(name)).collect();
+    let stale: Vec<&String> = covered.iter().filter(|name| !all.contains(name)).collect();
     assert_eq!(
         covered, all,
-        "a subcommand is neither a windowed view nor whole-history: give it the shared \
-         period group, or add it to `WHOLE_HISTORY` in this file. See \
-         `.claude/rules/cli-view-addition.md`."
+        "the subcommand partition is incomplete: {uncovered:?} is neither windowed (it carries \
+         no `--last`) nor whole-history; {stale:?} is listed but is no longer a subcommand. \
+         Give the command the shared period group, or add it to `WHOLE_HISTORY` in this file. \
+         See `.claude/rules/cli-view-addition.md`."
     );
 }
 
