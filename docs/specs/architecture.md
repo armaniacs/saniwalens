@@ -143,8 +143,19 @@ values, no SQLite ― is core's wherever it is called from today
   `store.rs` fires the same obligation in the PR that lands it.
 - The trigger is grep-able, not a parser: the rule enumerates the symbols, and
   `tests/pure_join_placement.rs` fails when the enumeration and `store.rs`
-  drift apart. When the move lands, the core row above, the rule's
-  enumeration, and the ledger's deferral note move with it in the same PR.
+  drift apart. When the move lands, the core row above, the rule's enumeration,
+  the ledger's deferral note, and the tripwire's own move side all change in
+  the same PR.
+
+When the move lands, four points land in one PR: the core row above, the
+rule's enumeration, the ledger's deferral note, and the tripwire itself. The
+tripwire's direction flips with the move ― its move-side test stops asserting
+that the definitions still sit in `src/store.rs` and starts asserting that they
+sit in core and no longer in the store, while the constant keeps every entry.
+The flip is not a follow-up: an emptied constant makes the tripwire pass
+without checking anything, and a tombstone comment satisfies a raw `contains`.
+Retiring the tripwire instead rewrites the two prose anchors that name it (the
+rule and this section) in the same PR.
 
 The contract between adapter and everything else is the **internal domain
 model** ― tool-centric names stable across Claude Code releases. Renaming an

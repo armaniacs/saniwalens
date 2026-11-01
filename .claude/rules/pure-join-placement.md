@@ -38,9 +38,17 @@ The house style is the opposite: `core/findings.rs` takes a store-free
   `pbi/2026-10-30-00-backlog.md`). Landing the move without the contract
   updates below, or parking the move behind a separate cleanup, both lose the
   trigger; the tripwire exists so neither can happen quietly.
-- When the move lands, the same PR updates this rule's enumeration below, the
-  core row of the layer table (`docs/specs/architecture.md`), and the ledger's
-  deferral note.
+- When the move lands, the same PR carries four points: this rule's
+  enumeration below, the core row of the layer table
+  (`docs/specs/architecture.md`), the ledger's deferral note
+  (`pbi/2026-10-30-00-backlog.md`), and `tests/pure_join_placement.rs` itself,
+  whose move-side test flips from "the definitions sit in `src/store.rs`" to
+  "they sit in core and no longer in the store". Emptying the constant,
+  dropping an entry, or satisfying it with a tombstone comment is not a
+  landing: an empty array makes both sides of the tripwire pass vacuously, and
+  `contains` reads comments as text. Retiring the file instead is allowed only
+  by rewriting the two prose anchors that name it (this rule and the
+  architecture paragraph) in the same PR.
 
 ## The trigger, judged: a grep-able contract, not a parser
 
