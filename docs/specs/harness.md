@@ -189,6 +189,16 @@ shares the event stream, so a headless kilo run is the same arm ― still gated
 on `--auto` by the launch shape above. The quiet-stretch logic the loop leans
 on lives in one place too (`heartbeat`, `cli/heartbeat.rs`), so the beat
 cadence and the stop handling are pinned by a test, not by the spawn.
+`CADENCE` (30s) is the minimum spacing between beats and `POLL` (500ms) is how
+often the thread wakes to re-check `stop` and to see whether the next beat is
+due. A beat fires when the observed elapsed time reaches its deadline, and the
+following deadline is then counted one cadence from that observation, not from
+the old deadline: the slots a stall swallowed (a process freeze, a blocked
+stderr) are dropped rather than replayed, so the resume shows one beat and the
+next one waits a full cadence instead of a back-to-back burst. The phase is not
+anchored to the start, and because the loop only looks after each poll, a
+cadence shorter than the poll is degenerate and beats on the poll, not on the
+cadence.
 
 ## Report copy names the harness
 

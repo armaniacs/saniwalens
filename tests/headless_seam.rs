@@ -102,6 +102,10 @@ fn the_heartbeat_beats_on_the_cadence_and_stops() {
     // Synthetic run state — no process, no log: the quiet-stretch logic alone.
     let stop = Arc::new(AtomicBool::new(false));
     let events = Arc::new(AtomicUsize::new(0));
+    // Shrunk to keep the test quick and degenerate on purpose: cadence (1ms)
+    // is below poll (5ms), so the beat follows the poll. The cadence and the
+    // dropped-slot contract are pinned by the unit tests in `cli::heartbeat`;
+    // this test only needs one beat and the stop.
     let (handle, beats) = heartbeat::spawn(
         Arc::clone(&stop),
         Arc::clone(&events),
