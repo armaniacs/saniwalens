@@ -104,8 +104,9 @@ fn the_heartbeat_beats_on_the_cadence_and_stops() {
     let events = Arc::new(AtomicUsize::new(0));
     // Shrunk to keep the test quick and degenerate on purpose: cadence (1ms)
     // is below poll (5ms), so the beat follows the poll. The cadence and the
-    // dropped-slot contract are pinned by the unit tests in `cli::heartbeat`;
-    // this test only needs one beat and the stop.
+    // dropped-slot contract are pinned by the pure decision function and its
+    // beat model in `cli::heartbeat` tests; this test only needs one beat and
+    // the stop.
     let (handle, beats) = heartbeat::spawn(
         Arc::clone(&stop),
         Arc::clone(&events),

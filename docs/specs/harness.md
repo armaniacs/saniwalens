@@ -187,8 +187,9 @@ either way (the upstream event shapes are unversioned). Claude's launch opens
 interactively, so it has no headless renderer; kilo is an OpenCode fork and
 shares the event stream, so a headless kilo run is the same arm ― still gated
 on `--auto` by the launch shape above. The quiet-stretch logic the loop leans
-on lives in one place too (`heartbeat`, `cli/heartbeat.rs`), so the beat
-cadence and the stop handling are pinned by a test, not by the spawn.
+on lives in one place too (`heartbeat`, `cli/heartbeat.rs`), so the due
+decision is a pure function and the beat model in its tests drives the same
+decision as the spawn.
 `CADENCE` (30s) is the minimum spacing between beats and `POLL` (500ms) is how
 often the thread wakes to re-check `stop` and to see whether the next beat is
 due. A beat fires when the observed elapsed time reaches its deadline, and the

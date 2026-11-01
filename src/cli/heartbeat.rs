@@ -27,8 +27,19 @@ pub const POLL: Duration = Duration::from_millis(500);
 /// later, counted from the observation rather than from the previous deadline.
 /// A stall therefore costs the slots it swallowed instead of replaying them
 /// back-to-back when the loop resumes.
-pub fn next_deadline(elapsed: Duration, cadence: Duration) -> Duration {
+fn next_deadline(elapsed: Duration, cadence: Duration) -> Duration {
     elapsed.saturating_add(cadence)
+}
+
+/// Decide whether a beat is due at `elapsed` and, when it is, move `next` one
+/// cadence past this observation. The spawn loop and the test's beat model
+/// both drive this decision, so neither can drift from the other.
+fn take_beat(elapsed: Duration, next: &mut Duration, cadence: Duration) -> bool {
+    if elapsed < *next {
+        return false;
+    }
+    *next = next_deadline(elapsed, cadence);
+    true
 }
 
 /// Spawn the heartbeat thread: a dim beat to stderr every `cadence` while the
@@ -55,8 +66,7 @@ pub fn spawn(
                 return;
             }
             let elapsed = start.elapsed();
-            if elapsed >= next {
-                next = next_deadline(elapsed, cadence);
+            if take_beat(elapsed, &mut next, cadence) {
                 let secs = elapsed.as_secs();
                 let count = events.load(Ordering::Relaxed);
                 eprintln!(
@@ -77,13 +87,12 @@ mod tests {
     use super::*;
 
     /// The beat timeline a poll loop produces for `samples`: one observation
-    /// per poll, the next deadline counted from the observed elapsed.
+    /// per poll, each one handed to the same decision the spawn loop uses.
     fn beats_on(samples: impl IntoIterator<Item = Duration>, cadence: Duration) -> Vec<Duration> {
         let mut next = cadence;
         let mut beats = Vec::new();
         for elapsed in samples {
-            if elapsed >= next {
-                next = next_deadline(elapsed, cadence);
+            if take_beat(elapsed, &mut next, cadence) {
                 beats.push(elapsed);
             }
         }
@@ -99,6 +108,11 @@ mod tests {
             "a deadline six cadences behind is not replayed: the next beat is one cadence from now"
         );
         assert_eq!(next_deadline(Duration::ZERO, cadence), cadence);
+        assert_eq!(
+            next_deadline(Duration::MAX, cadence),
+            Duration::MAX,
+            "the deadline saturates instead of panicking at the Duration ceiling"
+        );
     }
 
     #[test]
