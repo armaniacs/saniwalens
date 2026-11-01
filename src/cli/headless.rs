@@ -137,11 +137,21 @@ impl HeadlessRun {
         &self.log_path
     }
 
-    /// Wait for the child and hand back its status. The child is taken out of
-    /// the guard so `Drop` has nothing left to kill on the success path.
+    /// Wait for the child and hand back its status. The child stays in the
+    /// guard until the wait succeeds, so a failed wait still leaves it for
+    /// `Drop` to kill and reap; only a waited child is taken out.
     fn wait_for_status(&mut self) -> Result<ExitStatus> {
-        let mut child = self.child.take().context("the advisor child is missing")?;
-        child.wait().context("wait for the advisor")
+        let status = {
+            let child = self
+                .child
+                .as_mut()
+                .context("the advisor child is missing")?;
+            child.wait().context("wait for the advisor")
+        };
+        if status.is_ok() {
+            self.child = None;
+        }
+        status
     }
 }
 
@@ -214,7 +224,12 @@ fn drive(
     if let Some(child_err) = run.take_child_err() {
         launch.stderr(Stdio::from(child_err));
     }
-    let child = launch.spawn()?;
+    let child = launch.spawn().with_context(|| {
+        format!(
+            "launch `{binary} {}` — is it installed and on PATH?",
+            leading.join(" ")
+        )
+    })?;
     run.adopt(child);
     let stdout = run.take_stdout().context("pipe the advisor's stdout")?;
 

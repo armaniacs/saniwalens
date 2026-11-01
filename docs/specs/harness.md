@@ -184,7 +184,7 @@ contract the analyze seam keeps (`Harness::analyze`).
 The headless raw stream renders through per-harness data on the seam too:
 `Harness::run_line_renderer` (`adapter::harness`) returns the adapter fn that
 turns one raw line into a `RunEvent` beside the launch shape, and the
-delivery plan carries it to `run_headless`, so the shell's logged loop
+delivery plan carries it to `run_headless`, so the `cli/headless.rs` logged loop
 receives the seam's choice instead of naming a module. Rendering stays lenient
 either way (the upstream event shapes are unversioned). Claude's launch opens
 interactively, so it has no headless renderer; kilo is an OpenCode fork and

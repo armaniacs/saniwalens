@@ -579,17 +579,12 @@ pub fn deliver(plan: DeliveryPlan<'_>, advisor: &mut impl AdvisorLaunch) -> Resu
         }
     };
 
-    let launch_note = || {
-        format!(
-            "launch `{} {}` — is {} installed and on PATH?",
-            binary,
-            leading.join(" ").trim_end(),
-            harness_name
-        )
-    };
+    let launch_note = format!(
+        "launch `{binary} {}` — is {harness_name} installed?",
+        leading.join(" ").trim_end()
+    );
     // Headless harnesses run piped unless --verbose: the raw stream is logged
-    // to a private file and only the agent's text streams on stdout; verbose
-    // keeps the raw streaming by handing the terminal over.
+    // to a private file; text streams on stdout, verbose keeps the raw stream.
     let (result, run_log) = if mode == DeliveryMode::Headless && !verbose {
         match advisor.headless(binary, leading, &prompt, render) {
             Ok((status, log)) => (Ok(status), Some(log)),
@@ -600,7 +595,12 @@ pub fn deliver(plan: DeliveryPlan<'_>, advisor: &mut impl AdvisorLaunch) -> Resu
     };
     let _ = fs::remove_file(&path);
 
-    let status = result.with_context(launch_note)?;
+    // Headless errors already name the raw log and, for a spawn failure, the
+    // launch hint; the interactive path keeps the launch hint as its context.
+    let status = match (mode, verbose) {
+        (DeliveryMode::Headless, false) => result?,
+        _ => result.with_context(move || launch_note)?,
+    };
     if !status.success() {
         match run_log {
             Some(log) => anyhow::bail!(
