@@ -74,13 +74,16 @@ built, so an invalid flag fails on its own ― no store open, no freshness line
 ahead of the error. The nine report views resolve those flags through the
 windowed dispatch in `cli/window.rs`: `WindowedDispatch::open` for the four
 views without `--scope` (format, then period, then `Session::open_read`),
-`open_scoped` for the four with it (scope, then format, then period, then the
-store), and `open_pair` for trend (format, then pair, then the store). The
-narrowing is carried by what each entry returns ― `open` gives a
+`open_scoped` for the three with it (`inventory`, `waste`, `failures`: scope,
+then format, then period, then the store), `open_scoped_table_json` for
+`doctor` (the same scope-first order, with the `table | json` vocabulary of the
+section below), and `open_pair` for trend (format, then pair, then the store).
+The narrowing is carried by what each entry returns ― `open` gives a
 `WindowedRead` (session, format, window), so the views that never filter have
-no filter to ignore, and only `open_scoped` gives a `ScopedRead` (that read
-plus the filter `--scope` selected); `optimize` is the exception that resolves
-the store path first, exactly as the pre-`Session` dispatch did. A relative `db` joins the directory holding `config.toml` ― never the
+no filter to ignore, and only the scoped entries (`open_scoped` /
+`open_scoped_table_json`) return a `ScopedRead` (that read plus the filter
+`--scope` selected); `optimize` is the exception that resolves the store path
+first, exactly as the pre-`Session` dispatch did. A relative `db` joins the directory holding `config.toml` ― never the
 current working directory ― while an explicit `--db` is taken as is, even
 when relative; `~` is not expanded. Unknown keys are ignored so a newer file
 never breaks an older binary. A missing file is silence, not an error; anything

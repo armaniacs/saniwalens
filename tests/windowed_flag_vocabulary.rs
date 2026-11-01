@@ -51,7 +51,10 @@ fn write_store(dir: &Path) -> PathBuf {
 }
 
 /// Run the binary on the synthetic home and store, and return its raw output.
-/// `db` is appended so every case reads the same store.
+/// `db` is appended so every case reads the same store. The XDG config/data
+/// roots are removed rather than redirected: the ambient ones would let the
+/// binary read the user's real `config.toml` or profiles, and this file's
+/// contract is that every path it touches is synthetic.
 fn run(dir: &Path, db: &Path, args: &[&str]) -> std::process::Output {
     std::process::Command::new(env!("CARGO_BIN_EXE_saniwalens"))
         .args(args)
@@ -60,18 +63,26 @@ fn run(dir: &Path, db: &Path, args: &[&str]) -> std::process::Output {
         .env("HOME", dir)
         .env("CLAUDE_CONFIG_DIR", dir.join(".claude"))
         .env("XDG_STATE_HOME", dir.join("state"))
+        .env_remove("XDG_CONFIG_HOME")
+        .env_remove("XDG_DATA_HOME")
         .output()
         .expect("the binary runs")
 }
 
 /// The catalog row's `id` column out of a markdown table (the bare form: no
-/// framing block to strip).
+/// framing block to strip). The column is found by its header name, so a
+/// reordered table fails on the name rather than silently reading another
+/// column.
 fn inventory_ids(stdout: &[u8]) -> Vec<String> {
-    String::from_utf8_lossy(stdout)
-        .lines()
-        .filter(|line| line.starts_with('|'))
-        .skip(2) // the header and its separator
-        .filter_map(|line| line.split('|').nth(2))
+    let text = String::from_utf8_lossy(stdout);
+    let mut rows = text.lines().filter(|line| line.starts_with('|'));
+    let header = rows.next().expect("the table has a header row");
+    let id = header
+        .split('|')
+        .position(|cell| cell.trim() == "id")
+        .expect("the inventory table names its id column");
+    rows.skip(1) // the separator under the header
+        .filter_map(|line| line.split('|').nth(id))
         .map(|cell| cell.trim().to_string())
         .collect()
 }
