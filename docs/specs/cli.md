@@ -237,10 +237,18 @@ compare against is undefined.
   carries it as its last line (table only ― markdown stays a bare table),
   `doctor` prints it in-band under its heading, and `--format json` gains a
   `window` object (`since` / `until` as RFC 3339 with their offset). Every
-  accepted window renders a date that exists: an in-calendar instant renders
-  in any valid zone, so the bounds renderer has no empty-string fallback to
-  absorb an out-of-calendar bound with. Without the flags every output is
-  byte-identical to the pre-period behavior.
+  accepted window renders a bound that names its instant, never an empty
+  string: an in-calendar instant renders in any valid zone, so the bounds
+  renderer has no empty-string fallback to absorb an out-of-calendar bound
+  with. Two limits belong to the presentation, not to the window. At the
+  calendar's own ends the rendered **local date** can sit up to one zone width
+  outside the calendar ― the ceiling rendered in JST is
+  `+262143-01-01T08:59:59+09:00`, a date `NaiveDate` cannot name ― while the
+  instant stays exact; only a clock within a day of ±262,000 years reaches it,
+  so a real run cannot. And RFC 3339 names years 0000..=9999 only, so a render
+  at the calendar's edge years has the RFC 3339 shape but does not parse back
+  as RFC 3339. The sweep pins both ends byte for byte (`src/core/period.rs`).
+  Without the flags every output is byte-identical to the pre-period behavior.
 - The catalog half of `inventory` is current config, so it is not windowed by
   time ― its **usage half** is. An unused row under a window says
   `UNUSED (window)` / `"unused-in-window"`, never plain "unused".
@@ -263,6 +271,15 @@ compare against is undefined.
 (`storage.md`), bucketing converts to `--tz` first (**default JST**) so day/hour
 buckets mean the user's local day/hour ― bucketing UTC would smear a local day
 across two buckets.
+
+`--tz` takes an offset, not a zone name, and its domain is minute-granular:
+-86,340..=86,340 seconds in 60-second steps (`±23:59`), 2,879 offsets.
+`FixedOffset::east_opt` also accepts a seconds remainder, but a bound renders
+the offset with `%:z`, which rounds to the nearest minute ― a remainder would
+be silently rounded in the report, and the domain's ends would render `+24:00`,
+which is not a valid offset. The period path does not read `--tz` yet (Period
+above); the domain is declared here so wiring it cannot widen the rendering
+silently.
 
 A span is assigned **whole to its start-time bucket**; its cost is not split
 across boundaries. This is correct for coarse buckets (year/month) and for
@@ -303,9 +320,11 @@ caveats in `events.md` / `surfaces.md`):
   store bound (`started_at >= ''`) that silently passes every session ― a
   successful-looking report that measures nothing. The bounds renderer keeps
   no empty-string fallback to absorb an unrenderable instant with: an
-  accepted window's instants are in-calendar by the resolve entry's check,
-  so a bound always renders a date that exists and the disclosure line and
-  the JSON `window` cannot carry an empty string.
+  accepted window's instants are in-calendar by the resolve entry's check, so
+  a bound always renders, the disclosure line and the JSON `window` cannot
+  carry an empty string, and the one-zone-width presentation spill at the
+  calendar's own ends (qualified in the Period section) is pinned by a test
+  instead of being passed over as a different window.
 - A subagent run whose agent type was never recorded is shown as `(unknown)`,
   never merged into a named type and never dropped ― the per-agent rows must
   keep summing to the subagent total the same report prints above them, for
