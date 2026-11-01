@@ -55,11 +55,13 @@ A test that needs a temp directory uses the `ScratchDir` guard: `tests/common/mo
 for integration binaries, `src/scratch.rs` for unit tests (two copies, because
 `cfg(test)` items are invisible to integration binaries; keep their contracts in
 step). Scratch dirs are synthetic only, live under `std::env::temp_dir()`, and are
-never placed in the repository. The guard's `new` removes a leftover dir of the
-same name and then calls `create_dir` (never `create_dir_all`), so a previous
-run's `store.db` is not silently reused; `Drop` removes the dir on normal exit
-and on unwind, so no trailing `remove_dir_all` belongs at the end of a test. Set
-`SANIWALENS_KEEP_SCRATCH=1` to keep the dirs for post-mortem inspection.
+never placed in the repository. The guard's `new` removes a leftover dir at the
+same path (the path carries the process id) and then calls `create_dir` (never
+`create_dir_all`), so a leftover `store.db` at that path is not silently reused;
+a second live guard for the same path panics instead of removing the first one's
+dir. `Drop` removes the dir on normal exit and on unwind, so no trailing
+`remove_dir_all` belongs at the end of a test. Set `SANIWALENS_KEEP_SCRATCH=1` to
+keep the dirs for post-mortem inspection.
 
 ## Anti-patterns
 
