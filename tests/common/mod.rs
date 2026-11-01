@@ -117,8 +117,8 @@ impl Drop for ScratchDir {
         // No panic here: this runs during unwinds, where a second panic
         // aborts the process. A failed removal is reported and dropped; a dir
         // that is already gone is not an error.
-        unclaim(&self.path);
         if keep_scratch() {
+            unclaim(&self.path);
             return;
         }
         if let Err(err) = std::fs::remove_dir_all(&self.path)
@@ -126,5 +126,9 @@ impl Drop for ScratchDir {
         {
             report_removal_failure(std::io::stderr().lock(), &self.path, &err);
         }
+        // Release the claim only after the removal: a same-path `new` racing
+        // this Drop must still see the path as live and panic, instead of
+        // claiming it and having this removal delete the new guard's dir.
+        unclaim(&self.path);
     }
 }

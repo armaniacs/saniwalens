@@ -178,6 +178,20 @@ fn a_path_that_is_a_file_is_rejected() {
 }
 
 #[test]
+fn a_guard_whose_dir_vanished_drops_without_panic() {
+    let dir = ScratchDir::new(PREFIX, "vanished");
+    let path = dir.to_path_buf();
+    std::fs::remove_dir_all(&path).unwrap();
+
+    // NotFound is not an error to report: the Drop must stay silent and still
+    // release its claim, so the same name is usable again.
+    drop(dir);
+
+    let again = ScratchDir::new(PREFIX, "vanished");
+    assert!(again.is_dir());
+}
+
+#[test]
 fn a_failed_removal_report_does_not_panic_when_stderr_is_unwritable() {
     let path = scratch_path(PREFIX, "report");
     let err = std::io::Error::from(std::io::ErrorKind::PermissionDenied);
