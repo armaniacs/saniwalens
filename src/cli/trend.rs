@@ -90,7 +90,6 @@ pub(crate) struct Metric<T> {
     reason: Option<UnavailableReason>,
 }
 
-
 /// One kind's payload: its name and its three metrics — every kind × three
 /// metrics, the machine contract's full shape even for a point kind whose
 /// output tokens / duration ingest writes as constant zeros (only the table
@@ -166,7 +165,13 @@ impl TrendPayload {
         let reasons = self
             .kinds
             .iter()
-            .flat_map(|kind| [kind.events.reason, kind.out_tokens.reason, kind.duration_sec.reason])
+            .flat_map(|kind| {
+                [
+                    kind.events.reason,
+                    kind.out_tokens.reason,
+                    kind.duration_sec.reason,
+                ]
+            })
             .chain(self.skills.iter().map(|skill| skill.invocations.reason))
             .chain([
                 self.sessions.reason,
@@ -638,7 +643,10 @@ pub(crate) fn trend(sess: &Session, pair: WindowPair, format: Format) -> Result<
     // inapplicable metric (omitted from the table) never turns it on.
     preamble(
         format,
-        &framed(&trend_preamble(pair, payload.has_no_baseline()), pair.current),
+        &framed(
+            &trend_preamble(pair, payload.has_no_baseline()),
+            pair.current,
+        ),
     );
     if !kind_rows.is_empty() {
         render(
@@ -1053,7 +1061,6 @@ mod tests {
         assert_eq!((delta.as_str(), direction.as_str()), ("n/a", "n/a"));
     }
 
-
     #[test]
     fn the_precision_rule_is_one_for_the_table_and_the_json() {
         // The precision-rule drift: a previous window's 3.3s and the current
@@ -1300,7 +1307,9 @@ mod tests {
         // The sentence names the scope it holds in — that row's previous side
         // — so one wording covers a kind, a skill, and a totals row.
         assert!(
-            with.contains("A delta marked n/a: that row's previous side has nothing to compare — not a drop."),
+            with.contains(
+                "A delta marked n/a: that row's previous side has nothing to compare — not a drop."
+            ),
             "the reason text rides with an empty side: {with:?}"
         );
     }
@@ -1320,7 +1329,8 @@ mod tests {
             ("empty", Store::in_memory().unwrap()),
         ];
         for (label, store) in shapes {
-            let payload = trend_payload(trend_pair(), &store.trend_aggregates(trend_pair()).unwrap());
+            let payload =
+                trend_payload(trend_pair(), &store.trend_aggregates(trend_pair()).unwrap());
             let kind_rows = trend_kind_rows(&payload);
             let skill_rows = trend_skill_rows(&payload);
             let total_rows = trend_total_rows(&payload);
@@ -1449,7 +1459,10 @@ mod tests {
             .iter()
             .find(|kind| kind.kind == "file_edit")
             .unwrap();
-        assert_eq!(edit.out_tokens.reason, Some(UnavailableReason::NotApplicable));
+        assert_eq!(
+            edit.out_tokens.reason,
+            Some(UnavailableReason::NotApplicable)
+        );
         assert_eq!(
             edit.duration_sec.reason,
             Some(UnavailableReason::NotApplicable)
@@ -1498,8 +1511,8 @@ mod tests {
     fn trend_kind_rows_do_not_read_a_measured_zero_baseline_as_unavailable() {
         // A real 0.04s baseline rounds to the displayed 0.0: the comparison
         // is still one — up, at display precision — never 比較不能. The
-        // sentinel fold (`map_or(0.0)`) used to turn it into an empty side,
-        // so the row read as n/a whatever the current window held.
+        // baseline is the previous row's presence (`Baseline::Measured`), not
+        // the value it folds to, so a rounded-to-zero measurement compares.
         let mut store = Store::in_memory().unwrap();
         let mut past = trend_session("past");
         past.start = Some(SessionStart {

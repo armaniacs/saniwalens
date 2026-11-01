@@ -142,7 +142,7 @@ ranking.
 | `doctor` | The entry point: a one-screen health check **written for someone who has never seen saniwalens's vocabulary** ― every item says what happened, why it costs, and what to do. Sections: `WHAT TO FIX FIRST` (recurring problems as a prioritized to-do list, each routed to the owning config layer with the follow-up command), `COST` (the session-start context and output totals in plain words, humanized units, naming the agent types behind the subagent figure ― and, when the named rows cover only part of that figure, saying so first; see *Reporting honesty*), `CONFIG WORTH PRUNING` (dead or heavy config per owner), `LOOKS HEALTHY` (what explicitly needs no action). `--scope` narrows to one layer; the text form leads with actions, never a stats dump. |
 | `inventory` | The catalog×usage join per surface **row** (scope and owning project shown; usage attributed under per-project shadowing ― `surfaces.md`): startup cost, static cost, load mode, usage. `--scope` filters to one layer; orphaned usage (no scope to filter on) appears in the unfiltered view only. |
 | `usage` | Skill event rollups: per skill, or per time bucket (`--by`) ― frequency, tokens, `ctx_growth`, duration. Leads with a token-destination line (main-thread skill output vs subagent total) so the reader sees where tokens actually go before the table, then splits the subagent half **per agent type** (runs and output tokens, costliest first) ― the aggregate is usually the larger number and the split is the part that can be acted on. JSON carries the split's coverage as `agent_split` in every state. In text, a partial split prints its covered and uncovered figures between the total and the table, an unavailable split (no rows at all) is warned on stderr, and rows that cover the total need no note (see *Reporting honesty*). A section with no rows is omitted rather than rendered as bare headers. |
-| `trend` | How usage moved: each kind of event (count / output tokens / duration), each skill (invocations, largest movement first), and the session / subagent totals ― this window against the equal-length window right before it (default 7d vs the 7d before; `--last` or `--since` [+ `--until`] fixes the current one, the pair resolved by the Period section's rules). A kind renders the metrics it carries: point kinds render the count alone, because ingest writes their output tokens and duration as constant zeros (`events.md`: a span is currently `skill_invocation` only) ― their rows for those metrics are omitted rather than rendered as `0.0` / `n/a`, and `--format json` keeps every kind's three metrics (the machine contract; only the table omits what cannot apply). Every rendered row carries both windows' values, the delta, and the direction; a comparison is `n/a` / `"unavailable"` with no delta claimed only when the kind's previous side holds no events, never a drop to zero, and the n/a reason text rides only with a report that holds such a comparison (see *Reporting honesty*). Both windows' ranges ― the current one and the equal-length one **derived** one second before it ― are disclosed like every view's window is, and a pair whose either window leaves the calendar the Period section names is refused as a period error rather than disclosed with an empty bound; `--format json` carries them as `window.current` / `window.previous`. A section with no rows (e.g. no skill usage in either window) is omitted rather than rendered as bare headers. |
+| `trend` | How usage moved: each kind of event (count / output tokens / duration), each skill (invocations, largest movement first), and the session / subagent totals ― this window against the equal-length window right before it (default 7d vs the 7d before; `--last` or `--since` [+ `--until`] fixes the current one, the pair resolved by the Period section's rules). A kind renders the metrics it carries: point kinds render the count alone, because ingest writes their output tokens and duration as constant zeros (`events.md`: a span is currently `skill_invocation` only) ― their rows for those metrics are omitted rather than rendered as `0.0` / `n/a`, and `--format json` keeps every kind's three metrics (the machine contract; only the table omits what cannot apply). Every rendered row carries both windows' values, the delta, and the direction; a comparison is `n/a` / `"unavailable"` with no delta claimed only when *that row's* previous side holds no baseline ― its kind, its skill, or a session on the totals axis is absent from the previous window ― never because the baseline measured zero and never as a drop to zero. A row whose aggregate exists in the previous window compares at its measured value, zero included (a 0-token span is a measurement, and so is a session that ran no subagent). The n/a reason text rides only with a report that holds such a comparison (see *Reporting honesty*), and `--format json` carries the machine-readable reason beside every metric. Both windows' ranges ― the current one and the equal-length one **derived** one second before it ― are disclosed like every view's window is, and a pair whose either window leaves the calendar the Period section names is refused as a period error rather than disclosed with an empty bound; `--format json` carries them as `window.current` / `window.previous`. A section with no rows (e.g. no skill usage in either window) is omitted rather than rendered as bare headers. |
 | `waste` | Just the flagged opportunities (unused, costly+rare, always-on heavy, …) with their evidence and owning scope; `--scope` filters to one layer. |
 | `overhead` | Reconcile the empirical always-on floor (the leanest observed **session start**, not the context a skill happened to run at ― `surfaces.md`) against the readable always-on config; the residual is the system prompt + built-in tools + MCP schemas the catalog cannot weigh. The per-project table carries the session count behind each floor, because the floor is a minimum over observations and a project with few sessions may never have caught a fresh one. Reports the metric as unavailable when no session start was observed at all. |
 | `prompts` | How the user steers the session: the mix of steer / correct / question / instruct prompts (`core::prompt`, lexical heuristics), with a verdict ― heavy steering suggests more autonomy, frequent correction suggests clearer upfront specs. This is a behavioral signal, not a config metric; embeddings showed prompt *topics* do not map to reusable skills, so the value is in *how* you prompt, not *what about*. |
@@ -170,10 +170,18 @@ Every command has both a human form and a machine form, strictly separated:
   (`core::optimize::Findings`, `projects` filtered by `--scope`), and each view
   emits its rows as named objects. `trend`'s rows and its JSON are two forms
   of one typed payload (`trend_payload` in `cli/trend.rs`): both derive from
-  it, so a metric's delta and direction are judged once ― float metrics at
-  the display's 0.1 precision, so a drift smaller than the shown 0.1 (an
-  ms-derived duration's addition error) reads as `same` in both forms; a
-  golden test (`tests/trend_json_golden.rs`) pins the emitted JSON. All
+  it, so a metric's delta, direction, and reason are judged once ― float
+  metrics at the display's 0.1 precision, so a drift smaller than the shown
+  0.1 (an ms-derived duration's addition error) reads as `same` in both
+  forms; a golden test (`tests/trend_json_golden.rs`) pins the emitted JSON.
+  Every trend metric carries `reason` beside its direction: `null` when the
+  comparison was judged, `"no_baseline"` when that row's previous side holds
+  no aggregate, and `"not_applicable"` when the kind does not carry the
+  metric. The values are the payload's `UnavailableReason` enum serialized
+  (machine-readable only, never prose), and `direction == "unavailable"`
+  exactly when `reason` is not null, so a consumer distinguishes "nothing to
+  compare against" from "this metric does not apply" without inferring it
+  from the numbers. All
   freshness/refresh chatter goes to
   **stderr** (see above), so `saniwalens <cmd> --format json | jq` needs no
   filtering. Human-only footnotes (row counts, heuristic caveats) are either
@@ -372,14 +380,29 @@ caveats in `events.md` / `surfaces.md`):
   `doctor` introduces its top rows as "most of" the subagent output only when
   they exceed half of the total ― a long tail, or a partial split, gets a
   wording that claims no more than the rows show.
-- An `n/a` in `trend` states its real reason: the comparison's previous side
-  holds no events of that kind, and the reason text is printed only when a
-  report actually holds such a comparison. A metric a kind does not carry
-  renders no row at all ― the table omits it, so the unavailable label is
-  never attached to a metric the table does not show; `--format json` keeps
-  every kind's three metrics for its consumers, holding the same shape with a
-  null delta where the kind carries nothing, and a baseline that only rounds
-  to the displayed zero still compares.
+- An `n/a` in `trend` states its real reason, and the reason is a fact about
+  that row: its previous side holds no baseline ― no event of that kind, no
+  invocation of that skill, or no session on the totals axis. It never means
+  the baseline measured zero, and never a drop to zero. The table's reason
+  text names that row scope ("that row's previous side") because one sentence
+  covers the kind, skill, and totals sections, and it is printed only when a
+  report actually holds such a comparison; the footnote about an empty
+  previous window is printed only when that window holds neither events nor a
+  session. A metric a kind does not carry renders no row at all ― the table
+  omits it, so the unavailable label is never attached to a metric the table
+  does not show. `--format json` keeps every kind's three metrics for its
+  consumers, holding the same shape with a null delta and
+  `"reason": "not_applicable"` where the kind carries nothing,
+  `"reason": "no_baseline"` where the previous side is absent, and
+  `reason: null` where the comparison was judged. A baseline that measured zero still compares: a 0-token span is
+  a measurement, a session that ran no subagent measured 0 runs, and a
+  baseline that only rounds to the displayed zero compares too. Count axes
+  keep their baseline tied to the aggregate row's presence, deliberately: a
+  window with no event of a kind stays `no_baseline` rather than reading a
+  0 -> N change as a measured move. A byte-identity criterion stated for this
+  view by an earlier refactor is withdrawn for reports that hold a
+  measured-zero baseline; their cells compare, which is what this section
+  requires.
 
 Meta-skills are not nested (`events.md`): a driver and the skills it ran are
 each their own span, so a child's cost lands on the child and no figure is

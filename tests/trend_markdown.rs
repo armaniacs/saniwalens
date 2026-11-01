@@ -71,9 +71,7 @@ fn write_span_store(dir: &Path, spans: &[(&str, i64, u64, f64)]) -> PathBuf {
                 sub_agent_count: 0,
                 sub_tokens_estimated: false,
             };
-            store
-                .ingest(IngestBatch::new(&meta, &[span], &[]))
-                .unwrap();
+            store.ingest(IngestBatch::new(&meta, &[span], &[])).unwrap();
         }
     }
     db

@@ -88,6 +88,33 @@ fn write_store(dir: &Path) -> PathBuf {
     db
 }
 
+/// Write a synthetic present-zero store: both windows hold one 2.0s
+/// `commit` span, but the previous window's span reported **0** output
+/// tokens and **0.0s** — a legal measurement, not an absent row. The
+/// comparison must be claimed (`+300`, `+2.0`), and the machine contract must
+/// say so with `"reason": null`, never `"no_baseline"`.
+fn write_present_zero_store(dir: &Path) -> PathBuf {
+    let db = dir.join("store.db");
+    {
+        let mut store = Store::open(&db, OpenMode::ReadWrite).unwrap();
+        let past = session("past", 1_500, 0, 0);
+        let mut past_span = span("commit", 1_500, 0);
+        past_span.duration_sec = 0.0;
+        store
+            .ingest(IngestBatch::new(&past, &[past_span], &[]))
+            .unwrap();
+        let present = session("present", 100_000, 0, 0);
+        store
+            .ingest(IngestBatch::new(
+                &present,
+                &[span("commit", 100_500, 300)],
+                &[],
+            ))
+            .unwrap();
+    }
+    db
+}
+
 /// Run the binary's `trend` on `db` in `format`, frozen (the store is read
 /// as-is; the synthetic home holds nothing to refresh from), and return its
 /// stdout.
@@ -131,8 +158,10 @@ fn scratch_dir(name: &str) -> PathBuf {
 
 /// The captured JSON machine contract: both windows' ranges under `window`,
 /// every kind x three metrics (a point kind's output tokens / duration stay
-/// in the contract with a null delta and `"unavailable"`), the skill deltas,
-/// and the session/subagent totals — integers as integers, reals as reals.
+/// in the contract with a null delta, `"unavailable"`, and
+/// `"reason": "not_applicable"`), the skill deltas, and the session/subagent
+/// totals — integers as integers, reals as reals, and `reason` either null or
+/// one of the two machine-readable reasons.
 const GOLDEN: &str = r#"{
   "kinds": [
     {
@@ -140,20 +169,23 @@ const GOLDEN: &str = r#"{
         "current": 0.0,
         "delta": null,
         "direction": "unavailable",
-        "previous": 0.0
+        "previous": 0.0,
+        "reason": "not_applicable"
       },
       "events": {
         "current": 1,
         "delta": 0,
         "direction": "same",
-        "previous": 1
+        "previous": 1,
+        "reason": null
       },
       "kind": "file_edit",
       "out_tokens": {
         "current": 0,
         "delta": null,
         "direction": "unavailable",
-        "previous": 0
+        "previous": 0,
+        "reason": "not_applicable"
       }
     },
     {
@@ -161,20 +193,23 @@ const GOLDEN: &str = r#"{
         "current": 0.0,
         "delta": null,
         "direction": "unavailable",
-        "previous": 0.0
+        "previous": 0.0,
+        "reason": "not_applicable"
       },
       "events": {
         "current": 1,
         "delta": 0,
         "direction": "same",
-        "previous": 1
+        "previous": 1,
+        "reason": null
       },
       "kind": "session_start",
       "out_tokens": {
         "current": 0,
         "delta": null,
         "direction": "unavailable",
-        "previous": 0
+        "previous": 0,
+        "reason": "not_applicable"
       }
     },
     {
@@ -182,20 +217,23 @@ const GOLDEN: &str = r#"{
         "current": 2.0,
         "delta": -2.0,
         "direction": "down",
-        "previous": 4.0
+        "previous": 4.0,
+        "reason": null
       },
       "events": {
         "current": 1,
         "delta": -1,
         "direction": "down",
-        "previous": 2
+        "previous": 2,
+        "reason": null
       },
       "kind": "skill_invocation",
       "out_tokens": {
         "current": 300,
         "delta": 150,
         "direction": "up",
-        "previous": 150
+        "previous": 150,
+        "reason": null
       }
     }
   ],
@@ -203,7 +241,8 @@ const GOLDEN: &str = r#"{
     "current": 1,
     "delta": 0,
     "direction": "same",
-    "previous": 1
+    "previous": 1,
+    "reason": null
   },
   "skills": [
     {
@@ -211,6 +250,7 @@ const GOLDEN: &str = r#"{
       "delta": -1,
       "direction": "down",
       "previous": 1,
+      "reason": null,
       "skill": "review"
     },
     {
@@ -218,6 +258,7 @@ const GOLDEN: &str = r#"{
       "delta": 0,
       "direction": "same",
       "previous": 1,
+      "reason": null,
       "skill": "commit"
     }
   ],
@@ -225,13 +266,15 @@ const GOLDEN: &str = r#"{
     "current": 500,
     "delta": 100,
     "direction": "up",
-    "previous": 400
+    "previous": 400,
+    "reason": null
   },
   "subagent_runs": {
     "current": 2,
     "delta": 1,
     "direction": "up",
-    "previous": 1
+    "previous": 1,
+    "reason": null
   },
   "window": {
     "current": {
@@ -254,6 +297,76 @@ fn the_trend_json_contract_is_pinned_golden() {
     assert_eq!(
         out, GOLDEN,
         "the trend JSON contract drifted — actual:\n{out}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn the_trend_json_reason_separates_a_measured_zero_from_an_absent_baseline() {
+    // The second contract case: a previous window whose span really ran and
+    // measured 0 output tokens / 0.0s. The comparison is claimed — the metric
+    // carries numbers and `"reason": null` — where an absent row would carry
+    // `"reason": "no_baseline"` and a null delta. The totals carry a measured
+    // zero the same way: a previous session that ran no subagent measured 0
+    // runs, which compares (0 -> 0, same), not an unavailable row.
+    let dir = scratch_dir("present-zero");
+    let db = write_present_zero_store(&dir);
+    let out = trend_output(&dir, &db, "json");
+    let json: serde_json::Value = serde_json::from_str(&out).expect("the contract is JSON");
+    let kinds = json["kinds"].as_array().unwrap();
+    let skill = kinds
+        .iter()
+        .find(|kind| kind["kind"] == "skill_invocation")
+        .expect("the span kind is in the contract");
+    assert_eq!(
+        skill["out_tokens"],
+        serde_json::json!({
+            "previous": 0,
+            "current": 300,
+            "delta": 300,
+            "direction": "up",
+            "reason": null
+        }),
+        "a measured zero token baseline compares"
+    );
+    assert_eq!(
+        skill["duration_sec"],
+        serde_json::json!({
+            "previous": 0.0,
+            "current": 2.0,
+            "delta": 2.0,
+            "direction": "up",
+            "reason": null
+        }),
+        "a measured zero duration baseline compares"
+    );
+    assert_eq!(skill["events"]["direction"], "same");
+    assert_eq!(skill["events"]["reason"], serde_json::Value::Null);
+    // The point kind's span metrics stay in the contract as not applicable —
+    // the other reason, never confused with a missing baseline.
+    let start = kinds
+        .iter()
+        .find(|kind| kind["kind"] == "session_start")
+        .expect("the session start kind is in the contract");
+    for metric in ["out_tokens", "duration_sec"] {
+        assert_eq!(start[metric]["direction"], "unavailable");
+        assert_eq!(start[metric]["delta"], serde_json::Value::Null);
+        assert_eq!(start[metric]["reason"], "not_applicable");
+    }
+    // The totals: a previous session exists, so its zero subagent figures are
+    // measurements, not an absent axis.
+    assert_eq!(json["sessions"]["previous"], 1);
+    assert_eq!(json["sessions"]["reason"], serde_json::Value::Null);
+    assert_eq!(json["subagent_runs"]["previous"], 0);
+    assert_eq!(json["subagent_runs"]["current"], 0);
+    assert_eq!(json["subagent_runs"]["direction"], "same");
+    assert_eq!(json["subagent_runs"]["reason"], serde_json::Value::Null);
+    assert_eq!(json["sub_tokens"]["previous"], 0);
+    assert_eq!(json["sub_tokens"]["reason"], serde_json::Value::Null);
+    // No metric claims an absent baseline on this store.
+    assert!(
+        !out.contains("\"no_baseline\""),
+        "a measured zero is not an absent baseline: {out}"
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
