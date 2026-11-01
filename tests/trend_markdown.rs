@@ -3,7 +3,7 @@
 //! its threads' `println!` per-thread, so it never reaches stdout — here the
 //! binary's own stdout is real, and the store is synthetic.
 
-use saniwalens::core::span::SessionStart;
+use saniwalens::core::span::{SessionStart, Source, Span};
 use saniwalens::store::{IngestBatch, OpenMode, SessionMeta, Store};
 use std::path::{Path, PathBuf};
 
@@ -39,6 +39,40 @@ fn write_store(dir: &Path, sessions: &[(&str, i64)]) -> PathBuf {
                     "main.rs",
                     None,
                 )]))
+                .unwrap();
+        }
+    }
+    db
+}
+
+/// Write a synthetic store with one skill span per session, stamped at the
+/// session's epoch, as `(id, epoch_secs, out_tokens, duration_sec)` — the
+/// present-zero fixture: a previous window whose span really happened but
+/// measured zero.
+fn write_span_store(dir: &Path, spans: &[(&str, i64, u64, f64)]) -> PathBuf {
+    let db = dir.join("store.db");
+    {
+        let mut store = Store::open(&db, OpenMode::ReadWrite).unwrap();
+        for (id, epoch_secs, out_tokens, duration_sec) in spans {
+            let meta = session(id, *epoch_secs);
+            let span = Span {
+                skill: "commit".to_string(),
+                source: Source::Slash,
+                started_epoch_ms: epoch_secs * 1000,
+                duration_sec: *duration_sec,
+                out_tokens: *out_tokens,
+                ctx_growth: 5,
+                ctx_start: 0,
+                ctx_peak: 5,
+                model: None,
+                is_trailing: false,
+                spawns: Vec::new(),
+                sub_tokens: 0,
+                sub_agent_count: 0,
+                sub_tokens_estimated: false,
+            };
+            store
+                .ingest(IngestBatch::new(&meta, &[span], &[]))
                 .unwrap();
         }
     }
@@ -191,6 +225,45 @@ fn trend_states_the_na_reason_only_when_a_previous_side_is_empty() {
     assert!(
         out.contains("holds no events in this store"),
         "the empty-side note is missing: {out:?}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn trend_compares_a_previous_window_that_measured_zero() {
+    // Both windows hold a real 2.0s `commit` span; the previous one reported
+    // 0 output tokens. A measured zero is a baseline: the output-token row
+    // compares (0 -> 300, +300, up) instead of collapsing to n/a with no
+    // stated reason. The store is legal — a span's out_tokens is whatever its
+    // assistant records reported, and 0 is a measurement, not an absence.
+    let dir = scratch_dir("present-zero");
+    let db = write_span_store(
+        &dir,
+        &[("past", 1_000, 0, 2.0), ("present", 100_000, 300, 2.0)],
+    );
+    let out = trend_output(&dir, &db, "table");
+
+    let tokens = out
+        .lines()
+        .find(|line| line.contains("out tokens"))
+        .unwrap_or_else(|| panic!("the output-token row is missing: {out:?}"));
+    assert!(
+        tokens.contains("+300") && tokens.contains("up"),
+        "a measured zero baseline compares: {tokens:?}"
+    );
+    assert!(
+        !tokens.contains("n/a"),
+        "the row is not unavailable: {tokens:?}"
+    );
+    // No rendered n/a row means no reason text and no empty-window note: the
+    // reasons ride only with a report that holds such a comparison.
+    assert!(
+        !out.contains("A delta marked n/a"),
+        "an n/a reason rendered without an n/a row: {out:?}"
+    );
+    assert!(
+        !out.contains("holds no events in this store"),
+        "the empty-side note rendered without an empty side: {out:?}"
     );
     let _ = std::fs::remove_dir_all(&dir);
 }

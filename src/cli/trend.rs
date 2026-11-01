@@ -14,10 +14,11 @@ use crate::store::{KindRollup, TrendWindowAggregates, TwoWindow, skill_deltas};
 
 use super::{Align, Format, emit_json, framed, note, preamble, render};
 
-/// One direction of a two-window comparison. `Unavailable` is 比較不能: the
-/// previous side holds no events, so there is nothing to compare against —
-/// labeled, never read as a drop to zero. The JSON value is the variant's own
-/// snake_case name ("unavailable"), explicit where the table's label is terse.
+/// One direction of a two-window comparison. `Unavailable` is 比較不能: no
+/// comparison was made — that row's previous side has no baseline, or the
+/// metric does not apply to the kind — labeled, never read as a drop to zero.
+/// The JSON value is the variant's own snake_case name ("unavailable"),
+/// explicit where the table's label is terse.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum Direction {
@@ -39,8 +40,33 @@ impl Direction {
     }
 }
 
+/// Why a metric carries no comparison. `NoBaseline` is the only reason a
+/// window can give — the row's previous side holds nothing (`Baseline::Absent`)
+/// — and `NotApplicable` is the kind's own shape (a point kind has no output
+/// tokens or duration, so the metric is not judged at all). The payload's
+/// judgment and the machine contract's `reason` are one fact: the reason is set
+/// exactly when the direction is `Unavailable`, so the table's n/a rows, the
+/// preamble's sentence, the note, and the JSON all read the same bit.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum UnavailableReason {
+    NoBaseline,
+    NotApplicable,
+}
+
+/// The previous side of one metric: a measured value — **0 included** — or
+/// nothing at all. Presence is a fact about the aggregate's row, never about
+/// the value, so a window whose span really reported 0 output tokens is a
+/// baseline to compare against (`Measured(0)`); only a window that holds no
+/// row is `Absent`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) enum Baseline<T> {
+    Absent,
+    Measured(T),
+}
+
 /// Which way a metric moved between two sides both of which are present —
-/// the pure comparison [`direction_of`] guards with its empty-side sentinel.
+/// the pure comparison the payload's one judgment calls.
 fn direction_between<T: PartialOrd>(previous: T, current: T) -> Direction {
     match current.partial_cmp(&previous) {
         Some(std::cmp::Ordering::Greater) => Direction::Up,
@@ -49,29 +75,21 @@ fn direction_between<T: PartialOrd>(previous: T, current: T) -> Direction {
     }
 }
 
-/// Which way a metric moved between the two windows. An empty previous side
-/// (0 events) is 比較不能 — the store holds no baseline for the row, so no
-/// direction is claimed whatever the current value is; a delta against an
-/// empty side is a coverage fact, not a move.
-pub(crate) fn direction_of<T: PartialOrd + Default>(previous: T, current: T) -> Direction {
-    if previous == T::default() {
-        return Direction::Unavailable;
-    }
-    direction_between(previous, current)
-}
-
 /// One metric's two-window comparison as the payload carries it: both sides'
-/// values, the delta, and the direction. The judgment already happened at
-/// construction, so every derivation — the JSON machine contract and the
-/// table's cells — reads this one judged form; the delta is `None` when the
-/// comparison cannot be made, and no change is claimed for it.
+/// values, the delta, the direction, and — when nothing was claimed — why. The
+/// judgment already happened at construction ([`metric`]), so every derivation
+/// (the JSON machine contract and the table's cells) reads this one judged
+/// form; the delta is `None` exactly when the comparison cannot be made, and
+/// `reason` is `Some` exactly then.
 #[derive(Debug, Clone, serde::Serialize)]
 pub(crate) struct Metric<T> {
     previous: T,
     current: T,
     delta: Option<T>,
     direction: Direction,
+    reason: Option<UnavailableReason>,
 }
+
 
 /// One kind's payload: its name and its three metrics — every kind × three
 /// metrics, the machine contract's full shape even for a point kind whose
@@ -138,40 +156,69 @@ impl TrendPayload {
     fn json(&self) -> serde_json::Value {
         serde_json::to_value(self).expect("the typed trend payload serializes")
     }
-}
 
-/// One count metric's judged comparison (the kind rollups' events and output
-/// tokens, the skill invocations, and the totals): the value sentinel
-/// ([`direction_of`]) folds a zero previous side to 比較不能 — the store
-/// holds no baseline for it, so no delta is claimed. A kind rollup the window
-/// does not hold folds to that zero; a rollup the window holds always carries
-/// its events, so a present events baseline never reads as empty.
-fn int_metric(previous: i64, current: i64) -> Metric<i64> {
-    let direction = direction_of(previous, current);
-    Metric {
-        previous,
-        current,
-        delta: match direction {
-            Direction::Unavailable => None,
-            _ => Some(current - previous),
-        },
-        direction,
+    /// Whether any metric the report renders carries no baseline — the only
+    /// n/a reason a window can give, and exactly what the preamble's reason
+    /// sentence explains. A metric that does not apply is not this case
+    /// (`NotApplicable` rows are omitted from the table), so the sentence
+    /// never states a reason the report cannot show.
+    fn has_no_baseline(&self) -> bool {
+        let reasons = self
+            .kinds
+            .iter()
+            .flat_map(|kind| [kind.events.reason, kind.out_tokens.reason, kind.duration_sec.reason])
+            .chain(self.skills.iter().map(|skill| skill.invocations.reason))
+            .chain([
+                self.sessions.reason,
+                self.subagent_runs.reason,
+                self.sub_tokens.reason,
+            ]);
+        reasons
+            .into_iter()
+            .any(|reason| reason == Some(UnavailableReason::NoBaseline))
+    }
+
+    /// Whether the previous window holds nothing at all — no event of any kind
+    /// and no session on the totals axis. The note about an empty previous
+    /// window reads this one window-level fact instead of the aggregates, so
+    /// no view code reaches around the payload's judgment.
+    fn previous_window_is_empty(&self) -> bool {
+        self.sessions.reason == Some(UnavailableReason::NoBaseline)
+            && self
+                .kinds
+                .iter()
+                .all(|kind| kind.events.reason == Some(UnavailableReason::NoBaseline))
     }
 }
 
-/// The trend's ONE precision rule for a float metric: the empty previous side
-/// (the 0.0 an absent rollup folds to) is 比較不能 — the store holds no
-/// baseline for the row, so no delta is claimed — and a present baseline is
-/// judged at the display's precision, the same rounding the `{:.1}` cells
-/// show, so a drift smaller than the shown 0.1 (an ms-derived duration's
-/// addition error, e.g. 3.3s vs 3.3000000000000003s) cannot claim a move the
-/// table renders as ±0.0. The delta is that same display-precise difference,
-/// so the JSON number and the table's `+0.0` are one fact. A present baseline
-/// that rounds to the displayed 0.0 (a real 0.04s) still compares.
-fn float_comparison(previous: f64, current: f64) -> (Option<f64>, Direction) {
-    if previous == 0.0 {
-        return (None, Direction::Unavailable);
+/// A previous side as the payload carries it: an aggregate row that exists is
+/// a measured baseline — its value is the measurement, zero included — and a
+/// row the window does not hold is no baseline at all.
+fn baseline<T>(measured: Option<T>) -> Baseline<T> {
+    match measured {
+        Some(value) => Baseline::Measured(value),
+        None => Baseline::Absent,
     }
+}
+
+/// The one count comparison: both sides present, so the delta is claimed and
+/// the direction is the two values' own order.
+fn int_judge(previous: i64, current: i64) -> (Option<i64>, Direction) {
+    (
+        Some(current - previous),
+        direction_between(previous, current),
+    )
+}
+
+/// The trend's ONE precision rule for a float metric: a present baseline is
+/// measured against the current side at the display's precision, the same
+/// rounding the `{:.1}` cells show, so a drift smaller than the shown 0.1 (an
+/// ms-derived duration's addition error, e.g. 3.3s vs 3.3000000000000003s)
+/// cannot claim a move the table renders as ±0.0. The delta is that same
+/// display-precise difference, so the JSON number and the table's `+0.0` are
+/// one fact. A measured 0.0 is a baseline like any other: only an absent
+/// rollup is 比較不能.
+fn float_judge(previous: f64, current: f64) -> (Option<f64>, Direction) {
     let (previous, current) = (display_precise(previous), display_precise(current));
     (
         Some(display_precise(current - previous)),
@@ -179,24 +226,59 @@ fn float_comparison(previous: f64, current: f64) -> (Option<f64>, Direction) {
     )
 }
 
-/// One float metric's judged comparison (the kind durations), by
-/// [`float_comparison`].
-fn float_metric(previous: f64, current: f64) -> Metric<f64> {
-    let (delta, direction) = float_comparison(previous, current);
+/// One metric nothing was claimed for, with the reason it carries. This and
+/// [`metric`] are the only two places a `Metric` is built, so the invariant
+/// `direction == Unavailable` ⇔ `reason.is_some()` holds by construction:
+/// `NoBaseline` folds the absent side to the zero the previous column has
+/// always shown, and `NotApplicable` keeps the values ingest writes (constant
+/// zeros), so the machine contract's shape stays whole either way.
+fn unavailable<T>(previous: T, current: T, reason: UnavailableReason) -> Metric<T> {
     Metric {
         previous,
         current,
-        delta,
-        direction,
+        delta: None,
+        direction: Direction::Unavailable,
+        reason: Some(reason),
+    }
+}
+
+/// The trend's one metric judgment: a baseline that exists is compared (a
+/// measured zero included), and only `Baseline::Absent` is `NoBaseline`. Every
+/// metric of every section — the kind rollups' events, output tokens and
+/// duration, the skill invocations, and the totals — is built here, so the
+/// table's cells and the JSON contract cannot judge one row two ways.
+fn metric<T: Default + Copy>(
+    baseline: Baseline<T>,
+    current: T,
+    judge: impl FnOnce(T, T) -> (Option<T>, Direction),
+) -> Metric<T> {
+    match baseline {
+        Baseline::Absent => unavailable(T::default(), current, UnavailableReason::NoBaseline),
+        Baseline::Measured(previous) => {
+            let (delta, direction) = judge(previous, current);
+            debug_assert_ne!(
+                direction,
+                Direction::Unavailable,
+                "a measured baseline always compares"
+            );
+            Metric {
+                previous,
+                current,
+                delta,
+                direction,
+                reason: None,
+            }
+        }
     }
 }
 
 /// The trend's typed payload: both windows' ranges under `window`, the
 /// per-kind rows, the skill deltas, and the session/subagent totals — every
-/// metric carrying both windows' values, the delta, and the direction, each
-/// judged once by the one emptiness sentinel and the one float precision
-/// rule. The table's cells and the JSON machine contract both derive from
-/// this structure.
+/// metric carrying both windows' values, the delta, the direction, and the
+/// reason it has none, each judged once by [`metric`]. The per-kind rollups
+/// keep their `Option` here: presence is what tells a measured zero from an
+/// absent row, so the fold happens inside the judgment, not before it. The
+/// table's cells and the JSON machine contract both derive from this structure.
 pub(crate) fn trend_payload(
     pair: WindowPair,
     agg: &TwoWindow<TrendWindowAggregates>,
@@ -207,27 +289,90 @@ pub(crate) fn trend_payload(
         .into_iter()
         .map(|(kind, current, previous)| {
             let (c, p) = (current.as_ref(), previous.as_ref());
+            let events = metric(
+                baseline(p.map(|r| r.events)),
+                c.map_or(0, |r| r.events),
+                int_judge,
+            );
+            // A point kind carries no duration or output tokens: ingest writes
+            // both columns as constant zeros, so judging them would render a
+            // reason that does not apply. They stay in the machine contract as
+            // `not_applicable` with a null delta (PBI 30's decision) and only
+            // the table omits them.
+            let (out_tokens, duration_sec) = if carries_span_metrics(&kind) {
+                (
+                    metric(
+                        baseline(p.map(|r| r.out_tokens)),
+                        c.map_or(0, |r| r.out_tokens),
+                        int_judge,
+                    ),
+                    metric(
+                        baseline(p.map(|r| r.duration_sec)),
+                        c.map_or(0.0, |r| r.duration_sec),
+                        float_judge,
+                    ),
+                )
+            } else {
+                (
+                    unavailable(
+                        p.map_or(0, |r| r.out_tokens),
+                        c.map_or(0, |r| r.out_tokens),
+                        UnavailableReason::NotApplicable,
+                    ),
+                    unavailable(
+                        p.map_or(0.0, |r| r.duration_sec),
+                        c.map_or(0.0, |r| r.duration_sec),
+                        UnavailableReason::NotApplicable,
+                    ),
+                )
+            };
             KindPayload {
-                kind: kind.clone(),
-                events: int_metric(p.map_or(0, |r| r.events), c.map_or(0, |r| r.events)),
-                out_tokens: int_metric(
-                    p.map_or(0, |r| r.out_tokens),
-                    c.map_or(0, |r| r.out_tokens),
-                ),
-                duration_sec: float_metric(
-                    p.map_or(0.0, |r| r.duration_sec),
-                    c.map_or(0.0, |r| r.duration_sec),
-                ),
+                kind,
+                events,
+                out_tokens,
+                duration_sec,
             }
         })
+        .collect();
+    // A skill's previous side exists when the previous window holds a usage
+    // row for it — the name set is the presence signal (`skill_deltas` folds
+    // the two windows' counts, not their rows).
+    let previous_skills: std::collections::BTreeSet<&str> = agg
+        .previous
+        .skills
+        .iter()
+        .map(|usage| usage.skill.as_str())
         .collect();
     let skills: Vec<SkillPayload> = skill_deltas(&agg.current.skills, &agg.previous.skills)
         .iter()
         .map(|d| SkillPayload {
             skill: d.skill.clone(),
-            invocations: int_metric(d.previous, d.current),
+            invocations: metric(
+                if previous_skills.contains(d.skill.as_str()) {
+                    Baseline::Measured(d.previous)
+                } else {
+                    Baseline::Absent
+                },
+                d.current,
+                int_judge,
+            ),
         })
         .collect();
+    // The totals follow the sessions axis: the previous window's baseline
+    // exists when it holds a session, whose columns are the subagent figures.
+    // A session that ran no subagent measures 0 runs — a real baseline, so
+    // 0 -> 2 compares. Count rows themselves (kind rollups, skill usage) only
+    // exist with at least one event, so a count's measured zero cannot arrive
+    // that way and stays `NoBaseline` as before: a window with no row has
+    // nothing to compare against, deliberately unchanged here.
+    let sessions_present = agg.previous.sessions > 0;
+    let baseline_of_total = |measured: i64| {
+        if sessions_present {
+            Baseline::Measured(measured)
+        } else {
+            Baseline::Absent
+        }
+    };
     TrendPayload {
         window: PayloadWindows {
             current: WindowBounds {
@@ -241,17 +386,30 @@ pub(crate) fn trend_payload(
         },
         kinds,
         skills,
-        sessions: int_metric(agg.previous.sessions, agg.current.sessions),
-        subagent_runs: int_metric(agg.previous.subagent_runs, agg.current.subagent_runs),
-        sub_tokens: int_metric(agg.previous.sub_tokens, agg.current.sub_tokens),
+        sessions: metric(
+            baseline_of_total(agg.previous.sessions),
+            agg.current.sessions,
+            int_judge,
+        ),
+        subagent_runs: metric(
+            baseline_of_total(agg.previous.subagent_runs),
+            agg.current.subagent_runs,
+            int_judge,
+        ),
+        sub_tokens: metric(
+            baseline_of_total(agg.previous.sub_tokens),
+            agg.current.sub_tokens,
+            int_judge,
+        ),
     }
 }
 
 /// The two windows' per-kind rollups paired by kind — a kind present in only
-/// one window keeps None on the other side. The payload's kind metrics fold a
-/// None side to the default value, whose shape stays every kind × three
-/// metrics; the folded zero is the empty side the sentinel reads as 比較不能.
-/// Sorted by kind, the aggregation's own order.
+/// one window keeps None on the other side. The pair's presence is what the
+/// payload's judgment reads: a kind present in the previous window is a
+/// baseline (its events, output tokens and duration are measurements, zero
+/// included), and only an absent kind is 比較不能. Sorted by kind, the
+/// aggregation's own order.
 fn kind_pairs(
     agg: &TwoWindow<TrendWindowAggregates>,
 ) -> Vec<(String, Option<KindRollup>, Option<KindRollup>)> {
@@ -310,12 +468,13 @@ pub(crate) fn carries_span_metrics(kind: &str) -> bool {
 
 /// The per-kind section's rows, derived from the payload: one row per kind
 /// and *applicable* metric, so each row carries one comparison and one
-/// direction — a point kind renders its count alone ([`carries_span_metrics`]),
-/// the row-level form of the usage view's empty-section convention. Both
-/// windows' values keep their columns even when the comparison is n/a, and
-/// the judgment rides the payload ([`int_cells`] / [`float_cells`]): a rollup
-/// the window does not hold folds to the empty-side zero, a rollup the window
-/// holds compares (a present events baseline always carries its events).
+/// direction. Applicability is the payload's own judgment — a `NotApplicable`
+/// metric renders no row (PBI 30's decision: a point kind would otherwise show
+/// `0.0 | 0.0 | n/a | n/a` with a reason that does not apply), the row-level
+/// form of the usage view's empty-section convention. Both windows' values keep
+/// their columns even when the comparison is n/a, and the judgment rides the
+/// payload ([`int_cells`] / [`float_cells`]): a kind the window does not hold
+/// has no baseline, a kind it holds compares (a measured zero included).
 pub(crate) fn trend_kind_rows(payload: &TrendPayload) -> Vec<Vec<String>> {
     let mut rows = Vec::new();
     for kind in &payload.kinds {
@@ -328,7 +487,7 @@ pub(crate) fn trend_kind_rows(payload: &TrendPayload) -> Vec<Vec<String>> {
             delta,
             direction,
         ]);
-        if !carries_span_metrics(&kind.kind) {
+        if kind.out_tokens.reason == Some(UnavailableReason::NotApplicable) {
             continue;
         }
         let (delta, direction) = int_cells(&kind.out_tokens);
@@ -397,18 +556,19 @@ pub(crate) fn trend_total_rows(payload: &TrendPayload) -> Vec<Vec<String>> {
 
 /// The trend preamble's text: what the report compares, plus the previous
 /// window's range — the current one comes from `framed`. The n/a reason
-/// sentence rides only with a report that actually holds an n/a comparison:
-/// with the non-applicable rows omitted, every rendered n/a's previous side
-/// really is empty, and a report whose previous side holds every rendered
-/// kind prints no reason at all rather than one that cannot occur. Table
-/// format only.
+/// sentence rides only with a report that actually holds an n/a comparison
+/// (`TrendPayload::has_no_baseline`), and it names the scope the reason holds
+/// in: *that row's* previous side, so one sentence covers a kind row with no
+/// events, a skill row with no invocations, and a totals row with no session in
+/// the previous window. The applied-out rows never reach the table, so the
+/// sentence is never printed for a metric that does not apply. Table format
+/// only.
 pub(crate) fn trend_preamble(pair: WindowPair, has_unavailable: bool) -> String {
     let mut text =
         String::from("Usage trend — this window against the equal-length window right before it.");
     if has_unavailable {
         text.push_str(
-            "\nA delta marked n/a: the previous side holds no events, so the comparison is\n\
-             unavailable — not a drop.",
+            "\nA delta marked n/a: that row's previous side has nothing to compare — not a drop.",
         );
     }
     text.push_str("\nprevious window: ");
@@ -472,17 +632,13 @@ pub(crate) fn trend(sess: &Session, pair: WindowPair, format: Format) -> Result<
         return Ok(());
     }
     let kind_rows = trend_kind_rows(&payload);
-    // The reason text's condition: some rendered kind's previous side holds
-    // no rollup — exactly the comparisons the rows mark n/a, so the preamble
-    // never states a reason the report cannot show. The judgment rides the
-    // payload, so the condition reads its unavailable directions.
-    let has_unavailable = payload
-        .kinds
-        .iter()
-        .any(|kind| kind.events.direction == Direction::Unavailable);
+    // The reason text's condition: some rendered metric has no baseline.
+    // `has_no_baseline` is the payload's own judgment of the n/a rows, so the
+    // preamble never states a reason the report cannot show — and an
+    // inapplicable metric (omitted from the table) never turns it on.
     preamble(
         format,
-        &framed(&trend_preamble(pair, has_unavailable), pair.current),
+        &framed(&trend_preamble(pair, payload.has_no_baseline()), pair.current),
     );
     if !kind_rows.is_empty() {
         render(
@@ -532,7 +688,7 @@ pub(crate) fn trend(sess: &Session, pair: WindowPair, format: Format) -> Result<
         &trend_total_rows(&payload),
         format,
     );
-    if agg.previous.by_kind.is_empty() {
+    if payload.previous_window_is_empty() {
         note(&format!(
             "the previous window ({}) holds no events in this store — comparisons\n\
              marked n/a have nothing to compare against, so no change is claimed for them",
@@ -733,21 +889,126 @@ mod tests {
         }
     }
 
+    /// The invariant every derivation relies on: a metric has a reason exactly
+    /// when it has no direction, and claims a delta exactly when it compares.
+    fn assert_unavailable_pairing<T: std::fmt::Debug + PartialEq>(metric: &Metric<T>) {
+        assert_eq!(
+            metric.direction == Direction::Unavailable,
+            metric.reason.is_some(),
+            "direction and reason must agree: {metric:?}"
+        );
+        assert_eq!(
+            metric.delta.is_none(),
+            metric.reason.is_some(),
+            "an unavailable metric claims no delta: {metric:?}"
+        );
+        if metric.reason == Some(UnavailableReason::NotApplicable) {
+            assert_eq!(metric.delta, None);
+        }
+    }
+
     #[test]
-    fn the_trend_direction_judgment() {
-        use Direction::{Down, Same, Unavailable, Up};
-        assert_eq!(direction_of(3.0, 5.0), Up);
-        assert_eq!(direction_of(5.0, 3.0), Down);
-        assert_eq!(direction_of(5.0, 5.0), Same);
-        // An empty previous side is 比較不能: the comparison is unavailable
-        // whatever the current value is — never a -100% drop to zero.
-        assert_eq!(direction_of(0.0, 5.0), Unavailable);
-        assert_eq!(direction_of(0.0, 0.0), Unavailable);
-        // Integer sides share the judgment.
-        assert_eq!(direction_of(4, 1), Down);
-        assert_eq!(direction_of(1, 4), Up);
-        assert_eq!(direction_of(7, 7), Same);
-        assert_eq!(direction_of(0, 7), Unavailable);
+    fn the_metric_invariants_hold_for_every_construction() {
+        // A metric nothing was claimed for carries a reason; one that compares
+        // carries none — the invariant every derivation relies on.
+        let compared = metric(Baseline::Measured(4), 1, int_judge);
+        assert_eq!(compared.direction, Direction::Down);
+        assert_eq!(compared.delta, Some(-3));
+        assert_eq!(compared.reason, None);
+        let absent = metric(Baseline::Absent, 7, int_judge);
+        assert_eq!(absent.direction, Direction::Unavailable);
+        assert_eq!(absent.reason, Some(UnavailableReason::NoBaseline));
+        assert_eq!(absent.delta, None);
+        // A metric that does not apply never claims a delta and names its own
+        // reason, so the table can omit the row the reason would be false for.
+        let inapplicable = unavailable(0, 0, UnavailableReason::NotApplicable);
+        assert_eq!(inapplicable.direction, Direction::Unavailable);
+        assert_eq!(inapplicable.reason, Some(UnavailableReason::NotApplicable));
+        assert_eq!(inapplicable.delta, None);
+        // Every payload metric obeys the same pairing, on every fixture shape:
+        // both windows populated, and a previous side that holds nothing.
+        for payload in [
+            trend_payload(
+                trend_pair(),
+                &two_window_store().trend_aggregates(trend_pair()).unwrap(),
+            ),
+            trend_payload(
+                trend_pair(),
+                &one_sided_store().trend_aggregates(trend_pair()).unwrap(),
+            ),
+        ] {
+            for metric in payload
+                .kinds
+                .iter()
+                .flat_map(|kind| [&kind.events, &kind.out_tokens])
+                .chain(payload.skills.iter().map(|skill| &skill.invocations))
+                .chain([
+                    &payload.sessions,
+                    &payload.subagent_runs,
+                    &payload.sub_tokens,
+                ])
+            {
+                assert_unavailable_pairing(metric);
+            }
+            for metric in payload.kinds.iter().map(|kind| &kind.duration_sec) {
+                assert_unavailable_pairing(metric);
+            }
+        }
+    }
+
+    #[test]
+    fn a_measured_zero_is_a_baseline() {
+        use Direction::Up;
+        // A previous window whose span really reported 0 output tokens has a
+        // baseline: the comparison is claimed, not folded to n/a.
+        let tokens = metric(Baseline::Measured(0), 300, int_judge);
+        assert_eq!(tokens.direction, Up);
+        assert_eq!(tokens.delta, Some(300));
+        assert_eq!(tokens.reason, None);
+        assert_eq!(tokens.previous, 0);
+        let (delta, direction) = int_cells(&tokens);
+        assert_eq!((delta.as_str(), direction.as_str()), ("+300", "up"));
+        // The float side: a measured 0.0 compares at the display's precision.
+        let seconds = metric(Baseline::Measured(0.0), 2.0, float_judge);
+        assert_eq!(seconds.direction, Up);
+        assert_eq!(seconds.delta, Some(2.0));
+        assert_eq!(seconds.reason, None);
+        let (delta, direction) = float_cells(&seconds);
+        assert_eq!((delta.as_str(), direction.as_str()), ("+2.0", "up"));
+        // A measured baseline that rounds to the displayed 0.0 still compares.
+        let rounded = metric(Baseline::Measured(0.04), 2.0, float_judge);
+        assert_eq!(rounded.direction, Up);
+        assert_eq!(rounded.reason, None);
+        // A measured zero that truly did not move reads as unchanged, never as
+        // unavailable: the row has a baseline.
+        let still = metric(Baseline::Measured(0), 0, int_judge);
+        assert_eq!(still.direction, Direction::Same);
+        assert_eq!(still.delta, Some(0));
+        assert_eq!(still.reason, None);
+    }
+
+    #[test]
+    fn absent_is_the_only_no_baseline() {
+        // `Baseline::Absent` is the one way to `NoBaseline`, on every value
+        // shape (a measured zero never is) — the three baseline sources the
+        // payload reads: an event rollup, a skill row, a session.
+        let absent_count = metric(Baseline::<i64>::Absent, 5, int_judge);
+        assert_eq!(absent_count.reason, Some(UnavailableReason::NoBaseline));
+        assert_eq!(absent_count.direction, Direction::Unavailable);
+        assert_eq!(absent_count.delta, None);
+        let absent_duration = metric(Baseline::<f64>::Absent, 5.0, float_judge);
+        assert_eq!(absent_duration.reason, Some(UnavailableReason::NoBaseline));
+        assert_eq!(absent_duration.direction, Direction::Unavailable);
+        assert_eq!(absent_duration.delta, None);
+        assert_eq!(
+            unavailable(0, 3, UnavailableReason::NoBaseline).reason,
+            Some(UnavailableReason::NoBaseline)
+        );
+        assert_ne!(
+            metric(Baseline::Measured(0), 0, int_judge).reason,
+            Some(UnavailableReason::NoBaseline),
+            "a measured zero is not an absent side"
+        );
     }
 
     #[test]
@@ -757,46 +1018,41 @@ mod tests {
         // as ±0.0 — direction and displayed delta never disagree. The cells
         // read the payload's one judged form, so the same assertions hold for
         // the JSON side.
-        let metric = float_metric(3.3, 3.3000000000000003);
+        let judged = metric(Baseline::Measured(3.3), 3.3000000000000003, float_judge);
         assert_eq!(
-            metric.direction,
+            judged.direction,
             Direction::Same,
             "drift above zero is not a move"
         );
-        let (delta, direction) = float_cells(&metric);
+        let (delta, direction) = float_cells(&judged);
         assert_eq!(delta, "+0.0");
         assert_eq!(direction, "same");
         // A sub-0.05 real move rounds to ±0.0 too: no direction is claimed
         // for a move the table cannot show.
-        let metric = float_metric(1.0, 1.0 - 1e-9);
+        let judged = metric(Baseline::Measured(1.0), 1.0 - 1e-9, float_judge);
         assert_eq!(
-            metric.direction,
+            judged.direction,
             Direction::Same,
             "drift below zero is not a move"
         );
-        let (delta, direction) = float_cells(&metric);
+        let (delta, direction) = float_cells(&judged);
         assert_eq!(delta, "+0.0");
         assert_eq!(direction, "same");
         // A move the table CAN show still reads as one.
-        let metric = float_metric(1.0, 2.0);
-        assert_eq!(metric.direction, Direction::Up);
-        let (delta, direction) = float_cells(&metric);
+        let judged = metric(Baseline::Measured(1.0), 2.0, float_judge);
+        assert_eq!(judged.direction, Direction::Up);
+        let (delta, direction) = float_cells(&judged);
         assert_eq!(delta, "+1.0");
         assert_eq!(direction, "up");
-        // An empty previous side (the 0.0 an absent rollup folds to) is the
-        // only 比較不能: no delta is claimed, whatever the current value is.
-        let metric = float_metric(0.0, 2.0);
-        assert_eq!(metric.direction, Direction::Unavailable);
-        assert_eq!(metric.delta, None);
-        let (delta, direction) = float_cells(&metric);
+        // An absent previous side is the only 比較不能: no delta is claimed,
+        // whatever the current value is.
+        let judged = metric(Baseline::<f64>::Absent, 2.0, float_judge);
+        assert_eq!(judged.direction, Direction::Unavailable);
+        assert_eq!(judged.delta, None);
+        let (delta, direction) = float_cells(&judged);
         assert_eq!((delta.as_str(), direction.as_str()), ("n/a", "n/a"));
-        // A present baseline that rounds to 0.0 still compares — it is a
-        // measured zero, not an empty side.
-        let metric = float_metric(0.04, 2.0);
-        assert_eq!(metric.direction, Direction::Up);
-        let (delta, direction) = float_cells(&metric);
-        assert_eq!((delta.as_str(), direction.as_str()), ("+2.0", "up"));
     }
+
 
     #[test]
     fn the_precision_rule_is_one_for_the_table_and_the_json() {
@@ -1033,7 +1289,7 @@ mod tests {
         // no reason at all rather than one that cannot occur.
         let without = trend_preamble(pair, false);
         assert!(
-            !without.contains("holds no events"),
+            !without.contains("that row's previous side"),
             "a report with no empty side states no reason: {without:?}"
         );
         assert!(
@@ -1041,10 +1297,76 @@ mod tests {
             "the previous window is still named: {without:?}"
         );
         let with = trend_preamble(pair, true);
+        // The sentence names the scope it holds in — that row's previous side
+        // — so one wording covers a kind, a skill, and a totals row.
         assert!(
-            with.contains("A delta marked n/a: the previous side holds no events"),
+            with.contains("A delta marked n/a: that row's previous side has nothing to compare — not a drop."),
             "the reason text rides with an empty side: {with:?}"
         );
+    }
+
+    #[test]
+    fn the_reason_text_and_note_read_the_payload() {
+        // The two explanations a report can print must agree with the n/a rows
+        // it actually renders: a rendered n/a row is a `NoBaseline` metric, the
+        // reason sentence turns on for it, and the note turns on only when the
+        // whole previous window is empty. A point kind's inapplicable metric
+        // never turns the sentence on — its row is omitted.
+        let shapes = [
+            ("two windows", two_window_store()),
+            ("one sided", one_sided_store()),
+            ("kind gone", kind_gone_store()),
+            ("straddling", straddling_store()),
+            ("empty", Store::in_memory().unwrap()),
+        ];
+        for (label, store) in shapes {
+            let payload = trend_payload(trend_pair(), &store.trend_aggregates(trend_pair()).unwrap());
+            let kind_rows = trend_kind_rows(&payload);
+            let skill_rows = trend_skill_rows(&payload);
+            let total_rows = trend_total_rows(&payload);
+            let rendered_na = kind_rows
+                .iter()
+                .chain(&skill_rows)
+                .chain(&total_rows)
+                .filter(|row| row[row.len() - 1] == "n/a")
+                .count();
+            let empty_previous = payload.previous_window_is_empty();
+            let no_baseline = payload.has_no_baseline();
+            assert_eq!(
+                rendered_na > 0,
+                no_baseline,
+                "{label}: a rendered n/a row and the reason sentence are one fact"
+            );
+            if empty_previous {
+                assert!(
+                    no_baseline,
+                    "{label}: an empty previous window is a report of n/a rows"
+                );
+                // The note speaks about the window as a whole, so every
+                // rendered n/a row in it has an absent baseline.
+                assert!(
+                    payload
+                        .kinds
+                        .iter()
+                        .all(|kind| kind.events.reason == Some(UnavailableReason::NoBaseline)),
+                    "{label}: the note holds only when every previous kind is absent"
+                );
+            }
+        }
+        // The two shared windows are the shape whose note must stay off.
+        let payload = trend_payload(
+            trend_pair(),
+            &two_window_store().trend_aggregates(trend_pair()).unwrap(),
+        );
+        assert!(!payload.has_no_baseline());
+        assert!(!payload.previous_window_is_empty());
+        // The one-sided shape holds n/a rows and an empty previous window.
+        let payload = trend_payload(
+            trend_pair(),
+            &one_sided_store().trend_aggregates(trend_pair()).unwrap(),
+        );
+        assert!(payload.has_no_baseline());
+        assert!(payload.previous_window_is_empty());
     }
 
     #[test]
@@ -1120,6 +1442,31 @@ mod tests {
         // omitted, not rendered. A span kind renders all three metrics.
         let agg = two_window_store().trend_aggregates(trend_pair()).unwrap();
         let payload = trend_payload(trend_pair(), &agg);
+        // The omission is the payload's own judgment: a point kind's span
+        // metrics are `NotApplicable` with no delta, never `NoBaseline`.
+        let edit = payload
+            .kinds
+            .iter()
+            .find(|kind| kind.kind == "file_edit")
+            .unwrap();
+        assert_eq!(edit.out_tokens.reason, Some(UnavailableReason::NotApplicable));
+        assert_eq!(
+            edit.duration_sec.reason,
+            Some(UnavailableReason::NotApplicable)
+        );
+        assert_eq!(
+            edit.out_tokens.delta, None,
+            "an inapplicable metric claims no delta"
+        );
+        assert_eq!(edit.duration_sec.delta, None);
+        // The span kind's metrics are judged, not inapplicable.
+        let span = payload
+            .kinds
+            .iter()
+            .find(|kind| kind.kind == "skill_invocation")
+            .unwrap();
+        assert_eq!(span.out_tokens.reason, None);
+        assert_eq!(span.duration_sec.reason, None);
         let rows = trend_kind_rows(&payload);
         let edit: Vec<_> = rows.iter().filter(|r| r[0] == "file_edit").collect();
         assert_eq!(
