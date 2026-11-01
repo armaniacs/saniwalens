@@ -2998,21 +2998,10 @@ mod tests {
 
     #[test]
     fn the_period_flags_parse_on_every_report_view() {
-        // The flags exist on all nine views and nothing else.
-        let views = [
-            vec!["usage"],
-            vec!["trend"],
-            vec!["inventory"],
-            vec!["waste"],
-            vec!["overhead"],
-            vec!["prompts"],
-            vec!["failures"],
-            vec!["stuck"],
-            vec!["doctor"],
-        ];
-        for view in views {
-            let mut argv = vec!["saniwalens"];
-            argv.extend(view.iter().copied());
+        // The flags exist on every windowed view (derived from clap's
+        // subcommand tree, not listed here) and nothing else.
+        for view in windowed_views() {
+            let mut argv = vec!["saniwalens", view.as_str()];
             argv.extend(["--since", "2026-10-01", "--until", "2026-10-07"]);
             Cli::try_parse_from(argv).expect("the view takes the period flags");
         }

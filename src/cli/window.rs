@@ -350,6 +350,28 @@ pub(crate) fn unused_label(window: TimeRange) -> &'static str {
     }
 }
 
+/// The windowed views, derived from clap's subcommand tree: a subcommand is
+/// windowed iff it carries the shared `--last` (the period group's
+/// discriminator, `PairArgs` included). Derived, not listed: the conflict and
+/// period tests below follow a view added to `Command` without a list to
+/// update. `Cli::command()` is deliberately not `build()`t — build pushes the
+/// `help` subcommand in, and the partition test in `tests/cli_help_golden.rs`
+/// would then see a command it cannot classify.
+#[cfg(test)]
+pub(crate) fn windowed_views() -> Vec<String> {
+    use clap::CommandFactory;
+
+    crate::cli::Cli::command()
+        .get_subcommands()
+        .filter(|command| {
+            command
+                .get_arguments()
+                .any(|arg| arg.get_long() == Some("last"))
+        })
+        .map(|command| command.get_name().to_string())
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -511,22 +533,10 @@ mod tests {
 
     // ---- PBI 2026-11-01-40: the consolidated windowed flag surface ----
 
-    /// The eight single-window views that flatten the shared period args;
-    /// trend's pair keeps its own declaration beside them.
-    const SINGLE_WINDOW_VIEWS: [&str; 8] = [
-        "usage",
-        "inventory",
-        "waste",
-        "overhead",
-        "prompts",
-        "failures",
-        "stuck",
-        "doctor",
-    ];
-
     /// The windowed and read-path flags one parsed command holds, extracted
     /// per view: (since, until, last, frozen, db). The match is the flatten
-    /// demonstration — every view carries the shared groups as plain fields.
+    /// demonstration — every view carries the shared groups as plain fields,
+    /// trend's pair included.
     fn windowed_flags(
         command: Command,
     ) -> (
@@ -544,8 +554,8 @@ mod tests {
                 read.frozen,
                 read.db,
             ),
-            Command::Trend { .. } => {
-                unreachable!("the trend pair keeps its own declaration")
+            Command::Trend { pair, read, .. } => {
+                (pair.since, pair.until, pair.last, read.frozen, read.db)
             }
             Command::Inventory { period, read, .. } => (
                 period.since,
@@ -603,17 +613,20 @@ mod tests {
     }
 
     #[test]
-    fn the_shared_period_args_conflict_and_parse_on_every_single_window_view() {
-        // One declaration carries the conflicts: flatten keeps each field's
-        // arg id (the field name), so `--last`'s `conflicts_with_all` —
-        // pinned once on the shared group — resolves inside every command
-        // that flattens it. This mechanizes the conflicts for all eight
-        // single-window views (PBI 40: the six views the older conflict pin
-        // left uncovered — inventory, overhead, prompts, failures, stuck,
+    fn the_shared_period_args_conflict_and_parse_on_every_windowed_view() {
+        // One declaration carries the conflicts for the eight single-window
+        // views: flatten keeps each field's arg id (the field name), so
+        // `--last`'s `conflicts_with_all` — pinned once on the shared group —
+        // resolves inside every command that flattens it. This mechanizes the
+        // conflicts for all eight (PBI 40: the six views the older conflict
+        // pin left uncovered — inventory, overhead, prompts, failures, stuck,
         // doctor — are asserted here rather than left to the core's second
         // defense, whose wording and exit code differ from the clap
-        // conflict's).
-        for view in SINGLE_WINDOW_VIEWS {
+        // conflict's). trend's pair carries the same conflicts on its own
+        // declaration; the loop includes it so the set stays clap's, and the
+        // flag extraction below exercises the pair arm too.
+        for view in windowed_views() {
+            let view = view.as_str();
             let err =
                 Cli::try_parse_from(["saniwalens", view, "--last", "7d", "--since", "2026-10-01"])
                     .err()

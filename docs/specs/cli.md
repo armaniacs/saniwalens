@@ -71,7 +71,7 @@ Resolution order, strongest first: explicit flags, the selected profile, the
 file's top-level defaults, then the builtins (`claude`, the per-harness store
 path). Flag *values* (`--scope`, `--format`) are parsed before the session is
 built, so an invalid flag fails on its own ― no store open, no freshness line
-ahead of the error. The nine report views resolve those flags through the
+ahead of the error. The report views resolve those flags through the
 windowed dispatch in `cli/window.rs`: `WindowedDispatch::open` for the four
 views without `--scope` (format, then period, then `Session::open_read`),
 `open_scoped` for the three with it (`inventory`, `waste`, `failures`: scope,
@@ -203,8 +203,8 @@ markdown, so its `--format` vocabulary is `table | json` and nothing else:
 `markdown` (and the `md` shorthand that resolves to markdown in the other
 views) is refused at the flag stage ― `unknown --format 'markdown'
 (table|json)` ― before the refresh, the freshness line, or the store's
-creation, as the flags-before-store contract above requires. The other eight
-views (`trend` included) take all three values.
+creation, as the flags-before-store contract above requires. The other
+windowed views (`trend` included) take all three values.
 
 Slices not covered here ― the Bash command mix, the most-edited files, an error
 category broken down any way ― are a `sql` one-liner; those once had thin
@@ -212,9 +212,13 @@ category broken down any way ― are a `sql` one-liner; those once had thin
 
 ### Period ― narrow a report to a window of the history
 
-The nine report views above take `--since` / `--until` / `--last` so "what did
+The windowed report views above take `--since` / `--until` / `--last` so "what did
 the agent cost last week" is a view flag, not a `sql` query. The other commands
 (`analyze`, `sql`, `optimize`) take none ― they are whole-history by contract.
+Which commands are windowed is derived from the subcommand tree (a command
+carrying the shared `--last`), never a hand-maintained list: every subcommand
+must resolve to windowed or whole-history, and `tests/cli_help_golden.rs` pins
+that partition beside the `--help` captures.
 
 `trend` resolves the same flags as a **pair** ― the current window plus the
 equal-length window immediately before it (the previous ends one second before
@@ -240,7 +244,7 @@ compare against is undefined.
 - `--last SPAN`: a rolling window ending now ― `<N>d`, `<N>h`, `<N>w`.
   Exclusive with the explicit dates (clap conflict), so "last 7 days" can never
   be silently reinterpreted by a stray `--since`. The conflict is declared once
-  on the shared period-flags group the eight single-window views flatten
+  on the shared period-flags group the single-window views flatten
   (`cli/window.rs`); trend's pair keeps its own declaration, so its
   pair-specific help wording survives (the help capture pins hold every view's
   help byte-identical). The span's resolved window
