@@ -260,10 +260,9 @@ pub fn run() -> Result<()> {
     let resolved = resolve_cli(cli.harness.as_deref(), cli.profile.as_deref(), &env)?;
     let harness = resolved.harness;
     let config_db = resolved.config_db;
-    // The windowed report arms resolve their flags through one dispatch —
-    // scope, format, period, then the store, the order pinned in
-    // `cli/window.rs`, so an invalid flag fails on its own before any store
-    // work (PBI 01's byte-identical error ordering included).
+    // The windowed report arms resolve their flags through `cli/window.rs` —
+    // `open` (no scope) or `open_scoped` (scope, format, period) — so an
+    // invalid flag fails on its own before any store work (PBI 01's order).
     let dispatch = WindowedDispatch {
         harness: &harness,
         config_db: config_db.as_deref(),
@@ -285,7 +284,7 @@ pub fn run() -> Result<()> {
             format,
             read,
         } => {
-            let opened = dispatch.open(None, format.as_deref(), &period, &read, run_analyze)?;
+            let opened = dispatch.open(format.as_deref(), &period, &read, run_analyze)?;
             usage(&opened.sess, by.as_deref(), opened.window, opened.format)
         }
         Command::Trend { pair, format, read } => {
@@ -298,14 +297,15 @@ pub fn run() -> Result<()> {
             format,
             read,
         } => {
-            let opened = dispatch.open(
+            let opened = dispatch.open_scoped(
                 scope.as_deref(),
                 format.as_deref(),
                 &period,
                 &read,
                 run_analyze,
             )?;
-            inventory(&opened.sess, &opened.filter, opened.window, opened.format)
+            let (windowed, filter) = opened.into_parts();
+            inventory(&windowed.sess, &filter, windowed.window, windowed.format)
         }
         Command::Waste {
             scope,
@@ -313,21 +313,22 @@ pub fn run() -> Result<()> {
             format,
             read,
         } => {
-            let opened = dispatch.open(
+            let opened = dispatch.open_scoped(
                 scope.as_deref(),
                 format.as_deref(),
                 &period,
                 &read,
                 run_analyze,
             )?;
-            waste(&opened.sess, &opened.filter, opened.window, opened.format)
+            let (windowed, filter) = opened.into_parts();
+            waste(&windowed.sess, &filter, windowed.window, windowed.format)
         }
         Command::Overhead {
             format,
             period,
             read,
         } => {
-            let opened = dispatch.open(None, format.as_deref(), &period, &read, run_analyze)?;
+            let opened = dispatch.open(format.as_deref(), &period, &read, run_analyze)?;
             overhead(&opened.sess, opened.window, opened.format)
         }
         Command::Prompts {
@@ -335,7 +336,7 @@ pub fn run() -> Result<()> {
             period,
             read,
         } => {
-            let opened = dispatch.open(None, format.as_deref(), &period, &read, run_analyze)?;
+            let opened = dispatch.open(format.as_deref(), &period, &read, run_analyze)?;
             prompts(&opened.sess, opened.window, opened.format)
         }
         Command::Failures {
@@ -344,21 +345,22 @@ pub fn run() -> Result<()> {
             format,
             read,
         } => {
-            let opened = dispatch.open(
+            let opened = dispatch.open_scoped(
                 scope.as_deref(),
                 format.as_deref(),
                 &period,
                 &read,
                 run_analyze,
             )?;
-            failures(&opened.sess, &opened.filter, opened.window, opened.format)
+            let (windowed, filter) = opened.into_parts();
+            failures(&windowed.sess, &filter, windowed.window, windowed.format)
         }
         Command::Stuck {
             format,
             period,
             read,
         } => {
-            let opened = dispatch.open(None, format.as_deref(), &period, &read, run_analyze)?;
+            let opened = dispatch.open(format.as_deref(), &period, &read, run_analyze)?;
             stuck(&opened.sess, opened.window, opened.format)
         }
         Command::Doctor {
@@ -367,14 +369,15 @@ pub fn run() -> Result<()> {
             format,
             read,
         } => {
-            let opened = dispatch.open(
+            let opened = dispatch.open_scoped_table_json(
                 scope.as_deref(),
                 format.as_deref(),
                 &period,
                 &read,
                 run_analyze,
             )?;
-            doctor(&opened.sess, &opened.filter, opened.window, opened.format)
+            let (windowed, filter) = opened.into_parts();
+            doctor(&windowed.sess, &filter, windowed.window, windowed.format)
         }
         Command::Sql { query, format, db } => {
             let fmt = parse_format(format.as_deref())?;
@@ -927,9 +930,6 @@ fn sql(sess: &Session, query: Option<&str>, format: Format) -> Result<()> {
 /// then each project's own findings ("optimize my global setup" and "optimize
 /// this project" are different tasks). `--scope` narrows to one layer.
 fn doctor(sess: &Session, filter: &ScopeFilter, window: TimeRange, format: Format) -> Result<()> {
-    if format == Format::Markdown {
-        anyhow::bail!("summary has no markdown form — use the default text or --format json");
-    }
     let store = &sess.store;
     eprint_window(window);
     let f = collect_findings(store, window)?;

@@ -71,12 +71,16 @@ Resolution order, strongest first: explicit flags, the selected profile, the
 file's top-level defaults, then the builtins (`claude`, the per-harness store
 path). Flag *values* (`--scope`, `--format`) are parsed before the session is
 built, so an invalid flag fails on its own ― no store open, no freshness line
-ahead of the error. The nine report views resolve those flags through **one**
-windowed open (`WindowedDispatch::open` / `open_pair` in `cli/window.rs` ―
-scope where the view has `--scope`, then format, then the period or pair,
-then `Session::open_read`), so this ordering has one counterpart instead of a
-copy per view arm; `optimize` is the exception that resolves the store path
-first, exactly as the pre-`Session` dispatch did. A relative `db` joins the directory holding `config.toml` ― never the
+ahead of the error. The nine report views resolve those flags through the
+windowed dispatch in `cli/window.rs`: `WindowedDispatch::open` for the four
+views without `--scope` (format, then period, then `Session::open_read`),
+`open_scoped` for the four with it (scope, then format, then period, then the
+store), and `open_pair` for trend (format, then pair, then the store). The
+narrowing is carried by what each entry returns ― `open` gives a
+`WindowedRead` (session, format, window), so the views that never filter have
+no filter to ignore, and only `open_scoped` gives a `ScopedRead` (that read
+plus the filter `--scope` selected); `optimize` is the exception that resolves
+the store path first, exactly as the pre-`Session` dispatch did. A relative `db` joins the directory holding `config.toml` ― never the
 current working directory ― while an explicit `--db` is taken as is, even
 when relative; `~` is not expanded. Unknown keys are ignored so a newer file
 never breaks an older binary. A missing file is silence, not an error; anything
@@ -171,6 +175,14 @@ Every command has both a human form and a machine form, strictly separated:
   **stderr** (see above), so `saniwalens <cmd> --format json | jq` needs no
   filtering. Human-only footnotes (row counts, heuristic caveats) are either
   folded into the JSON (`total`, …) or dropped, never mixed into it.
+
+`doctor`'s human form is its own text layout rather than a table pasted as
+markdown, so its `--format` vocabulary is `table | json` and nothing else:
+`markdown` (and the `md` shorthand that resolves to markdown in the other
+views) is refused at the flag stage ― `unknown --format 'markdown'
+(table|json)` ― before the refresh, the freshness line, or the store's
+creation, as the flags-before-store contract above requires. The other eight
+views (`trend` included) take all three values.
 
 Slices not covered here ― the Bash command mix, the most-edited files, an error
 category broken down any way ― are a `sql` one-liner; those once had thin

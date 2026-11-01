@@ -1,15 +1,21 @@
 //! The windowed flag surface every report view shares, in one place: the
 //! period flags declared once (clap args groups flattened into each command),
-//! resolved ahead of the store through one session-open dispatch, and the
-//! window's disclosure on stderr, in the JSON payloads, and in a table's
-//! framing block.
+//! resolved ahead of the store through one session-open dispatch with an entry
+//! per view shape, and the window's disclosure on stderr, in the JSON payloads,
+//! and in a table's framing block.
+//!
+//! The vocabulary is carried by the return type, not by a flag bag: a view
+//! without `--scope` gets [`WindowedRead`] and no filter to ignore, one with
+//! `--scope` gets [`ScopedRead`], and doctor — whose `--format` set is
+//! narrower than the table views' — has its own entry. Adding a view cannot
+//! quietly acquire a filter it never shows or a format it never renders.
 
 use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 
 use crate::adapter::harness::Harness;
-use crate::cli::{Format, parse_format};
+use crate::cli::{Format, ViewFormat};
 use crate::core::bucket::JST_OFFSET_SECS;
 use crate::core::period::{self, TimeRange, WindowPair};
 use crate::core::scope::ScopeFilter;
@@ -65,14 +71,37 @@ pub(crate) struct ReadArgs {
     pub(crate) db: Option<PathBuf>,
 }
 
-/// What one windowed report arm's open call resolves: the opened session and
-/// the flags, resolved in the arm's order.
+/// What one unscoped windowed report arm's open call resolves: the opened
+/// session and the flags every windowed view has. The four views without
+/// `--scope` (usage, overhead, prompts, stuck) take this and nothing else, so
+/// there is no filter for them to leave unread.
 #[derive(Debug)]
 pub(crate) struct WindowedRead {
     pub(crate) sess: Session,
-    pub(crate) filter: ScopeFilter,
     pub(crate) format: Format,
     pub(crate) window: TimeRange,
+}
+
+/// What one scoped windowed report arm's open call resolves: a
+/// [`WindowedRead`] plus the config layer `--scope` selected. Only the four
+/// views that declare `--scope` (inventory, waste, failures, doctor) take
+/// this, and only through [`WindowedDispatch::open_scoped`].
+#[derive(Debug)]
+pub(crate) struct ScopedRead {
+    pub(crate) read: WindowedRead,
+    pub(crate) filter: ScopeFilter,
+}
+
+impl ScopedRead {
+    /// The two halves, for an arm that hands each to its view separately: the
+    /// windowed read every view takes, and the layer only the scoped four
+    /// have. A method rather than a struct pattern at the call site because
+    /// rustfmt expands `let ScopedRead { .. } = <multi-line call>` to one line
+    /// per field, and `src/cli/mod.rs` may not grow past its budget
+    /// (`tests/cli_mod_line_budget.rs`).
+    pub(crate) fn into_parts(self) -> (WindowedRead, ScopeFilter) {
+        (self.read, self.filter)
+    }
 }
 
 /// What the trend arm's open call resolves: the opened session, the format,
@@ -95,23 +124,86 @@ pub(crate) struct WindowedDispatch<'a> {
 }
 
 impl WindowedDispatch<'_> {
-    /// The one windowed session open for the eight single-window views:
-    /// scope (where the view has `--scope`), then format, then the period,
-    /// then the store opens. The order is the arms' own, kept so a double
-    /// failure reports the same error the current binary does; the invariant —
-    /// every flag resolves before the store opens, so an invalid flag fails
-    /// on its own with no store error or freshness line ahead of it
-    /// (`docs/specs/cli.md`) — is pinned here once.
+    /// The one open for the four windowed views without `--scope` (usage,
+    /// overhead, prompts, stuck): format, then the period, then the store
+    /// opens. The invariant — every flag resolves before the store opens, so
+    /// an invalid flag fails on its own with no store error or freshness line
+    /// ahead of it (`docs/specs/cli.md`) — is pinned here once.
     pub(crate) fn open(
+        &self,
+        format: Option<&str>,
+        period: &PeriodArgs,
+        read: &ReadArgs,
+        analyze: impl FnOnce(&Harness, Option<PathBuf>, &Path) -> Result<AnalyzeStats>,
+    ) -> Result<WindowedRead> {
+        self.open_in(ViewFormat::TableMarkdownJson, format, period, read, analyze)
+    }
+
+    /// The one open for the four windowed views with `--scope` (inventory,
+    /// waste, failures, doctor): scope, then the format, then the period, then
+    /// the store. Scope is resolved **here**, before delegating, which is what
+    /// keeps it winning over a bad format without any arm ordering it by hand
+    /// (`the_scoped_open_resolves_flags_in_the_arms_order`).
+    pub(crate) fn open_scoped(
         &self,
         scope: Option<&str>,
         format: Option<&str>,
         period: &PeriodArgs,
         read: &ReadArgs,
         analyze: impl FnOnce(&Harness, Option<PathBuf>, &Path) -> Result<AnalyzeStats>,
-    ) -> Result<WindowedRead> {
+    ) -> Result<ScopedRead> {
+        self.open_scoped_in(
+            ViewFormat::TableMarkdownJson,
+            scope,
+            format,
+            period,
+            read,
+            analyze,
+        )
+    }
+
+    /// doctor's open: the same scope-first order, with the two-value `--format`
+    /// set whose `markdown` refusal lands before the store opens — the view's
+    /// human form is its own text layout, not a pasted table.
+    pub(crate) fn open_scoped_table_json(
+        &self,
+        scope: Option<&str>,
+        format: Option<&str>,
+        period: &PeriodArgs,
+        read: &ReadArgs,
+        analyze: impl FnOnce(&Harness, Option<PathBuf>, &Path) -> Result<AnalyzeStats>,
+    ) -> Result<ScopedRead> {
+        self.open_scoped_in(ViewFormat::TableJson, scope, format, period, read, analyze)
+    }
+
+    /// The scoped views' shared body: the view's vocabulary decides what
+    /// `--format` may be; [`WindowedDispatch::open_in`] keeps the rest of the
+    /// flags-before-store order.
+    fn open_scoped_in(
+        &self,
+        view: ViewFormat,
+        scope: Option<&str>,
+        format: Option<&str>,
+        period: &PeriodArgs,
+        read: &ReadArgs,
+        analyze: impl FnOnce(&Harness, Option<PathBuf>, &Path) -> Result<AnalyzeStats>,
+    ) -> Result<ScopedRead> {
         let filter = super::parse_scope(scope)?;
-        let format = parse_format(format)?;
+        let read = self.open_in(view, format, period, read, analyze)?;
+        Ok(ScopedRead { read, filter })
+    }
+
+    /// format, then the period, then the store — the half every windowed view
+    /// shares, so the order has one counterpart instead of a copy per arm.
+    fn open_in(
+        &self,
+        view: ViewFormat,
+        format: Option<&str>,
+        period: &PeriodArgs,
+        read: &ReadArgs,
+        analyze: impl FnOnce(&Harness, Option<PathBuf>, &Path) -> Result<AnalyzeStats>,
+    ) -> Result<WindowedRead> {
+        let format = view.parse(format)?;
         let window = parse_period(
             period.since.as_deref(),
             period.until.as_deref(),
@@ -127,7 +219,6 @@ impl WindowedDispatch<'_> {
         )?;
         Ok(WindowedRead {
             sess,
-            filter,
             format,
             window,
         })
@@ -143,7 +234,7 @@ impl WindowedDispatch<'_> {
         read: &ReadArgs,
         analyze: impl FnOnce(&Harness, Option<PathBuf>, &Path) -> Result<AnalyzeStats>,
     ) -> Result<WindowedPairRead> {
-        let format = parse_format(format)?;
+        let format = ViewFormat::TableMarkdownJson.parse(format)?;
         let pair = parse_pair(
             pair.since.as_deref(),
             pair.until.as_deref(),
@@ -162,8 +253,8 @@ impl WindowedDispatch<'_> {
 }
 
 /// Resolve the period flags before the session is built — the same
-/// ahead-of-store evaluation `parse_scope`/`parse_format` have, so an
-/// unparseable date fails on its own. The clock is read here: this is the
+/// ahead-of-store evaluation `parse_scope` and [`ViewFormat::parse`] have, so
+/// an unparseable date fails on its own. The clock is read here: this is the
 /// thin shell around the pure transform in `core::period`.
 pub(crate) fn parse_period(
     since: Option<&str>,
@@ -584,12 +675,10 @@ mod tests {
     }
 
     #[test]
-    fn the_windowed_open_resolves_flags_in_the_arms_order() {
-        // The dispatch resolves scope, then format, then the period, then the
-        // store — the arms' own order, so a double failure reports the same
-        // error the current binary does and a flag failure never opens the
-        // store or runs the analyzer. Reordering inside the open fails here,
-        // not in a user's terminal.
+    fn the_unscoped_open_resolves_flags_in_the_arms_order() {
+        // The four views without --scope resolve format, then the period,
+        // then the store — a flag failure never opens the store or runs the
+        // analyzer, and the resolved read carries no filter to ignore.
         let dir = example_dir("windowed-open");
         let env = SessionEnv {
             state_home: Some(&dir),
@@ -606,15 +695,76 @@ mod tests {
             db: Some(dir.join("store.db")),
         };
 
-        // scope first, where the view has --scope: a bad scope wins over a
-        // bad format, exactly as the scoped arms parse today.
+        // format before the period: a bad format wins over a bad date.
+        let bad_period = PeriodArgs {
+            since: Some("2026/10/01".to_string()),
+            until: None,
+            last: None,
+        };
+        let err = dispatch
+            .open(Some("nonsense"), &bad_period, &read, panic_analyzer())
+            .expect_err("a bad format must fail");
+        assert!(
+            err.to_string().contains("unknown --format"),
+            "the format error must come before the period: {err}"
+        );
+
+        // the period before the store opens: a bad date fails with the
+        // analyzer never run — no store work, no freshness line.
+        let err = dispatch
+            .open(None, &bad_period, &read, panic_analyzer())
+            .expect_err("a bad period must fail");
+        assert!(
+            err.to_string().contains("invalid --since '2026/10/01'"),
+            "the period error must come before the open: {err}"
+        );
+
+        // All flags valid: the session opens (the frozen read never runs the
+        // analyzer) and the resolved values come back resolved.
         let period = PeriodArgs {
             since: None,
             until: None,
             last: None,
         };
+        let opened = dispatch
+            .open(None, &period, &read, panic_analyzer())
+            .expect("the flags resolve and the store opens");
+        assert_eq!(opened.format, Format::Table);
+        assert_eq!(opened.window, TimeRange::ALL);
+        assert_eq!(opened.sess.db_path, dir.join("store.db"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_scoped_open_resolves_flags_in_the_arms_order() {
+        // The four views with --scope resolve scope, then format, then the
+        // period, then the store. Scope is parsed inside the entry, so a bad
+        // scope wins over a bad format without the arm ordering the two
+        // calls by hand.
+        let dir = example_dir("scoped-open");
+        let env = SessionEnv {
+            state_home: Some(&dir),
+            home: None,
+            config_home: Some(&dir),
+        };
+        let dispatch = WindowedDispatch {
+            harness: &Harness::Claude,
+            config_db: None,
+            env: &env,
+        };
+        let read = ReadArgs {
+            frozen: true,
+            db: Some(dir.join("store.db")),
+        };
+        let period = PeriodArgs {
+            since: None,
+            until: None,
+            last: None,
+        };
+
+        // scope first: a bad scope wins over a bad format.
         let err = dispatch
-            .open(
+            .open_scoped(
                 Some("nonsense"),
                 Some("nonsense"),
                 &period,
@@ -634,7 +784,7 @@ mod tests {
             last: None,
         };
         let err = dispatch
-            .open(None, Some("nonsense"), &bad_period, &read, panic_analyzer())
+            .open_scoped(None, Some("nonsense"), &bad_period, &read, panic_analyzer())
             .expect_err("a bad format must fail");
         assert!(
             err.to_string().contains("unknown --format"),
@@ -644,22 +794,78 @@ mod tests {
         // the period before the store opens: a bad date fails with the
         // analyzer never run — no store work, no freshness line.
         let err = dispatch
-            .open(None, None, &bad_period, &read, panic_analyzer())
+            .open_scoped(None, None, &bad_period, &read, panic_analyzer())
             .expect_err("a bad period must fail");
         assert!(
             err.to_string().contains("invalid --since '2026/10/01'"),
             "the period error must come before the open: {err}"
         );
 
-        // All flags valid: the session opens (the frozen read never runs the
-        // analyzer) and the resolved values come back resolved.
+        // All flags valid: the filter comes back resolved beside the read.
         let opened = dispatch
-            .open(Some("global"), None, &period, &read, panic_analyzer())
+            .open_scoped(Some("global"), None, &period, &read, panic_analyzer())
             .expect("the flags resolve and the store opens");
         assert_eq!(opened.filter, ScopeFilter::Global);
-        assert_eq!(opened.format, Format::Table);
-        assert_eq!(opened.window, TimeRange::ALL);
-        assert_eq!(opened.sess.db_path, dir.join("store.db"));
+        assert_eq!(opened.read.format, Format::Table);
+        assert_eq!(opened.read.window, TimeRange::ALL);
+        assert_eq!(opened.read.sess.db_path, dir.join("store.db"));
+
+        // No --scope means both layers, not an absent filter.
+        let opened = dispatch
+            .open_scoped(None, None, &period, &read, panic_analyzer())
+            .expect("the flags resolve and the store opens");
+        assert_eq!(opened.filter, ScopeFilter::All);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn doctors_open_refuses_markdown_before_the_store_opens() {
+        // doctor's --format set is table|json: the refusal is part of the
+        // open, so it lands before the analyzer and the store's creation.
+        // `md` resolves to markdown elsewhere; here it is simply unaccepted.
+        let dir = example_dir("doctor-open");
+        let env = SessionEnv {
+            state_home: Some(&dir),
+            home: None,
+            config_home: Some(&dir),
+        };
+        let dispatch = WindowedDispatch {
+            harness: &Harness::Claude,
+            config_db: None,
+            env: &env,
+        };
+        let read = ReadArgs {
+            frozen: true,
+            db: Some(dir.join("store.db")),
+        };
+        let period = PeriodArgs {
+            since: None,
+            until: None,
+            last: None,
+        };
+
+        for value in ["markdown", "md"] {
+            let err = dispatch
+                .open_scoped_table_json(None, Some(value), &period, &read, panic_analyzer())
+                .expect_err("doctor must refuse markdown");
+            assert_eq!(
+                err.to_string(),
+                format!("unknown --format '{value}' (table|json)")
+            );
+            assert!(
+                !read.db.as_ref().expect("a db path").exists(),
+                "the store was created before {value} was refused"
+            );
+        }
+
+        // The two values it does take resolve to the formats doctor renders.
+        for (value, expected) in [(None, Format::Table), (Some("json"), Format::Json)] {
+            let opened = dispatch
+                .open_scoped_table_json(Some("project"), value, &period, &read, panic_analyzer())
+                .expect("doctor's own values must resolve");
+            assert_eq!(opened.read.format, expected);
+            assert_eq!(opened.filter, ScopeFilter::Project(None));
+        }
         let _ = std::fs::remove_dir_all(&dir);
     }
 
