@@ -200,3 +200,129 @@ fn a_failed_removal_report_does_not_panic_when_stderr_is_unwritable() {
     // write error being dropped instead.
     report_removal_failure(FailingWriter, &path, &err);
 }
+
+const UNIT_GUARD: &str = "src/scratch.rs";
+const INTEGRATION_GUARD: &str = "tests/common/mod.rs";
+
+/// Extract the `impl Drop for ScratchDir { ... }` block from a source file.
+/// A missing or duplicated block is a broken fixture, not an empty contract.
+fn drop_body(path: &str) -> String {
+    let source =
+        std::fs::read_to_string(path).unwrap_or_else(|e| panic!("cannot read {path}: {e}"));
+    let marker = "impl Drop for ScratchDir {";
+    let start = source
+        .find(marker)
+        .unwrap_or_else(|| panic!("{path} has no `{marker}`"));
+    let after = &source[start..];
+    assert_eq!(
+        after.matches(marker).count(),
+        1,
+        "{path} has more than one Drop impl"
+    );
+
+    let mut depth = 0usize;
+    for (index, ch) in after.char_indices() {
+        match ch {
+            '{' => depth += 1,
+            '}' => {
+                depth -= 1;
+                if depth == 0 {
+                    return after[..=index].to_string();
+                }
+            }
+            _ => {}
+        }
+    }
+    panic!("{path}'s Drop impl has unbalanced braces");
+}
+
+/// Compare the two copies without comments, blank lines, or indentation: the
+/// bodies must be the same statements, not merely look similar.
+fn normalized(body: &str) -> String {
+    body.lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty() && !line.starts_with("//"))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// The order contract: `keep_scratch` returns before any removal, and the final
+/// `unclaim` comes only after `remove_dir_all`.
+fn assert_drop_order(body: &str) {
+    let remove = body
+        .find("remove_dir_all")
+        .expect("the Drop removes the dir");
+    let last_unclaim = body.rfind("unclaim(").expect("the Drop releases the claim");
+    assert!(
+        remove < last_unclaim,
+        "the Drop unclaims before removing: {body}"
+    );
+    let keep = body
+        .find("keep_scratch()")
+        .expect("the Drop checks keep_scratch");
+    assert!(
+        keep < remove,
+        "keep_scratch must return before the removal: {body}"
+    );
+}
+
+#[test]
+fn the_two_copies_share_the_drop_contract() {
+    let unit = drop_body(UNIT_GUARD);
+    let integration = drop_body(INTEGRATION_GUARD);
+    assert_eq!(
+        normalized(&unit),
+        normalized(&integration),
+        "the two ScratchDir Drop copies drifted; keep them in step"
+    );
+    assert_drop_order(&unit);
+    assert_drop_order(&integration);
+}
+
+const RIGHT_ORDER: &str = "impl Drop for ScratchDir {
+    fn drop(&mut self) {
+        if keep_scratch() {
+            return;
+        }
+        let _ = std::fs::remove_dir_all(&self.path);
+        unclaim(&self.path);
+    }
+}";
+
+const WRONG_ORDER: &str = "impl Drop for ScratchDir {
+    fn drop(&mut self) {
+        if keep_scratch() {
+            return;
+        }
+        unclaim(&self.path);
+        let _ = std::fs::remove_dir_all(&self.path);
+    }
+}";
+
+#[test]
+#[should_panic(expected = "the two ScratchDir Drop copies drifted")]
+fn a_single_changed_copy_is_rejected() {
+    let dir = ScratchDir::new(PREFIX, "drop-contract-mismatch");
+    let left = dir.join("left.rs");
+    let right = dir.join("right.rs");
+    std::fs::write(&left, RIGHT_ORDER).unwrap();
+    std::fs::write(&right, WRONG_ORDER).unwrap();
+
+    let left = drop_body(left.to_str().unwrap());
+    let right = drop_body(right.to_str().unwrap());
+    assert_eq!(
+        normalized(&left),
+        normalized(&right),
+        "the two ScratchDir Drop copies drifted; keep them in step"
+    );
+}
+
+#[test]
+#[should_panic(expected = "the Drop unclaims before removing")]
+fn both_copies_with_the_wrong_order_are_rejected() {
+    let dir = ScratchDir::new(PREFIX, "drop-contract-wrong-order");
+    let path = dir.join("guard.rs");
+    std::fs::write(&path, WRONG_ORDER).unwrap();
+    let body = drop_body(path.to_str().unwrap());
+    assert_drop_order(&body);
+}
