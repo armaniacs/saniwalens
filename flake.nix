@@ -38,8 +38,9 @@
 
         # `cleanCargoSource` keeps only Cargo inputs, but the prose reference
         # gate (`tests/prose_reference_gate.rs`) reads README, AGENTS, and the
-        # current specs at test time. Keep those files (and the directories
-        # that lead to them) so the package build runs the same gate as CI.
+        # current specs, and asserts that the history trees still exist. Keep
+        # the prose trees (docs, pbi, .claude) plus their root files so the
+        # package build runs the same gate as CI.
         proseSources = path: type:
           let
             root = toString ./.;
@@ -48,12 +49,13 @@
           craneLib.filterCargoSources path type
           || rel == "README.md"
           || rel == "AGENTS.md"
+          || rel == "CHANGELOG.md"
           || rel == "docs"
-          || rel == "docs/specs"
-          || pkgs.lib.hasPrefix "docs/specs/" rel
+          || pkgs.lib.hasPrefix "docs/" rel
+          || rel == "pbi"
+          || pkgs.lib.hasPrefix "pbi/" rel
           || rel == ".claude"
-          || rel == ".claude/rules"
-          || pkgs.lib.hasPrefix ".claude/rules/" rel;
+          || pkgs.lib.hasPrefix ".claude/" rel;
 
         commonArgs = {
           src = pkgs.lib.cleanSourceWith {
