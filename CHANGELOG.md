@@ -23,6 +23,11 @@
   直前ウィンドウにイベントが無い比較は「比較不能」と明示され、-100% と
   いう誤読を生む表示は出ない。既存のビューと `sql` / `analyze` /
   `optimize` の出力は一切変わらない。
+- `optimize` の headless 実行に `--timeout <DURATION>` を追加（例:
+  `30s`, `2m`, `500ms`）。期限超過で子を kill して reap し、エラーは
+  raw log を名指す。既定は無効で、長い実行を勝手に切らない（PR #26）。
+- `trend` の JSON に `reason` を追加し、比較不能や実測 0 の理由を
+  文字列で返す（PR #15 / #17）。
 
 ### Changed
 
@@ -44,6 +49,26 @@
 - 上記の構造変更は出力が従来と同一: 旧 `821bf1e` バイナリとのE2E出力
   269行がバイト同一、`cargo test` 391件 green。PBI 01-06 は
   `pbi/archived/` にアーカイブ。
+- `--format` の宣言を 1 箇所に集約し、ヘルプを実際の受理値（レポートは
+  `table | markdown | json`、doctor は `table | json`）に合わせた（PR #24）。
+  `doctor --format markdown` は store を開く前に拒否する（PR #17）。
+- 期間クエリ用の `events_by_epoch` インデックスを追加した。既存ストアでは
+  次回 open 時に作成し、`SCHEMA_VERSION` は変えない（PR #15）。
+- 内部構造: CLI を `cli/` 配下へ分割し、windowed flag の宣言を 1 箇所に、
+  headless の renderer 選択を harness seam に、`run_headless` を
+  `cli/headless.rs` の guard に集約した。出力は不変（PR #15〜#17）。
+- ライブラリ API: `saniwalens::store::{SkillUsage, KindRollup, TwoWindow,
+  TrendWindowAggregates, SkillDelta, skill_deltas}` は
+  `saniwalens::core::trend` へ移動した。互換再輸出はしない（PR #27）。
+
+### Fixed
+
+- `--last` が暦レンジ外を指す場合に丸められる問題と、`trend` の導出
+  previous 窓が暦外を指す問題を修正（PR #15）。
+- `trend` の point kind で適用外の metric 行が表に出る問題と、`n/a` の
+  理由が実際と異なる問題を修正（PR #15）。
+- heartbeat が遅延後に burst する問題を修正し、cadence / poll に 0 を
+  渡した場合はエラーにした（PR #17 / #21）。
 
 ## [0.5.1] - 2026-10-29
 
