@@ -61,7 +61,9 @@ same path (the path carries the process id) and then calls `create_dir` (never
 a second live guard for the same path panics instead of removing the first one's
 dir. `Drop` removes the dir on normal exit and on unwind, so no trailing
 `remove_dir_all` belongs at the end of a test. Set `SANIWALENS_KEEP_SCRATCH=1` to
-keep the dirs for post-mortem inspection.
+keep the dirs for post-mortem inspection. The two copies' `Drop` order is pinned by
+`the_two_copies_share_the_drop_contract` in `tests/scratch_dir_contract.rs`:
+`remove_dir_all` before the final `unclaim`, and `keep_scratch` before the removal.
 
 ## Anti-patterns
 
