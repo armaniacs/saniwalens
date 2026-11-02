@@ -223,3 +223,28 @@ fn the_spec_carries_the_placement_rule() {
         "the architecture core row must carry the trend view's two-window joins"
     );
 }
+
+#[test]
+fn the_spec_sync_map_does_not_pin_the_join_location() {
+    // The spec-sync table names the owning spec, not the current file
+    // location. The location belongs to the placement rule and architecture;
+    // a row that says "still in src/store.rs" goes stale the moment the move
+    // lands and is a fifth, unowned copy of the same fact.
+    let spec_sync = read(".claude/rules/spec-sync.md");
+    let row = spec_sync
+        .lines()
+        .find(|line| line.contains("Pure shaping of fetched rows"))
+        .expect("spec-sync must keep the pure-shaping row");
+    assert!(
+        row.contains("docs/specs/cli.md"),
+        "the pure-shaping row must name its owning spec: {row}"
+    );
+    assert!(
+        row.contains("pure-join-placement"),
+        "the pure-shaping row must point at the placement rule: {row}"
+    );
+    assert!(
+        !row.contains("src/store.rs") && !row.contains("still sit"),
+        "the pure-shaping row must not pin the current join location: {row}"
+    );
+}
