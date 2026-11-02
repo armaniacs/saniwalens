@@ -10,8 +10,8 @@ in their own specs (`session-format.md`, `session-format-opencode.md`); the
 ## One store per harness
 
 Stores are **never shared** across harnesses. Each harness gets its own SQLite
-file holding a single harness's sessions, so the Claude Code path — behavior,
-defaults, and existing stores — is untouched by every later harness:
+file holding a single harness's sessions, so the Claude Code path ― behavior,
+defaults, and existing stores ― is untouched by every later harness:
 
 | Harness | Default store (`--db`) |
 | --- | --- |
@@ -21,7 +21,7 @@ defaults, and existing stores — is untouched by every later harness:
 
 An explicit `--db` always wins, exactly as before. The schema is identical in
 every store (`storage.md`); only the rows' origin differs, which is why no
-`harness` column exists — a file holding one harness needs no per-row label,
+`harness` column exists ― a file holding one harness needs no per-row label,
 and a shared file is what this design refuses to create. No cross-harness
 aggregation exists in v1.
 
@@ -41,7 +41,7 @@ A global flag, default `claude`:
 saniwalens [--harness claude|opencode|kilocode] <command>
 ```
 
-- The default keeps every existing invocation byte-identical in behavior —
+- The default keeps every existing invocation byte-identical in behavior ―
   this is what keeps the change upstream-mergeable.
 - There is deliberately **no `auto`**: detection order across harnesses would
   be ambiguous (several harnesses installed, several stores present), and an
@@ -52,7 +52,7 @@ saniwalens [--harness claude|opencode|kilocode] <command>
 `--projects` keeps its meaning ("input root") but resolves per harness:
 a directory for Claude Code (`$CLAUDE_CONFIG_DIR/projects`), the opencode
 database file for opencode (default `~/.local/share/opencode/opencode.db`),
-and the kilocode tasks directory for kilocode — default the **first existing
+and the kilocode tasks directory for kilocode ― default the **first existing
 editor globalStorage candidate** (`kilocode_tasks_candidates`), since the
 path varies with the editor install (Code / Cursor / VSCodium) and the
 platform, so the candidate list, not one hardcoded path, is the contract.
@@ -85,12 +85,12 @@ contract:
 - **Subagent runs are not ingested.** opencode has no subagent-side
   transcripts, so `sub_tokens`/`sub_agent_count` stay zero and the per-agent
   split is empty. `SplitCoverage::is_unavailable` requires a positive total,
-  so no misleading "run analyze to fill it" warning fires — zero subagent
+  so no misleading "run analyze to fill it" warning fires ― zero subagent
   activity reads as zero, which is what it is.
 - **Prompts are not ingested in v1.** The store's prompt pointer is a
   `(source_path, source_line)` file coordinate (`storage.md`); opencode text
   lives in database rows, so the pointer needs a new encoding. Until then the
-  `prompts` view is empty under opencode — reported as empty, never
+  `prompts` view is empty under opencode ― reported as empty, never
   fabricated.
 - **Permission denials count zero.** No runtime denial marker was found in
   the opencode format, and no heuristic stands in for one.
@@ -120,11 +120,11 @@ contract:
   the session id and the slug.
 - **The project root is a stated heuristic** (`estimate_root`): the common
   parent directory of the **leading** tool paths, since kilocode stamps no
-  `cwd` anywhere. A task whose tools name no absolute path stays unrooted —
+  `cwd` anywhere. A task whose tools name no absolute path stays unrooted ―
   empty, never guessed.
 - **Per-task ingest keys.** `kilocode:<task-uuid>` keys each task, with
   (mtime = the later of the two files', size = their summed length) as the
-  fingerprint — either file moves on activity, and the directory stat would
+  fingerprint ― either file moves on activity, and the directory stat would
   re-ingest every task on each run (checkpoints move too). Replace semantics
   make re-ingest idempotent, as for the other harnesses.
 - **Invalidation has its own version key**, `meta.kilocode_analyzer_version`
@@ -134,10 +134,10 @@ contract:
 - **Subagent runs, prompts, and permission denials are not ingested.** No
   spawn marker, no usable prompt pointer (the store's `(source_path,
   source_line)` coordinate has no line meaning in JSON), and no denial marker
-  was measured in the kilocode format — the counts stay zero and the views
+  was measured in the kilocode format ― the counts stay zero and the views
   read as empty, which is what they are.
 - **The surface catalog is empty.** The global `~/.config/kilo` sites are
-  measured (commands, skills, `kilo.json`) but not cataloged yet — the config
+  measured (commands, skills, `kilo.json`) but not cataloged yet ― the config
   half is a separate spec and change. `inventory` says so instead of showing
   a table that looks like an empty config, and `meta.config_dir` is recorded
   empty (nothing scanned, distinguishable from unknown).
@@ -148,14 +148,14 @@ The briefing composes from the store either way, so `--print` works under
 every harness. Launching runs the harness's own agent on a data-free pointer
 prompt (the briefing travels via a private temp file, as for Claude Code):
 `claude <prompt>` opens interactively, while `opencode run --format json
---title 'saniwalens optimize' <prompt>` runs the advisor headless — no user is
+--title 'saniwalens optimize' <prompt>` runs the advisor headless ― no user is
 present for the approval gate, so the headless instructions
 (`run_instructions`) make the printed plan the final output and forbid
 edits.
 
 The headless terminal stays quiet: saniwalens reads the JSON event stream line
-by line and surfaces only what the agent says — text parts (narration, then
-the plan) on stdout, one-line tool markers on stderr — while every raw line
+by line and surfaces only what the agent says ― text parts (narration, then
+the plan) on stdout, one-line tool markers on stderr ― while every raw line
 and the child's stderr go to a private (`0600`) log file whose path is
 printed up front. Rendering is lenient (the upstream event shapes are
 unversioned): a line with no recognizable text stays in the log, and a run
@@ -163,12 +163,12 @@ that renders nothing readable says so instead of leaving silence.
 `--verbose` inherits stdio for the raw streaming instead.
 
 Under kilocode the briefing composes from the store either way, so `--print`
-works. Launching opens an **interactive kilo session** on the pointer prompt —
+works. Launching opens an **interactive kilo session** on the pointer prompt ―
 `kilo --prompt <prompt>`, the experience the claude launch gives: the user is
 present to approve the briefing read (kilo gates every tool call where
 opencode does not, so a headless run would need `--auto` instead), steer the
 investigation, and apply the fixes themselves. A bare `kilo <text>` positional
-is treated as a file to open (measured), not a prompt — `--prompt` is the
+is treated as a file to open (measured), not a prompt ― `--prompt` is the
 TUI's message surface.
 
 ## Report copy names the harness
@@ -184,14 +184,14 @@ opencode output never claims to be Claude Code's:
   `inventory` framing, `overhead` breakdown, friction suggestions).
 - The `optimize` briefing and advisor instructions render from a
   `HarnessCopy` (`core::optimize`), plain data the shell assembles from the
-  harness — the core never names a harness.
+  harness ― the core never names a harness.
 - Freshness lines count the harness's own unit (`transcript(s)` vs
   `session(s)`).
 
 Static `--help` texts still describe the Claude Code defaults; per-harness
 help generation is out of scope.
 
-## The analyze seam — `Harness::analyze`
+## The analyze seam ― `Harness::analyze`
 
 `analyze` is dispatched exactly once, on the harness:
 
@@ -199,19 +199,20 @@ help generation is out of scope.
   the matching adapter module's `analyze` (`adapter::claude`,
   `adapter::opencode`, `adapter::kilocode`), which owns input discovery,
   fingerprint skipping, extraction wiring, and the store hand-off for that
-  harness. `cli.rs` guards the store against a cross-harness write and then
-  calls the seam — it names no harness and carries no dispatch arm.
+  harness. The shell guards the store against a cross-harness write and then
+  calls the seam ― `run_analyze` (`cli/mod.rs`) invokes `guard_harness`
+  (`session.rs`) first ― and names no harness, carrying no dispatch arm.
 - The input-route defaults resolve inside that module: the projects directory
   (Claude Code), the opencode database file, the kilocode tasks directory.
   `--projects` still overrides whatever the harness resolves (the top of this
   spec), and the resolved root is recorded in `meta.projects_dir` unchanged.
-- Each harness's analyzer-version key sits beside its mapping —
+- Each harness's analyzer-version key sits beside its mapping ―
   `adapter::transcript::CLAUDE_ANALYZER_META_KEY` / `CLAUDE_ANALYZER_VERSION`,
   `OPENCODE_ANALYZER_*`, `KILOCODE_ANALYZER_*`. The store's invalidation check
   takes the `(key, version)` it is given, so no harness's key lives in
   `store.rs` and a new harness adds its own without touching the store.
 - The surface catalog rides the same seam: `catalog_surfaces(harness, roots)`
-  (`adapter::harness`) is the single traversal — it resolves that harness's
+  (`adapter::harness`) is the single traversal ― it resolves that harness's
   config root, builds each `Scope`, owns the symlink-dedup `seen` set, and
   gates roots on disk. Each harness contributes only its **site rows**
   (`global_sites` / `project_sites`: a path plus a loader), so a new config
@@ -222,7 +223,9 @@ help generation is out of scope.
 
 A new harness adds: a `Harness` variant, its default input root and store
 name here, its format spec, and an adapter module carrying its analyze routine
-behind `Harness::analyze` — input route, fingerprinting, and its
-analyzer-version key included, so `cli.rs` gains no dispatch arm. Nothing in
-the Claude Code path moves — that immobility is the contract this spec
-protects.
+behind `Harness::analyze` ― input route, fingerprinting, and its
+analyzer-version key included, so `cli/mod.rs` gains no dispatch arm: the
+shell's only harness-aware step is the cross-harness write guard
+(`guard_harness` in `session.rs`, invoked from `run_analyze`), and a new
+harness passes it unchanged. Nothing in the Claude Code path moves ― that
+immobility is the contract this spec protects.

@@ -104,7 +104,7 @@ pub struct Surface {
 /// only evidence of disuse for usage-measurable kinds; for catalog-only kinds
 /// Static-token threshold above which an always-on or rarely-used surface
 /// counts as "heavy" — a tuning knob, not a hard rule. Shared by the briefing's
-/// wedge routing (`core::findings`) and the `waste` view (`cli.rs`).
+/// wedge routing (`core::findings`) and the `waste` view (`cli/mod.rs`).
 pub const HEAVY_TOKENS: u64 = 800;
 
 /// (rules, hooks, CLAUDE.md) it means nothing (`docs/specs/surfaces.md`).

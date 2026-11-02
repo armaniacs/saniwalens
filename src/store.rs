@@ -105,6 +105,7 @@ CREATE TABLE IF NOT EXISTS ingested_files (
 /// column a future release adds would be replayed against a legacy shape, fail on
 /// the missing column, and take the whole migration down with it.
 const INDEX_SCHEMA: &str = "
+CREATE INDEX events_by_epoch ON events(started_epoch);
 CREATE INDEX events_by_surface ON events(surface_kind, surface_id);
 CREATE INDEX subagent_runs_by_agent ON subagent_runs(agent);
 CREATE INDEX subagent_runs_by_source ON subagent_runs(source_path);
@@ -3808,6 +3809,116 @@ mod tests {
         assert_eq!(
             (agg.previous.sub_tokens, agg.previous.subagent_runs),
             (400, 1)
+        );
+    }
+
+    // ---- PBI 2026-10-31-31: the events_by_epoch index ----
+
+    #[test]
+    fn a_new_store_declares_the_epoch_index() {
+        // `started_epoch` is the column every windowed reader filters on; the
+        // index is the planner's choice that keeps those reads from scanning
+        // the whole spine (`docs/specs/storage.md`).
+        let store = Store::in_memory().unwrap();
+        let sql = declared_sql(&store.conn, "index").unwrap();
+        let ddl = sql
+            .get("events_by_epoch")
+            .expect("events_by_epoch must be declared on a fresh store");
+        assert!(ddl.contains("started_epoch"), "wrong column: {ddl}");
+    }
+
+    #[test]
+    fn an_existing_store_gains_the_epoch_index_on_the_next_open() {
+        // A store created before the index was declared must converge on the
+        // next ReadWrite open. Reconciliation only ever adds, so
+        // SCHEMA_VERSION does not move for it (`docs/specs/storage.md`).
+        let store = Store::in_memory().unwrap();
+        store
+            .conn
+            .execute_batch("DROP INDEX IF EXISTS events_by_epoch;")
+            .unwrap();
+        let version_before: i64 = store
+            .conn
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
+            .unwrap();
+
+        let store = Store::from_connection(store.conn).unwrap();
+
+        let indexes = declared_sql(&store.conn, "index").unwrap();
+        assert!(
+            indexes.contains_key("events_by_epoch"),
+            "the index must be recreated on open: {indexes:?}"
+        );
+        let version_after: i64 = store
+            .conn
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(
+            version_after, version_before,
+            "adding the index must not bump SCHEMA_VERSION"
+        );
+    }
+
+    #[test]
+    fn the_epoch_index_leaves_windowed_output_byte_identical() {
+        // The index is a planner's option, never a result change: the same
+        // windowed reader and the raw windowed SQL it rests on must answer
+        // byte-identically with and without it (PBI 2026-10-31-31's
+        // output-invariance scenario).
+        let spans = [
+            span_at("commit", 1_000, 100),
+            span_at("commit", 2_000, 200),
+            span_at("commit", 9_000, 400),
+        ];
+        let mut indexed = Store::in_memory().unwrap();
+        indexed
+            .ingest(IngestBatch::new(&session("s1"), &spans, &[]))
+            .unwrap();
+        let mut plain = Store::in_memory().unwrap();
+        plain
+            .ingest(IngestBatch::new(&session("s1"), &spans, &[]))
+            .unwrap();
+        plain
+            .conn
+            .execute_batch("DROP INDEX IF EXISTS events_by_epoch;")
+            .unwrap();
+        // The two stores must differ in nothing but the index itself.
+        assert!(
+            declared_sql(&indexed.conn, "index")
+                .unwrap()
+                .contains_key("events_by_epoch"),
+            "the indexed store lost its index"
+        );
+        assert!(
+            !declared_sql(&plain.conn, "index")
+                .unwrap()
+                .contains_key("events_by_epoch"),
+            "the comparison store kept the index"
+        );
+
+        let window = TimeRange {
+            start: Some(1_500),
+            end: Some(8_000),
+        };
+        assert_eq!(
+            indexed.skill_usage(window).unwrap(),
+            plain.skill_usage(window).unwrap(),
+            "index presence changed the windowed reader's result"
+        );
+        let sql = "SELECT kind, COUNT(*), SUM(out_tokens) FROM events \
+                   WHERE started_epoch >= 1500 AND started_epoch < 8001 \
+                   GROUP BY kind";
+        let (cols_i, rows_i) = indexed.query(sql).unwrap();
+        let (cols_p, rows_p) = plain.query(sql).unwrap();
+        assert_eq!(cols_i, cols_p);
+        assert_eq!(
+            rows_i, rows_p,
+            "index presence changed the windowed query's output"
+        );
+        assert_eq!(
+            rows_i.len(),
+            1,
+            "the window must catch data for this check to be non-vacuous"
         );
     }
 }

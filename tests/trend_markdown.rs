@@ -45,10 +45,10 @@ fn write_store(dir: &Path, sessions: &[(&str, i64)]) -> PathBuf {
     db
 }
 
-/// Run the binary's `trend` on `db` in markdown, frozen (the store is read
+/// Run the binary's `trend` on `db` in `format`, frozen (the store is read
 /// as-is; the synthetic home holds nothing to refresh from), and return its
 /// stdout.
-fn trend_markdown(dir: &Path, db: &Path) -> String {
+fn trend_output(dir: &Path, db: &Path, format: &str) -> String {
     let out = std::process::Command::new(env!("CARGO_BIN_EXE_saniwalens"))
         .args([
             "trend",
@@ -57,7 +57,7 @@ fn trend_markdown(dir: &Path, db: &Path) -> String {
             "--until",
             "1970-01-02",
             "--format",
-            "markdown",
+            format,
             "--frozen",
         ])
         .arg("--db")
@@ -95,7 +95,7 @@ fn trend_markdown_omits_an_empty_section_instead_of_bare_headers() {
     // holds the 1_000 one.
     let dir = scratch_dir("empty-skills");
     let db = write_store(&dir, &[("past", 1_000), ("present", 100_000)]);
-    let out = trend_markdown(&dir, &db);
+    let out = trend_output(&dir, &db, "markdown");
 
     // No bare skill table, and no section label without its table — a section
     // with no rows is omitted, per the usage view's convention.
@@ -122,7 +122,7 @@ fn trend_note_names_the_previous_window_that_holds_no_events() {
     // previous window with its range.
     let dir = scratch_dir("one-sided");
     let db = write_store(&dir, &[("present", 100_000)]);
-    let out = trend_markdown(&dir, &db);
+    let out = trend_output(&dir, &db, "markdown");
 
     assert!(
         out.contains("holds no events in this store"),
@@ -131,6 +131,66 @@ fn trend_note_names_the_previous_window_that_holds_no_events() {
     assert!(
         out.contains("previous window (since "),
         "the note does not name the previous window: {out:?}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn trend_markdown_omits_a_point_kinds_non_applicable_metric_rows() {
+    // Both windows hold `file_edit` events and no skill spans anywhere:
+    // ingest writes a point kind's output tokens and duration as constant
+    // zeros, so its "out tokens" / "seconds" rows would always read
+    // `0.0 | 0.0 | n/a | n/a` — the n/a's stated reason (an empty previous
+    // side) false for a row whose real reason is that the metric does not
+    // apply. The rows are omitted, not rendered.
+    let dir = scratch_dir("point-kinds");
+    let db = write_store(&dir, &[("past", 1_000), ("present", 100_000)]);
+    let out = trend_output(&dir, &db, "markdown");
+
+    assert!(
+        out.contains("| file_edit | events |"),
+        "the kind's count row is gone: {out:?}"
+    );
+    assert!(
+        !out.contains("| file_edit | out tokens |"),
+        "the out tokens row rendered: {out:?}"
+    );
+    assert!(
+        !out.contains("| file_edit | seconds |"),
+        "the seconds row rendered: {out:?}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn trend_states_the_na_reason_only_when_a_previous_side_is_empty() {
+    // Both windows hold events: every rendered kind has a baseline, so no
+    // comparison is n/a and the reason text ("A delta marked n/a: ...")
+    // prints nowhere — the table format renders the preamble. The one-sided
+    // store does hold an empty previous side, and there the reason text
+    // explains its n/a rows.
+    let dir = scratch_dir("reason-two-sided");
+    let db = write_store(&dir, &[("past", 1_000), ("present", 100_000)]);
+    let out = trend_output(&dir, &db, "table");
+    assert!(
+        !out.contains("A delta marked n/a"),
+        "the n/a reason rendered without an n/a row: {out:?}"
+    );
+    assert!(
+        !out.contains("holds no events in this store"),
+        "the empty-side note rendered without an empty side: {out:?}"
+    );
+
+    let dir = scratch_dir("reason-one-sided");
+    let db = write_store(&dir, &[("present", 100_000)]);
+    let out = trend_output(&dir, &db, "table");
+    assert!(
+        out.contains("A delta marked n/a"),
+        "the n/a reason is missing where a previous side is empty: {out:?}"
+    );
+    assert!(
+        out.contains("holds no events in this store"),
+        "the empty-side note is missing: {out:?}"
     );
     let _ = std::fs::remove_dir_all(&dir);
 }

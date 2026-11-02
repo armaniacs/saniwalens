@@ -36,8 +36,32 @@
         rustToolchain = pkgs.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml;
         craneLib = (crane.mkLib pkgs).overrideToolchain rustToolchain;
 
+        # `cleanCargoSource` keeps only Cargo inputs, but the prose reference
+        # gate (`tests/prose_reference_gate.rs`) reads README, AGENTS, and the
+        # current specs, and asserts that the history trees still exist. Keep
+        # the prose trees (docs, pbi, .claude) plus their root files so the
+        # package build runs the same gate as CI.
+        proseSources = path: type:
+          let
+            root = toString ./.;
+            rel = pkgs.lib.removePrefix (root + "/") (toString path);
+          in
+          craneLib.filterCargoSources path type
+          || rel == "README.md"
+          || rel == "AGENTS.md"
+          || rel == "CHANGELOG.md"
+          || rel == "docs"
+          || pkgs.lib.hasPrefix "docs/" rel
+          || rel == "pbi"
+          || pkgs.lib.hasPrefix "pbi/" rel
+          || rel == ".claude"
+          || pkgs.lib.hasPrefix ".claude/" rel;
+
         commonArgs = {
-          src = craneLib.cleanCargoSource ./.;
+          src = pkgs.lib.cleanSourceWith {
+            src = ./.;
+            filter = proseSources;
+          };
           strictDeps = true;
           # rusqlite is built with the `bundled` feature, so SQLite compiles from
           # C against the stdenv C toolchain — no system sqlite/pkg-config needed.

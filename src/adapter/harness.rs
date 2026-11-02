@@ -212,7 +212,7 @@ impl Harness {
     /// command and the views' auto-refresh call. The per-harness routines
     /// live beside their formats (`adapter::claude`, `adapter::opencode`,
     /// `adapter::kilocode`), so a new harness is a variant plus its adapter
-    /// module and `cli.rs` does not change (`docs/specs/harness.md`).
+    /// module and `cli/mod.rs` does not change (`docs/specs/harness.md`).
     pub fn analyze(&self, input: Option<PathBuf>, db: &Path) -> Result<AnalyzeStats> {
         match self {
             Harness::Claude => crate::adapter::claude::analyze(input, db),
