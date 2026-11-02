@@ -133,7 +133,10 @@ Scenario: core が store を import しない
 - `cli/trend.rs` の `kind_pairs` は `TwoWindow<TrendWindowAggregates>` を取る。
   core へ移すと cli 側の import が減る
 - 台帳の deferral note は削除しない。「移動済み」に書き換える（履歴として残す）
-- 非機能要件: なし（移動のみ、外部契約は不変）
+- lib API: `saniwalens::store::{SkillUsage, KindRollup, skill_deltas, ...}` のパスが
+  `saniwalens::core::trend::*` に移る。互換再輸出は rule が禁じるため意図的な破壊で、
+  semver gate 導入時にこの移動を記録する（CHANGELOG は履歴ファイルなので触らない）
+- 非機能要件: CLI 出力は不変。lib API のパス移動は上記のとおり
 
 ## 実装者向け注記
 

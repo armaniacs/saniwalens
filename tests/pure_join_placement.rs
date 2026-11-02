@@ -78,7 +78,8 @@ fn normalize(text: &str) -> String {
 fn move_message(definition: &str) -> String {
     format!(
         "`{definition}` is not in {CORE_TREND}, or is back in {STORE}: the pure join moved to \
-         core in PBI 61. {MOVE_REMEDY}"
+         core in PBI 61. If the definition moved within core, update CORE_TREND and the rule's \
+         enumeration instead. {MOVE_REMEDY}"
     )
 }
 
@@ -158,6 +159,10 @@ fn the_enumerated_joins_sit_in_core_and_not_in_the_store() {
         assert!(core.contains(definition), "{}", move_message(definition));
         assert!(!store.contains(definition), "{}", move_message(definition));
     }
+    assert!(
+        !store.contains("pub use crate::core::trend"),
+        "{STORE} must not re-export the moved joins: a re-export-only module is a tombstone"
+    );
 }
 
 #[test]
@@ -210,6 +215,8 @@ fn the_trend_view_does_not_import_analysis_types_from_the_store() {
     // cannot satisfy this by deletion.
     let cli = read(CLI_TREND);
     for symbol in [
+        "SkillUsage",
+        "KindRollup",
         "SkillDelta",
         "TwoWindow",
         "TrendWindowAggregates",

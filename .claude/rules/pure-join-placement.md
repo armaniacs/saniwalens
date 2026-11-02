@@ -31,14 +31,15 @@ The house style is the opposite: `core/findings.rs` takes a store-free
   query→join window split
   (`two_window_aggregation_splits_events_between_the_windows`): which window a
   boundary event lands in is storage behavior, not join logic.
-- **The 2nd SQLite-free function that appears in `src/store.rs` is the
-  trigger**: the PBI that lands it also moves the accumulated joins to core in
-  the same PR. The 1st pattern's trigger 1 fired at PBI 46 (`1ecda2a` /
-  `3b4349f`) but the move did not ride that landing; PBI 61 (2026-11-02) is the
-  follow-up remediation, not a co-landing. That miss is recorded in the ledger,
-  and trigger 2 remains armed for the next accumulation. Landing a join without
-  the contract updates below, or parking the move behind a separate cleanup,
-  both lose the trigger; the tripwire exists so neither can happen quietly.
+- **Two triggers arm a move**: trigger 1 is a trend metric/view landing; it
+  fired at PBI 46 (`1ecda2a` / `3b4349f`) and is spent. Trigger 2 is the next
+  SQLite-free function that appears in `src/store.rs`; the PBI that lands it
+  also moves it (and anything else that slipped in) to core in the same PR.
+  PBI 61 (2026-11-02) landed after trigger 1 was missed: it is a follow-up
+  remediation, not a co-landing, and no accumulation remains. Landing a join
+  without the contract updates below, or parking the move behind a separate
+  cleanup, both lose the trigger; the tripwire exists so neither can happen
+  quietly.
 - The four points that accompany a move: this rule's enumeration below, the
   core row of the layer table (`docs/specs/architecture.md`), the ledger's
   deferral note (`pbi/2026-10-30-00-backlog.md`), and
