@@ -14,10 +14,12 @@ query だけが残ってほしい、なぜなら placement rule の 1st pattern 
 
 ## trigger（旧 PBI の停止条件を解消）
 旧 PBI 61 は「次の trend metric/view 着地 PR、または 2 個目の SQLite 非依存 join」を
-待つとして blocked にした。しかし rule 着地 `7a95563`（2026-11-01）の後に、
-trend の metric contract を変える `1ecda2a`（baseline 型）と `3b4349f`（reason の
-JSON 配線）が着地している。これは rule の trigger 1 に当たる。本 PBI はその着地に
-同乗する形で、旧 PBI の未決だった型所有を決めて移動する。
+待つとして blocked にした。rule 着地 `7a95563`（2026-11-01）の後に、trend の metric
+contract を変える `1ecda2a`（baseline 型）と `3b4349f`（reason の JSON 配線）が着地して
+おり、これは rule の trigger 1 に当たる。ただし move はその着地に同乗しておらず、
+本 PBI は trigger 発火後の **follow-up remediation** である（co-landing ではない）。
+この missed co-landing を台帳と rule に記録し、trigger 2 は次の accumulation に armed
+のまま残す。
 
 ## 決定（旧 PBI の自己矛盾の解消）
 旧 PBI は「4 型を core へ」「`SkillUsage` / `KindRollup` は store に残す」を同時に
@@ -40,7 +42,7 @@ row 型を store に残したままでは core が store を import する逆依
 Scenario: 移動後も trend の出力が不変
   Given 移動前の trend の table / markdown / json の capture
   When 移動を着地させる
-  Then 3 つの capture が byte 同一
+  Then JSON capture は byte 同一、markdown / 表の既存出力テストは green
   And tests/trend_markdown.rs と trend_json_golden が green
 
 Scenario: 移動が tripwire を反転させる
@@ -60,9 +62,10 @@ Scenario: core が store を import しない
 - [ ] `src/core/trend.rs` を新設し、`SkillUsage` / `KindRollup` / `TwoWindow<T>` /
   `TrendWindowAggregates` / `SkillDelta` / `skill_deltas` / `kind_pairs` を定義する。
   `src/core.rs` に `pub mod trend;` を足す
-- [ ] `src/store.rs` から 6 型 + 2 関数の定義を削除し、`crate::core::trend` から
-  import する。`Store::trend_aggregates` / `trend_window_aggregates` の戻り値は
-  core の型にする
+- [ ] `src/store.rs` から 5 型 + 1 関数（`SkillUsage` / `KindRollup` / `TwoWindow` /
+  `TrendWindowAggregates` / `SkillDelta` / `skill_deltas`）の定義を削除し、
+  `crate::core::trend` から import する。`kind_pairs` は `cli/trend.rs` から移す。
+  `Store::trend_aggregates` / `trend_window_aggregates` の戻り値は core の型にする
 - [ ] `src/cli/trend.rs` の import を `crate::core::trend` に張り替え、`kind_pairs` の
   定義を削除して core から import する。`crate::store` の分析型 import を残さない
 - [ ] `skill_deltas_order_by_the_largest_absolute_delta` を core の module へ移す。
@@ -84,8 +87,8 @@ Scenario: core が store を import しない
   (d) tripwire の move side
 - [ ] `docs/specs/cli.md` に trend の型が store 由来と読める記述があれば core に直す。
   現状は型名を出していないため変更不要であることを確認して PR に記録する
-- [ ] trend の golden 3 本（JSON / markdown / 表）が byte 同一、fmt、clippy、
-  フルスイートが green
+- [ ] trend の JSON が byte 同一、markdown / 表の既存出力テストが green、fmt、
+  clippy、フルスイートが green
 - [ ] 旧 PBI 61 の「単独着手しない」「trigger 待ち」の記述を、trigger 発火済みの
   本再スコープに置き換える。台帳の RICE と順位も更新する
 
@@ -156,8 +159,8 @@ Scenario: core が store を import しない
 4. tripwire を 5 エントリ + 反転 + 外部アンカー 2 本 + architecture stale 不在に
    作り直す
 5. rule / architecture / 台帳 / PBI 61 を更新
-6. `cargo test --test pure_join_placement`、trend golden 3 本、フルスイート、fmt、
-   clippy
+6. `cargo test --test pure_join_placement`、trend の JSON golden と markdown / 表の
+   出力テスト、フルスイート、fmt、clippy
 7. 変異確認: `core/trend.rs` から `kind_pairs` を消す -> tripwire 赤、
    `cli/trend.rs` に `crate::store` の分析型 import を戻す -> 外部アンカー赤、
    `architecture.md` に「still sit in `store.rs`」を戻す -> prose pin 赤

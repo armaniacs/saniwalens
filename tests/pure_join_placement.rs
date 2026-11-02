@@ -37,9 +37,12 @@ const CLI_TREND: &str = "src/cli/trend.rs";
 /// rename satisfy the tripwire while the rule still claimed the old name.
 const FIRST_PATTERN_JOINS: [(&str, &str); 5] = [
     ("skill_deltas", "pub fn skill_deltas("),
-    ("TwoWindow", "pub struct TwoWindow"),
-    ("SkillDelta", "pub struct SkillDelta"),
-    ("TrendWindowAggregates", "pub struct TrendWindowAggregates"),
+    ("TwoWindow", "pub struct TwoWindow<"),
+    ("SkillDelta", "pub struct SkillDelta {"),
+    (
+        "TrendWindowAggregates",
+        "pub struct TrendWindowAggregates {",
+    ),
     ("kind_pairs", "pub fn kind_pairs("),
 ];
 
@@ -128,8 +131,8 @@ fn the_rule_names_the_trigger_symbols() {
     // destination instead.
     let rule = read(RULE);
     assert!(
-        rule.contains("src/core/trend.rs") || rule.contains("`core`"),
-        "the rule must name where the 1st pattern sits now (src/core/trend.rs or core): {RULE}"
+        rule.contains("src/core/trend.rs"),
+        "the rule must name where the 1st pattern sits now (src/core/trend.rs): {RULE}"
     );
     assert!(
         rule.contains("same PR"),
@@ -189,9 +192,9 @@ fn the_enumerated_set_matches_the_rule() {
 
 #[test]
 fn core_trend_does_not_reach_into_the_store() {
-    // The dependency direction the move bought: a pure join takes the rows it
-    // shapes as arguments, never through the store's namespace. `store -> core`
-    // is the only direction the layers allow.
+    // The dependency direction the move bought for this module: a pure join
+    // takes the rows it shapes as arguments, never through the store's
+    // namespace. `store -> core` is the only direction the layers allow.
     let core = read(CORE_TREND);
     assert!(
         !core.contains("crate::store"),
@@ -211,6 +214,7 @@ fn the_trend_view_does_not_import_analysis_types_from_the_store() {
         "TwoWindow",
         "TrendWindowAggregates",
         "skill_deltas",
+        "kind_pairs",
     ] {
         for line in cli.lines().filter(|line| line.contains("crate::store")) {
             assert!(

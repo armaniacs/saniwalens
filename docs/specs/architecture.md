@@ -138,11 +138,13 @@ values, no SQLite ― is core's wherever it is called from today
   `store.rs` with the query it tests.
 - The trend view's two-window joins (`skill_deltas`, `TwoWindow`,
   `SkillDelta`, `TrendWindowAggregates`, `kind_pairs`) were the 1st pattern:
-  they predated the rule and sat in `store.rs` until PBI 61 (2026-11-02) moved
-  them to `src/core/trend.rs`. The store keeps the windowed queries that hand
-  them rows; `kind_pairs` was the fifth join, found in `cli/trend.rs` only
-  because the move enumerated them. The 2nd SQLite-free function appearing in
-  `store.rs` still fires the same obligation in the PR that lands it.
+  they predated the rule and sat in `store.rs`. PBI 46 fired the trend-metric
+  trigger (`1ecda2a` / `3b4349f`) but the move did not ride that landing;
+  PBI 61 (2026-11-02) is the follow-up remediation that moved them to
+  `src/core/trend.rs`. The store keeps the windowed queries that hand them
+  rows; `kind_pairs` was the fifth join, found in `cli/trend.rs` only because
+  the move enumerated them. Trigger 2 (the next SQLite-free function) remains
+  armed for the next accumulation.
 - The trigger is grep-able, not a parser: the rule enumerates the symbols, and
   `tests/pure_join_placement.rs` fails when the enumeration and core drift
   apart. A join that leaves core or re-enters the store carries the core row
