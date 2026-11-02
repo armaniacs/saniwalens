@@ -80,6 +80,51 @@ fn write_span_store(dir: &Path, spans: &[(&str, i64, u64, f64)]) -> PathBuf {
     db
 }
 
+/// Write a synthetic store whose `previous` sessions hold a session row but
+/// **no event at all** — the shape a store written before `session_start`
+/// events were stamped has — and whose `present` sessions hold one
+/// `file_edit` event at their epoch.
+///
+/// `IngestBatch` stamps a `session_start` event whenever the session carries
+/// a start, so a plain ingest cannot produce a row without events. The fixture
+/// uses the store's own replace contract instead: a second session sharing the
+/// first one's transcript path (`source_path`) replaces that path's events,
+/// leaving the first session's row (keyed by `id`) in place and eventless.
+/// The replacement is unstamped (no start, no span), so a windowed read does
+/// not count it as a session of its own.
+fn write_session_only_store(
+    dir: &Path,
+    previous: &[(&str, i64)],
+    present: &[(&str, i64)],
+) -> PathBuf {
+    let db = dir.join("store.db");
+    {
+        let mut store = Store::open(&db, OpenMode::ReadWrite).unwrap();
+        for (id, epoch_secs) in previous {
+            let meta = session(id, *epoch_secs);
+            store.ingest(IngestBatch::new(&meta, &[], &[])).unwrap();
+            let mut replacement = session(&format!("{id}-reingested"), *epoch_secs);
+            replacement.source_path = meta.source_path.clone();
+            replacement.start = None;
+            store
+                .ingest(IngestBatch::new(&replacement, &[], &[]))
+                .unwrap();
+        }
+        for (id, epoch_secs) in present {
+            let meta = session(id, *epoch_secs);
+            store
+                .ingest(IngestBatch::new(&meta, &[], &[]).work_events(&[(
+                    epoch_secs * 1000,
+                    "file_edit",
+                    "main.rs",
+                    None,
+                )]))
+                .unwrap();
+        }
+    }
+    db
+}
+
 /// Run the binary's `trend` on `db` in `format`, frozen (the store is read
 /// as-is; the synthetic home holds nothing to refresh from), and return its
 /// stdout.
@@ -154,6 +199,43 @@ fn trend_note_names_the_previous_window_that_holds_no_events() {
     assert!(
         out.contains("previous window (since "),
         "the note does not name the previous window: {out:?}"
+    );
+}
+
+#[test]
+fn trend_note_fires_when_the_previous_window_holds_sessions_but_no_events() {
+    // The previous window holds a session row but no event of any kind: the
+    // note speaks about the events axis, so it must fire — and the totals,
+    // whose baseline is the session itself, must still compare. A note keyed
+    // to "any row is n/a" would fire here too, but the sessions row is what
+    // keeps the two axes apart: it is measured while every kind row is n/a.
+    let dir = ScratchDir::new("saniwalens-trend-markdown", "session-only-previous");
+    let db = write_session_only_store(&dir, &[("past", 1_000)], &[("present", 100_000)]);
+    let out = trend_output(&dir, &db, "markdown");
+
+    assert!(
+        out.contains("holds no events in this store"),
+        "the empty-events note is missing: {out:?}"
+    );
+    let kind = out
+        .lines()
+        .find(|line| line.starts_with("| file_edit | events |"))
+        .unwrap_or_else(|| panic!("the kind row is missing: {out:?}"));
+    assert!(
+        kind.contains("n/a"),
+        "a kind with no previous-side event must read n/a: {kind:?}"
+    );
+    let sessions = out
+        .lines()
+        .find(|line| line.starts_with("| sessions |"))
+        .unwrap_or_else(|| panic!("the sessions total is missing: {out:?}"));
+    assert!(
+        !sessions.contains("n/a"),
+        "the totals axis collapsed although the previous window holds a session: {sessions:?}"
+    );
+    assert!(
+        sessions.contains("| 1 | 1 |"),
+        "the sessions total does not carry both windows' counts: {sessions:?}"
     );
 }
 
