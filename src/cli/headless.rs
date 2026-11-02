@@ -181,6 +181,10 @@ impl Drop for HeadlessRun {
 /// detail. The raw event shapes are unversioned upstream, so rendering is
 /// lenient: a line with no recognizable text stays in the log, and a run that
 /// renders nothing readable says so instead of leaving silence.
+/// The context prefix that carries the raw log's path. One constant so the
+/// failure path and the test-side reader cannot drift apart.
+const RAW_LOG_CONTEXT: &str = "raw output";
+
 pub(crate) fn run_headless(
     binary: &str,
     leading: &[&str],
@@ -193,7 +197,7 @@ pub(crate) fn run_headless(
     let (status, readable) = match drive(&mut run, binary, leading, prompt, render_line) {
         Ok(driven) => driven,
         Err(err) => {
-            return Err(err).with_context(|| format!("raw output: {}", log_path.display()));
+            return Err(err).with_context(|| format!("{RAW_LOG_CONTEXT}: {}", log_path.display()));
         }
     };
     drop(run);
@@ -265,6 +269,32 @@ mod tests {
         }
     }
 
+    /// The raw log path carried by the failure context. The outermost
+    /// `to_string()` would lose it, so walk the whole chain.
+    fn raw_log_path(err: &anyhow::Error) -> Option<PathBuf> {
+        err.chain().find_map(|cause| {
+            let text = cause.to_string();
+            let rest = text.strip_prefix(RAW_LOG_CONTEXT)?;
+            let path = rest.strip_prefix(": ")?;
+            Some(PathBuf::from(path))
+        })
+    }
+
+    #[test]
+    fn the_raw_log_path_is_found_through_the_context_chain() {
+        let err = anyhow::anyhow!("boom").context("raw output: /tmp/saniwalens-run-example.log");
+        assert_eq!(
+            raw_log_path(&err),
+            Some(PathBuf::from("/tmp/saniwalens-run-example.log"))
+        );
+    }
+
+    #[test]
+    fn the_raw_log_path_is_absent_without_the_context() {
+        let err = anyhow::anyhow!("boom");
+        assert_eq!(raw_log_path(&err), None);
+    }
+
     #[test]
     fn a_bad_utf8_line_reaps_the_child_and_names_the_log() {
         let pid_file =
@@ -282,6 +312,8 @@ mod tests {
             fast_beat(),
         )
         .expect_err("the invalid UTF-8 line fails the read");
+        let log = raw_log_path(&err).expect("the failure names the raw log");
+        let _ = std::fs::remove_file(log);
 
         let pid = std::fs::read_to_string(&pid_file).expect("the child wrote its pid");
         let _ = std::fs::remove_file(&pid_file);
@@ -312,6 +344,8 @@ mod tests {
             fast_beat(),
         )
         .expect_err("a missing binary fails the spawn");
+        let log = raw_log_path(&err).expect("the failure names the raw log");
+        let _ = std::fs::remove_file(log);
         assert!(
             err.to_string().contains("raw output:"),
             "the spawn error does not name the raw log: {err}"
@@ -337,8 +371,10 @@ mod tests {
     #[test]
     fn dropping_the_guard_stops_the_beat() {
         let run = HeadlessRun::start(fast_beat()).expect("the log and beat start");
+        let log_path = run.log_path().to_path_buf();
         let started = Instant::now();
         drop(run);
+        let _ = std::fs::remove_file(log_path);
         assert!(
             started.elapsed() < Duration::from_secs(1),
             "the heartbeat did not stop within a poll: {:?}",
