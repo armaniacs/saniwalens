@@ -171,6 +171,25 @@ investigation, and apply the fixes themselves. A bare `kilo <text>` positional
 is treated as a file to open (measured), not a prompt ― `--prompt` is the
 TUI's message surface.
 
+The launch shape itself is per-harness **data on the seam**:
+`Harness::launch_command` (`adapter::harness`) returns the binary, the
+leading argv, and the run mode beside the harness's other facts
+(`input_unit`, `db_file_name`), so a new harness lands as one arm there and
+the shell's launch side (`cli/mod.rs`) neither matches nor changes ― the same
+contract the analyze seam keeps (`Harness::analyze`).
+
+The headless raw stream renders through per-harness data on the seam too:
+`Harness::run_line_renderer` (`adapter::harness`) returns the adapter fn that
+turns one raw line into a `RunEvent` beside the launch shape, and the
+delivery plan carries it to `run_headless`, so the shell's logged loop
+receives the seam's choice instead of naming a module. Rendering stays lenient
+either way (the upstream event shapes are unversioned). Claude's launch opens
+interactively, so it has no headless renderer; kilo is an OpenCode fork and
+shares the event stream, so a headless kilo run is the same arm ― still gated
+on `--auto` by the launch shape above. The quiet-stretch logic the loop leans
+on lives in one place too (`heartbeat`, `cli/heartbeat.rs`), so the beat
+cadence and the stop handling are pinned by a test, not by the spawn.
+
 ## Report copy names the harness
 
 Copy that attributes rows to a harness uses `Harness` display helpers, so
@@ -224,8 +243,13 @@ help generation is out of scope.
 A new harness adds: a `Harness` variant, its default input root and store
 name here, its format spec, and an adapter module carrying its analyze routine
 behind `Harness::analyze` ― input route, fingerprinting, and its
-analyzer-version key included, so `cli/mod.rs` gains no dispatch arm: the
-shell's only harness-aware step is the cross-harness write guard
+analyzer-version key included. Its launch shape rides the same seam:
+`Harness::launch_command` (`adapter::harness`) holds the binary, the leading
+argv, and the run mode beside the other data arms, and its headless run-line
+renderer beside them (`Harness::run_line_renderer`), so `cli/mod.rs` gains no
+dispatch arm on the analyze side, the launch side, or the headless loop. The
+shell's only harness-dispatched step is the cross-harness write guard
 (`guard_harness` in `session.rs`, invoked from `run_analyze`), and a new
-harness passes it unchanged. Nothing in the Claude Code path moves ― that
-immobility is the contract this spec protects.
+harness passes it unchanged; every other per-harness fact reaches the shell
+as seam data. Nothing in the Claude Code path moves ― that immobility is the
+contract this spec protects.

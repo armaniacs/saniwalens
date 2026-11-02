@@ -71,7 +71,11 @@ Resolution order, strongest first: explicit flags, the selected profile, the
 file's top-level defaults, then the builtins (`claude`, the per-harness store
 path). Flag *values* (`--scope`, `--format`) are parsed before the session is
 built, so an invalid flag fails on its own ― no store open, no freshness line
-ahead of the error; `optimize` is the exception that resolves the store path
+ahead of the error. The nine report views resolve those flags through **one**
+windowed open (`WindowedDispatch::open` / `open_pair` in `cli/window.rs` ―
+scope where the view has `--scope`, then format, then the period or pair,
+then `Session::open_read`), so this ordering has one counterpart instead of a
+copy per view arm; `optimize` is the exception that resolves the store path
 first, exactly as the pre-`Session` dispatch did. A relative `db` joins the directory holding `config.toml` ― never the
 current working directory ― while an explicit `--db` is taken as is, even
 when relative; `~` is not expanded. Unknown keys are ignored so a newer file
@@ -157,7 +161,13 @@ Every command has both a human form and a machine form, strictly separated:
   on stdout ― SQLite integers/reals/NULLs stay JSON numbers/null
   (`Store::query_json`), `doctor` emits the routed findings structure
   (`core::optimize::Findings`, `projects` filtered by `--scope`), and each view
-  emits its rows as named objects. All freshness/refresh chatter goes to
+  emits its rows as named objects. `trend`'s rows and its JSON are two forms
+  of one typed payload (`trend_payload` in `cli/trend.rs`): both derive from
+  it, so a metric's delta and direction are judged once ― float metrics at
+  the display's 0.1 precision, so a drift smaller than the shown 0.1 (an
+  ms-derived duration's addition error) reads as `same` in both forms; a
+  golden test (`tests/trend_json_golden.rs`) pins the emitted JSON. All
+  freshness/refresh chatter goes to
   **stderr** (see above), so `saniwalens <cmd> --format json | jq` needs no
   filtering. Human-only footnotes (row counts, heuristic caveats) are either
   folded into the JSON (`total`, …) or dropped, never mixed into it.
@@ -183,9 +193,23 @@ compare against is undefined.
   date a whole day (`YYYY-MM-DD`, read in the presentation zone ― **JST**, the
   same zone the bucketing table uses; the comparison is against the UTC epoch
   the store keeps). `--until` is **inclusive**: the whole named day counts.
+  The resolved instants carry the same calendar bound the rolling span has,
+  checked at the same resolve entry: the day end adds its +86,399 after the
+  zone conversion, so a west offset (the `--tz` zone Time bucketing declares,
+  not wired into the period path) can resolve `NaiveDate::MAX`'s last second
+  past the calendar's ceiling, and a date whose resolved midnight or last
+  second leaves the calendar is refused with the empty-window error naming
+  its flag. Under **JST** the named-day path stays inside the calendar on its
+  own ― `NaiveDate::MIN`'s midnight sits below the floor, where the zone
+  conversion refuses it as a local time ― which is why the bound is
+  established at the entry instead of trusted to the zone's sign.
 - `--last SPAN`: a rolling window ending now ― `<N>d`, `<N>h`, `<N>w`.
   Exclusive with the explicit dates (clap conflict), so "last 7 days" can never
-  be silently reinterpreted by a stray `--since`. The span's resolved window
+  be silently reinterpreted by a stray `--since`. The conflict is declared once
+  on the shared period-flags group the eight single-window views flatten
+  (`cli/window.rs`); trend's pair keeps its own declaration, so its
+  pair-specific help wording survives (the help capture pins hold every view's
+  help byte-identical). The span's resolved window
   must stay inside the calendar chrono can express (`NaiveDate`'s range,
   roughly ±262,000 years, `NaiveDateTime::MIN`/`MAX`'s timestamps): a span
   whose resolved window leaves it (e.g. `--last 100000000d`) has no date to
@@ -204,14 +228,19 @@ compare against is undefined.
 - Errors are parse-time, before any report renders: an unparseable date fails
   on stderr with a non-zero exit and an empty stdout; `--since` after `--until`
   is an empty-window error rather than an empty-looking report. A `--last`
-  whose resolved window leaves the calendar is that same invalid-span error ―
-  non-zero, empty stdout, before any report renders or store work runs.
+  whose resolved window leaves the calendar is that same invalid-span error,
+  and a named day whose resolved midnight or last second leaves it is the
+  empty-window error naming its flag ― non-zero, empty stdout, before any
+  report renders or store work runs.
 - The window is **disclosed, never silent**: a dimmed `report window:` line
   rides with the freshness line on stderr (every format), the framing block
   carries it as its last line (table only ― markdown stays a bare table),
   `doctor` prints it in-band under its heading, and `--format json` gains a
-  `window` object (`since` / `until` as RFC 3339 with their offset). Without
-  the flags every output is byte-identical to the pre-period behavior.
+  `window` object (`since` / `until` as RFC 3339 with their offset). Every
+  accepted window renders a date that exists: an in-calendar instant renders
+  in any valid zone, so the bounds renderer has no empty-string fallback to
+  absorb an out-of-calendar bound with. Without the flags every output is
+  byte-identical to the pre-period behavior.
 - The catalog half of `inventory` is current config, so it is not windowed by
   time ― its **usage half** is. An unused row under a window says
   `UNUSED (window)` / `"unused-in-window"`, never plain "unused".
@@ -268,9 +297,15 @@ caveats in `events.md` / `surfaces.md`):
   window **derived** one second before the current one ― leaves the calendar
   names dates that do not exist, and fails with the invalid-span error; a
   `--since` whose derived previous leaves it fails with the empty-window
-  error naming `--since`. The alternative would be a disclosure line with an
-  empty `since` and a store bound (`started_at >= ''`) that silently passes
-  every session ― a successful-looking report that measures nothing.
+  error naming `--since`; and a named day whose resolved midnight or last
+  second leaves it fails with the empty-window error naming its own flag.
+  The alternative would be a disclosure line with an empty `since` and a
+  store bound (`started_at >= ''`) that silently passes every session ― a
+  successful-looking report that measures nothing. The bounds renderer keeps
+  no empty-string fallback to absorb an unrenderable instant with: an
+  accepted window's instants are in-calendar by the resolve entry's check,
+  so a bound always renders a date that exists and the disclosure line and
+  the JSON `window` cannot carry an empty string.
 - A subagent run whose agent type was never recorded is shown as `(unknown)`,
   never merged into a named type and never dropped ― the per-agent rows must
   keep summing to the subagent total the same report prints above them, for
@@ -430,4 +465,11 @@ ends. Production wires `ProcessAdvisor` (inherited stdio, or `run_headless`'s
 logged pipe unless `--verbose`); the delivery tests wire a recording double
 and assert the argv instead of spawning. `Harness::copy` assembles the harness
 data those prompts render from, so the shell never spells `HarnessCopy` field
-by field.
+by field. The launch shape the mode defers to is per-harness **data on the
+seam** too (`Harness::launch_command` in `adapter::harness`, beside the
+harness's other arms), so a new harness's delivery lands there and this
+section's wiring stays put. The headless run's raw lines render through
+per-harness data as well: the plan carries the renderer the harness seam
+chose (`Harness::run_line_renderer`), and the logged pipe applies it line by
+line, so the loop never names a harness and a new harness's stream needs no
+shell edit.

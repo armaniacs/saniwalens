@@ -187,3 +187,56 @@ fn the_ordinary_last_still_runs() {
         String::from_utf8_lossy(&out.stderr)
     );
 }
+
+#[test]
+fn usage_rejects_a_date_whose_local_midnight_leaves_the_calendar() {
+    // The date path's floor, end to end on the rebuilt binary: NaiveDate::MIN's
+    // local midnight in JST sits below the calendar's floor, so the zone
+    // conversion refuses it as a period error — non-zero, empty stdout, no
+    // window disclosure — instead of a window whose since no date can name.
+    // clap equals form: the space form is refused by clap as a stray flag,
+    // which would make this a different bug.
+    let out = run("date-floor", &["usage", "--since=-262143-01-01"]);
+    assert!(
+        !out.status.success(),
+        "the floor date must fail, not render: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        out.stdout.is_empty(),
+        "stdout must stay empty on the error path: {:?}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("invalid --since '-262143-01-01'"),
+        "the invalid-date message is missing: {stderr}"
+    );
+    assert!(
+        !stderr.contains("report window:"),
+        "the disclosure line rode ahead of the error: {stderr}"
+    );
+}
+
+#[test]
+fn usage_resolves_a_date_at_the_calendars_ceiling() {
+    // The date path's ceiling, end to end: the whole day NaiveDate::MAX names
+    // ends one zone-width below the calendar's ceiling in JST, so it resolves
+    // and the disclosure carries a real date — the widest named day the
+    // bounds renderer can draw, with no empty-string fallback behind it.
+    let out = run("date-ceiling", &["usage", "--until=+262142-12-31"]);
+    assert!(
+        out.status.success(),
+        "the ceiling date must resolve: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("report window: until +262142-12-31T23:59:59+09:00"),
+        "the ceiling instant must disclose as a date that exists: {stderr}"
+    );
+    assert!(
+        !stderr.contains("since ,"),
+        "an empty bound leaked into the disclosure: {stderr}"
+    );
+}

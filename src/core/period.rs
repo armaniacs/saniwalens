@@ -73,6 +73,24 @@ pub fn resolve(
     let end = until
         .map(|value| day_end_epoch(value, "--until", tz_offset_secs))
         .transpose()?;
+    // The named-day window's instants must name dates the calendar can
+    // express — the same invariant the rolling path checks above, established
+    // here for the date path instead of left to the zone conversion. The day
+    // end adds its +86,399 after the conversion, so a west offset (the
+    // declared `--tz` zone, `docs/specs/cli.md`) can resolve NaiveDate::MAX's
+    // last second past the calendar's ceiling, where the bounds would render
+    // an empty string. The input is the date, so the error is the
+    // empty-window family naming the flag — never the invalid-`--last`
+    // wording a date did not earn.
+    for (flag, value, epoch) in [("--since", since, start), ("--until", until, end)] {
+        if let (Some(value), Some(epoch)) = (value, epoch)
+            && !in_calendar(epoch)
+        {
+            return Err(format!(
+                "empty window: {flag} {value} — the day it names resolves outside the calendar chrono can express"
+            ));
+        }
+    }
     if let (Some(start), Some(end)) = (start, end)
         && start > end
     {
@@ -265,11 +283,18 @@ fn in_calendar(epoch: i64) -> bool {
 pub fn bounds(range: TimeRange, tz_offset_secs: i32) -> (Option<String>, Option<String>) {
     let tz = FixedOffset::east_opt(tz_offset_secs).expect("valid tz offset");
     let instant = |epoch: i64| {
+        // Every TimeRange is built by resolve / resolve_pair, which validate
+        // both ends against the calendar, so an epoch they accept renders in
+        // any valid offset: `timestamp_opt` yields None only outside the
+        // calendar or for an ambiguous local time, and a fixed offset cannot
+        // have one. There is no unrenderable instant to fall back on — the
+        // empty-string branch is gone, so an out-of-calendar bound cannot be
+        // silently absorbed here.
         tz.timestamp_opt(epoch, 0)
             .single()
-            .map_or_else(String::new, |t| {
-                t.format("%Y-%m-%dT%H:%M:%S%:z").to_string()
-            })
+            .expect("an in-calendar instant renders in any valid offset")
+            .format("%Y-%m-%dT%H:%M:%S%:z")
+            .to_string()
     };
     (range.start.map(instant), range.end.map(instant))
 }
@@ -712,6 +737,67 @@ mod tests {
     }
 
     #[test]
+    fn the_calendar_edges_are_the_limits_of_the_date_path() {
+        // The date version of the rolling edges tests: the named-day window's
+        // resolved instants must name dates the calendar can express too. In
+        // JST the floor is closed by the zone conversion — NaiveDate::MIN's
+        // local midnight sits below the calendar's floor, so the conversion
+        // refuses it before any window is built — and the ceiling stays one
+        // zone-width below it. The date path's own hole is the day end: it
+        // adds its +86,399 after the conversion, so a west offset — the
+        // declared `--tz` zone (Time bucketing), unwired today — resolves
+        // NaiveDate::MAX's last second past the calendar's ceiling, where the
+        // bounds would render an empty until. The entry's calendar check
+        // refuses it with the empty-window error naming the flag — the
+        // date-derived error family, never the invalid-`--last` wording a
+        // date did not earn.
+        const CAL_MIN: i64 = -8_334_601_228_800;
+        const CAL_MAX: i64 = 8_210_266_876_799;
+        // Floor, JST: the local midnight of NaiveDate::MIN is below the
+        // calendar's floor — refused as a period error, no window drawn.
+        let err = resolve(Some("-262143-01-01"), None, None).unwrap_err();
+        assert!(err.contains("--since"), "{err}");
+        assert!(err.contains("not a local time"), "{err}");
+        // One day in, the window resolves inside the calendar: the local
+        // midnight is CAL_MIN + 15h.
+        let range = resolve(Some("-262143-01-02"), None, None).unwrap();
+        assert_eq!(range.start, Some(CAL_MIN + 15 * 3_600));
+        // Ceiling, JST: the whole day NaiveDate::MAX names ends CAL_MAX - 9h,
+        // inside the calendar.
+        let range = resolve(None, Some("+262142-12-31"), None).unwrap();
+        assert_eq!(range.end, Some(CAL_MAX - 9 * 3_600));
+        // The day end under a west offset: the conversion keeps NaiveDate::MAX's
+        // midnight inside the calendar, but the +86,399 after it leaves the
+        // ceiling — refused with the empty-window error naming `--until`.
+        const WEST_8H: i32 = -28_800;
+        let err = super::resolve(None, Some("+262142-12-31"), None, 0, WEST_8H).unwrap_err();
+        assert!(err.contains("empty window: --until +262142-12-31"), "{err}");
+        assert!(
+            err.contains("outside the calendar chrono can express"),
+            "{err}"
+        );
+        assert!(!err.contains("invalid --last"), "{err}");
+        // The pair builds its current window through the same resolve entry,
+        // so the west-offset ceiling refusal carries over to `trend` — with
+        // the `--since` the trend requires naming the same error family.
+        let err = super::resolve_pair(
+            Some("+262142-12-30"),
+            Some("+262142-12-31"),
+            None,
+            0,
+            WEST_8H,
+        )
+        .unwrap_err();
+        assert!(err.contains("empty window: --until +262142-12-31"), "{err}");
+        // The west offset widens the band the other way: NaiveDate::MIN's
+        // named day, which JST cannot resolve (its midnight sits below the
+        // floor), resolves inside the calendar under the same west offset.
+        let range = super::resolve(Some("-262143-01-01"), None, None, 0, WEST_8H).unwrap();
+        assert_eq!(range.start, Some(CAL_MIN + 8 * 3_600));
+        assert!(in_calendar(range.start.expect("the start resolves")));
+    }
+
+    #[test]
     fn every_accepted_window_renders_non_empty_bounds() {
         // The disclosure line and the JSON window must never carry an empty
         // since/until: out-of-calendar input is refused at the resolve entry
@@ -719,10 +805,15 @@ mod tests {
         // as a date that exists. Swept with the clock injected at both
         // calendar ends — where the UTC bound meets the +09:00 presentation,
         // the edge a render-only spill would show at — every rendered bound
-        // carries its offset.
+        // carries its offset. The date path is swept too, in both zones the
+        // pure transform must survive: the JST presentation zone every caller
+        // passes today, and a west offset — the declared `--tz` zone (Time
+        // bucketing), unwired today — whose sign is what can push the day
+        // end past the calendar's ceiling.
         const CAL_MIN: i64 = -8_334_601_228_800;
         const CAL_MAX: i64 = 8_210_266_876_799;
         let clocks = [CAL_MIN, CAL_MIN + 2 * 86_400, NOW, CAL_MAX];
+        let zones = [JST_OFFSET_SECS, -28_800];
         let spans = [
             "1h",
             "7d",
@@ -733,14 +824,38 @@ mod tests {
             "100000000d",
             "92233720368547d",
         ];
-        let check = |name: &str, range: TimeRange| {
-            let (since, until) = bounds(range, JST_OFFSET_SECS);
-            for (side, bound) in [("since", since), ("until", until)] {
-                if let Some(bound) = bound {
+        let dates = [
+            "-262143-01-01", // NaiveDate::MIN — the calendar's floor
+            "-262143-01-02", // one day in
+            "2026-10-01",
+            "2026-10-07",
+            "+262142-12-31", // NaiveDate::MAX — the calendar's ceiling
+        ];
+        let check = |name: &str, zone: i32, range: TimeRange| {
+            let (since, until) = bounds(range, zone);
+            let suffix = if zone >= 0 {
+                format!("+{:02}:00", zone / 3_600)
+            } else {
+                format!("-{:02}:00", -zone / 3_600)
+            };
+            // No None-skip: each side is asserted in both directions — a
+            // drawn bound renders (never empty, offset carried), an undrawn
+            // one renders nothing.
+            for (side, drawn, bound) in [
+                ("since", range.start.is_some(), since),
+                ("until", range.end.is_some(), until),
+            ] {
+                if drawn {
+                    let bound = bound.expect("a drawn bound renders");
                     assert!(!bound.is_empty(), "empty {side} for {name}");
                     assert!(
-                        bound.ends_with("+09:00"),
+                        bound.ends_with(&suffix),
                         "the offset is missing for {name}: {bound}"
+                    );
+                } else {
+                    assert!(
+                        bound.is_none(),
+                        "an undrawn {side} rendered for {name}: {bound:?}"
                     );
                 }
             }
@@ -748,15 +863,41 @@ mod tests {
         for now in clocks {
             for span in spans {
                 match super::resolve(None, None, Some(span), now, JST_OFFSET_SECS) {
-                    Ok(range) => check(span, range),
+                    Ok(range) => check(span, JST_OFFSET_SECS, range),
                     Err(err) => assert!(err.contains("invalid --last"), "{err}"),
                 }
                 match super::resolve_pair(None, None, Some(span), now, JST_OFFSET_SECS) {
                     Ok(pair) => {
-                        check(&format!("{span} current"), pair.current);
-                        check(&format!("{span} previous"), pair.previous);
+                        check(&format!("{span} current"), JST_OFFSET_SECS, pair.current);
+                        check(&format!("{span} previous"), JST_OFFSET_SECS, pair.previous);
                     }
                     Err(err) => assert!(err.contains("invalid --last"), "{err}"),
+                }
+            }
+            for zone in zones {
+                for date in dates {
+                    // The named-day window the date path builds: one flag at
+                    // a time, both zones.
+                    match super::resolve(Some(date), None, None, now, zone) {
+                        Ok(range) => check(&format!("--since {date}"), zone, range),
+                        Err(err) => assert!(err.contains("--since"), "{err}"),
+                    }
+                    match super::resolve(None, Some(date), None, now, zone) {
+                        Ok(range) => check(&format!("--until {date}"), zone, range),
+                        Err(err) => assert!(err.contains("--until"), "{err}"),
+                    }
+                    // The pair's current window is built through the same
+                    // resolve entry; its derived previous has its own guard.
+                    // Every date-derived error names the date flag — the
+                    // empty-window family and the zone conversion's
+                    // invalid-date wording alike.
+                    match super::resolve_pair(Some(date), None, None, now, zone) {
+                        Ok(pair) => {
+                            check(&format!("{date} current"), zone, pair.current);
+                            check(&format!("{date} previous"), zone, pair.previous);
+                        }
+                        Err(err) => assert!(err.contains("--since"), "{err}"),
+                    }
                 }
             }
         }

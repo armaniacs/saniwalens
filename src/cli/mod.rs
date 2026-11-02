@@ -8,8 +8,8 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 
-use crate::adapter::harness::{Harness, home_dir};
-use crate::adapter::opencode as opencode_mod;
+use crate::adapter::harness::{Harness, RunLineRenderer, home_dir};
+use crate::adapter::opencode::RunEvent;
 use crate::core::bucket::{Bucket, JST_OFFSET_SECS, bucket_label};
 use crate::core::findings;
 use crate::core::friction::ErrorCategory;
@@ -28,6 +28,7 @@ use crate::session::{
 };
 use crate::store::{OpenMode, Store};
 
+pub mod heartbeat;
 pub(crate) mod report;
 pub(crate) mod trend;
 pub(crate) mod window;
@@ -86,52 +87,25 @@ enum Command {
         /// Bucket usage by time: year | month | week | day | hour (JST).
         #[arg(long)]
         by: Option<String>,
-        /// Only count events on or after this date (YYYY-MM-DD, JST).
-        #[arg(long, value_name = "DATE")]
-        since: Option<String>,
-        /// Only count events through this date (YYYY-MM-DD, JST) — the
-        /// whole day counts.
-        #[arg(long, value_name = "DATE")]
-        until: Option<String>,
-        /// Rolling window ending now: <N>d | <N>h | <N>w (e.g. 7d). Exclusive
-        /// with the explicit dates.
-        #[arg(long, value_name = "SPAN", conflicts_with_all = ["since", "until"])]
-        last: Option<String>,
+        #[command(flatten)]
+        period: PeriodArgs,
         /// Output format: table | markdown.
         #[arg(long)]
         format: Option<String>,
-        /// Read the store as-is; skip the automatic refresh.
-        #[arg(long)]
-        frozen: bool,
-        /// Store path (default: $XDG_STATE_HOME/saniwalens/saniwalens.db).
-        #[arg(long)]
-        db: Option<PathBuf>,
+        #[command(flatten)]
+        read: ReadArgs,
     },
     /// How usage moved: each kind of event, each skill, and the session and
     /// subagent totals this window against the equal-length window right
     /// before it (default 7d vs the 7d before).
     Trend {
-        /// Current window start (YYYY-MM-DD, JST). The window to compare it
-        /// with is the same length immediately before it.
-        #[arg(long, value_name = "DATE")]
-        since: Option<String>,
-        /// Current window end (YYYY-MM-DD, JST) — the whole day counts.
-        /// Needs --since; alone, the window to compare against is undefined.
-        #[arg(long, value_name = "DATE")]
-        until: Option<String>,
-        /// Rolling pair ending now: <N>d | <N>h | <N>w (e.g. 7d). Exclusive
-        /// with the explicit dates.
-        #[arg(long, value_name = "SPAN", conflicts_with_all = ["since", "until"])]
-        last: Option<String>,
+        #[command(flatten)]
+        pair: PairArgs,
         /// Output format: table | markdown | json.
         #[arg(long)]
         format: Option<String>,
-        /// Read the store as-is; skip the automatic refresh.
-        #[arg(long)]
-        frozen: bool,
-        /// Store path (default: $XDG_STATE_HOME/saniwalens/saniwalens.db).
-        #[arg(long)]
-        db: Option<PathBuf>,
+        #[command(flatten)]
+        read: ReadArgs,
     },
     /// Everything installed in your config (skills, rules, agents, MCP
     /// servers, CLAUDE.md), what it weighs, and whether it was ever used.
@@ -140,26 +114,13 @@ enum Command {
         /// projects' own config) | project:<slug> (one project's).
         #[arg(long)]
         scope: Option<String>,
-        /// Only count events on or after this date (YYYY-MM-DD, JST).
-        #[arg(long, value_name = "DATE")]
-        since: Option<String>,
-        /// Only count events through this date (YYYY-MM-DD, JST) — the
-        /// whole day counts.
-        #[arg(long, value_name = "DATE")]
-        until: Option<String>,
-        /// Rolling window ending now: <N>d | <N>h | <N>w (e.g. 7d). Exclusive
-        /// with the explicit dates.
-        #[arg(long, value_name = "SPAN", conflicts_with_all = ["since", "until"])]
-        last: Option<String>,
+        #[command(flatten)]
+        period: PeriodArgs,
         /// Output format: table | markdown.
         #[arg(long)]
         format: Option<String>,
-        /// Read the store as-is; skip the automatic refresh.
-        #[arg(long)]
-        frozen: bool,
-        /// Store path (default: $XDG_STATE_HOME/saniwalens/saniwalens.db).
-        #[arg(long)]
-        db: Option<PathBuf>,
+        #[command(flatten)]
+        read: ReadArgs,
     },
     /// Cleanup opportunities: config that is never used, loaded every session
     /// while heavy, or rarely worth its cost — ranked by what removing it
@@ -169,26 +130,13 @@ enum Command {
         /// projects' own config) | project:<slug> (one project's).
         #[arg(long)]
         scope: Option<String>,
-        /// Only count events on or after this date (YYYY-MM-DD, JST).
-        #[arg(long, value_name = "DATE")]
-        since: Option<String>,
-        /// Only count events through this date (YYYY-MM-DD, JST) — the
-        /// whole day counts.
-        #[arg(long, value_name = "DATE")]
-        until: Option<String>,
-        /// Rolling window ending now: <N>d | <N>h | <N>w (e.g. 7d). Exclusive
-        /// with the explicit dates.
-        #[arg(long, value_name = "SPAN", conflicts_with_all = ["since", "until"])]
-        last: Option<String>,
+        #[command(flatten)]
+        period: PeriodArgs,
         /// Output format: table | markdown.
         #[arg(long)]
         format: Option<String>,
-        /// Read the store as-is; skip the automatic refresh.
-        #[arg(long)]
-        frozen: bool,
-        /// Store path (default: $XDG_STATE_HOME/saniwalens/saniwalens.db).
-        #[arg(long)]
-        db: Option<PathBuf>,
+        #[command(flatten)]
+        read: ReadArgs,
     },
     /// What every session pays in context before any work starts, and how
     /// much of that comes from your own config files vs the harness itself.
@@ -196,23 +144,10 @@ enum Command {
         /// Output format: table | markdown.
         #[arg(long)]
         format: Option<String>,
-        /// Only count events on or after this date (YYYY-MM-DD, JST).
-        #[arg(long, value_name = "DATE")]
-        since: Option<String>,
-        /// Only count events through this date (YYYY-MM-DD, JST) — the
-        /// whole day counts.
-        #[arg(long, value_name = "DATE")]
-        until: Option<String>,
-        /// Rolling window ending now: <N>d | <N>h | <N>w (e.g. 7d). Exclusive
-        /// with the explicit dates.
-        #[arg(long, value_name = "SPAN", conflicts_with_all = ["since", "until"])]
-        last: Option<String>,
-        /// Read the store as-is; skip the automatic refresh.
-        #[arg(long)]
-        frozen: bool,
-        /// Store path (default: $XDG_STATE_HOME/saniwalens/saniwalens.db).
-        #[arg(long)]
-        db: Option<PathBuf>,
+        #[command(flatten)]
+        period: PeriodArgs,
+        #[command(flatten)]
+        read: ReadArgs,
     },
     /// How you steer Claude: the mix of instructing, steering ("go ahead"),
     /// correcting ("no, instead…"), and questioning prompts — and what that
@@ -221,23 +156,10 @@ enum Command {
         /// Output format: table | markdown.
         #[arg(long)]
         format: Option<String>,
-        /// Only count events on or after this date (YYYY-MM-DD, JST).
-        #[arg(long, value_name = "DATE")]
-        since: Option<String>,
-        /// Only count events through this date (YYYY-MM-DD, JST) — the
-        /// whole day counts.
-        #[arg(long, value_name = "DATE")]
-        until: Option<String>,
-        /// Rolling window ending now: <N>d | <N>h | <N>w (e.g. 7d). Exclusive
-        /// with the explicit dates.
-        #[arg(long, value_name = "SPAN", conflicts_with_all = ["since", "until"])]
-        last: Option<String>,
-        /// Read the store as-is; skip the automatic refresh.
-        #[arg(long)]
-        frozen: bool,
-        /// Store path (default: $XDG_STATE_HOME/saniwalens/saniwalens.db).
-        #[arg(long)]
-        db: Option<PathBuf>,
+        #[command(flatten)]
+        period: PeriodArgs,
+        #[command(flatten)]
+        read: ReadArgs,
     },
     /// Tool calls that kept failing the same way — recurring failures that
     /// waste turns and tokens, each with a suggested fix.
@@ -247,26 +169,13 @@ enum Command {
         /// project:<slug> (everything in that one project).
         #[arg(long)]
         scope: Option<String>,
-        /// Only count events on or after this date (YYYY-MM-DD, JST).
-        #[arg(long, value_name = "DATE")]
-        since: Option<String>,
-        /// Only count events through this date (YYYY-MM-DD, JST) — the
-        /// whole day counts.
-        #[arg(long, value_name = "DATE")]
-        until: Option<String>,
-        /// Rolling window ending now: <N>d | <N>h | <N>w (e.g. 7d). Exclusive
-        /// with the explicit dates.
-        #[arg(long, value_name = "SPAN", conflicts_with_all = ["since", "until"])]
-        last: Option<String>,
+        #[command(flatten)]
+        period: PeriodArgs,
         /// Output format: table | markdown.
         #[arg(long)]
         format: Option<String>,
-        /// Read the store as-is; skip the automatic refresh.
-        #[arg(long)]
-        frozen: bool,
-        /// Store path (default: $XDG_STATE_HOME/saniwalens/saniwalens.db).
-        #[arg(long)]
-        db: Option<PathBuf>,
+        #[command(flatten)]
+        read: ReadArgs,
     },
     /// Files Claude kept re-editing in rapid bursts — where it got stuck
     /// retrying instead of making progress.
@@ -274,23 +183,10 @@ enum Command {
         /// Output format: table | markdown.
         #[arg(long)]
         format: Option<String>,
-        /// Only count events on or after this date (YYYY-MM-DD, JST).
-        #[arg(long, value_name = "DATE")]
-        since: Option<String>,
-        /// Only count events through this date (YYYY-MM-DD, JST) — the
-        /// whole day counts.
-        #[arg(long, value_name = "DATE")]
-        until: Option<String>,
-        /// Rolling window ending now: <N>d | <N>h | <N>w (e.g. 7d). Exclusive
-        /// with the explicit dates.
-        #[arg(long, value_name = "SPAN", conflicts_with_all = ["since", "until"])]
-        last: Option<String>,
-        /// Read the store as-is; skip the automatic refresh.
-        #[arg(long)]
-        frozen: bool,
-        /// Store path (default: $XDG_STATE_HOME/saniwalens/saniwalens.db).
-        #[arg(long)]
-        db: Option<PathBuf>,
+        #[command(flatten)]
+        period: PeriodArgs,
+        #[command(flatten)]
+        read: ReadArgs,
     },
     /// The health check — what to fix first, what your sessions cost, and
     /// what is fine as-is. Start here.
@@ -299,26 +195,13 @@ enum Command {
         /// projects' own config) | project:<slug> (one project's).
         #[arg(long)]
         scope: Option<String>,
-        /// Only count events on or after this date (YYYY-MM-DD, JST).
-        #[arg(long, value_name = "DATE")]
-        since: Option<String>,
-        /// Only count events through this date (YYYY-MM-DD, JST) — the
-        /// whole day counts.
-        #[arg(long, value_name = "DATE")]
-        until: Option<String>,
-        /// Rolling window ending now: <N>d | <N>h | <N>w (e.g. 7d). Exclusive
-        /// with the explicit dates.
-        #[arg(long, value_name = "SPAN", conflicts_with_all = ["since", "until"])]
-        last: Option<String>,
+        #[command(flatten)]
+        period: PeriodArgs,
         /// Output format: table (human text) | json (the routed findings).
         #[arg(long)]
         format: Option<String>,
-        /// Read the store as-is; skip the automatic refresh.
-        #[arg(long)]
-        frozen: bool,
-        /// Store path (default: $XDG_STATE_HOME/saniwalens/saniwalens.db).
-        #[arg(long)]
-        db: Option<PathBuf>,
+        #[command(flatten)]
+        read: ReadArgs,
     },
     /// Ask anything the fixed reports don't cover: run a read-only SQL query
     /// against the analyzed store (as an argument, or piped via stdin).
@@ -377,11 +260,15 @@ pub fn run() -> Result<()> {
     let resolved = resolve_cli(cli.harness.as_deref(), cli.profile.as_deref(), &env)?;
     let harness = resolved.harness;
     let config_db = resolved.config_db;
-    // Flags are parsed before the session is built — the pre-Session dispatch
-    // evaluated `parse_scope`/`parse_format` ahead of any store work, so an
-    // invalid flag fails on its own instead of surfacing a store error (or a
-    // freshness line) first. Byte-identical output, error ordering included
-    // (PBI 01's acceptance criterion).
+    // The windowed report arms resolve their flags through one dispatch —
+    // scope, format, period, then the store, the order pinned in
+    // `cli/window.rs`, so an invalid flag fails on its own before any store
+    // work (PBI 01's byte-identical error ordering included).
+    let dispatch = WindowedDispatch {
+        harness: &harness,
+        config_db: config_db.as_deref(),
+        env: &env,
+    };
     match cli.command {
         Command::Analyze {
             projects,
@@ -394,195 +281,100 @@ pub fn run() -> Result<()> {
         }
         Command::Usage {
             by,
-            since,
-            until,
-            last,
+            period,
             format,
-            frozen,
-            db,
+            read,
         } => {
-            let fmt = parse_format(format.as_deref())?;
-            let window = parse_period(since.as_deref(), until.as_deref(), last.as_deref())?;
-            let sess = Session::open_read(
-                &harness,
-                db,
-                config_db.as_deref(),
-                frozen,
-                &env,
-                run_analyze,
-            )?;
-            usage(&sess, by.as_deref(), window, fmt)
+            let opened = dispatch.open(None, format.as_deref(), &period, &read, run_analyze)?;
+            usage(&opened.sess, by.as_deref(), opened.window, opened.format)
         }
-        Command::Trend {
-            since,
-            until,
-            last,
-            format,
-            frozen,
-            db,
-        } => {
-            let fmt = parse_format(format.as_deref())?;
-            // The pair resolves before the session opens — the same
-            // ahead-of-store evaluation `parse_period` gives the other views,
-            // so a bad date fails as a period error before any store work.
-            let pair = parse_pair(since.as_deref(), until.as_deref(), last.as_deref())?;
-            let sess = Session::open_read(
-                &harness,
-                db,
-                config_db.as_deref(),
-                frozen,
-                &env,
-                run_analyze,
-            )?;
-            trend(&sess, pair, fmt)
+        Command::Trend { pair, format, read } => {
+            let opened = dispatch.open_pair(format.as_deref(), &pair, &read, run_analyze)?;
+            trend(&opened.sess, opened.pair, opened.format)
         }
         Command::Inventory {
             scope,
-            since,
-            until,
-            last,
+            period,
             format,
-            frozen,
-            db,
+            read,
         } => {
-            let filter = parse_scope(scope.as_deref())?;
-            let fmt = parse_format(format.as_deref())?;
-            let window = parse_period(since.as_deref(), until.as_deref(), last.as_deref())?;
-            let sess = Session::open_read(
-                &harness,
-                db,
-                config_db.as_deref(),
-                frozen,
-                &env,
+            let opened = dispatch.open(
+                scope.as_deref(),
+                format.as_deref(),
+                &period,
+                &read,
                 run_analyze,
             )?;
-            inventory(&sess, &filter, window, fmt)
+            inventory(&opened.sess, &opened.filter, opened.window, opened.format)
         }
         Command::Waste {
             scope,
-            since,
-            until,
-            last,
+            period,
             format,
-            frozen,
-            db,
+            read,
         } => {
-            let filter = parse_scope(scope.as_deref())?;
-            let fmt = parse_format(format.as_deref())?;
-            let window = parse_period(since.as_deref(), until.as_deref(), last.as_deref())?;
-            let sess = Session::open_read(
-                &harness,
-                db,
-                config_db.as_deref(),
-                frozen,
-                &env,
+            let opened = dispatch.open(
+                scope.as_deref(),
+                format.as_deref(),
+                &period,
+                &read,
                 run_analyze,
             )?;
-            waste(&sess, &filter, window, fmt)
+            waste(&opened.sess, &opened.filter, opened.window, opened.format)
         }
         Command::Overhead {
-            since,
-            until,
-            last,
             format,
-            frozen,
-            db,
+            period,
+            read,
         } => {
-            let fmt = parse_format(format.as_deref())?;
-            let window = parse_period(since.as_deref(), until.as_deref(), last.as_deref())?;
-            let sess = Session::open_read(
-                &harness,
-                db,
-                config_db.as_deref(),
-                frozen,
-                &env,
-                run_analyze,
-            )?;
-            overhead(&sess, window, fmt)
+            let opened = dispatch.open(None, format.as_deref(), &period, &read, run_analyze)?;
+            overhead(&opened.sess, opened.window, opened.format)
         }
         Command::Prompts {
-            since,
-            until,
-            last,
             format,
-            frozen,
-            db,
+            period,
+            read,
         } => {
-            let fmt = parse_format(format.as_deref())?;
-            let window = parse_period(since.as_deref(), until.as_deref(), last.as_deref())?;
-            let sess = Session::open_read(
-                &harness,
-                db,
-                config_db.as_deref(),
-                frozen,
-                &env,
-                run_analyze,
-            )?;
-            prompts(&sess, window, fmt)
+            let opened = dispatch.open(None, format.as_deref(), &period, &read, run_analyze)?;
+            prompts(&opened.sess, opened.window, opened.format)
         }
         Command::Failures {
             scope,
-            since,
-            until,
-            last,
+            period,
             format,
-            frozen,
-            db,
+            read,
         } => {
-            let filter = parse_scope(scope.as_deref())?;
-            let fmt = parse_format(format.as_deref())?;
-            let window = parse_period(since.as_deref(), until.as_deref(), last.as_deref())?;
-            let sess = Session::open_read(
-                &harness,
-                db,
-                config_db.as_deref(),
-                frozen,
-                &env,
+            let opened = dispatch.open(
+                scope.as_deref(),
+                format.as_deref(),
+                &period,
+                &read,
                 run_analyze,
             )?;
-            failures(&sess, &filter, window, fmt)
+            failures(&opened.sess, &opened.filter, opened.window, opened.format)
         }
         Command::Stuck {
-            since,
-            until,
-            last,
             format,
-            frozen,
-            db,
+            period,
+            read,
         } => {
-            let fmt = parse_format(format.as_deref())?;
-            let window = parse_period(since.as_deref(), until.as_deref(), last.as_deref())?;
-            let sess = Session::open_read(
-                &harness,
-                db,
-                config_db.as_deref(),
-                frozen,
-                &env,
-                run_analyze,
-            )?;
-            stuck(&sess, window, fmt)
+            let opened = dispatch.open(None, format.as_deref(), &period, &read, run_analyze)?;
+            stuck(&opened.sess, opened.window, opened.format)
         }
         Command::Doctor {
             scope,
-            since,
-            until,
-            last,
+            period,
             format,
-            frozen,
-            db,
+            read,
         } => {
-            let filter = parse_scope(scope.as_deref())?;
-            let fmt = parse_format(format.as_deref())?;
-            let window = parse_period(since.as_deref(), until.as_deref(), last.as_deref())?;
-            let sess = Session::open_read(
-                &harness,
-                db,
-                config_db.as_deref(),
-                frozen,
-                &env,
+            let opened = dispatch.open(
+                scope.as_deref(),
+                format.as_deref(),
+                &period,
+                &read,
                 run_analyze,
             )?;
-            doctor(&sess, &filter, window, fmt)
+            doctor(&opened.sess, &opened.filter, opened.window, opened.format)
         }
         Command::Sql { query, format, db } => {
             let fmt = parse_format(format.as_deref())?;
@@ -613,38 +405,6 @@ fn parse_scope(value: Option<&str>) -> Result<ScopeFilter> {
         None => Ok(ScopeFilter::All),
         Some(v) => ScopeFilter::parse(v)
             .with_context(|| format!("unknown --scope '{v}' (global | project | project:<slug>)")),
-    }
-}
-
-/// Analyze, compose the advisor prompt from the findings, and hand it to an
-/// advisor session — the AI-proposal layer's entry point. The pure
-/// composition lives in `core::optimize`; this shell does the I/O: run the
-/// analysis, read the store into `Findings`, then launch the harness's agent.
-/// See `docs/specs/harness.md` for the per-harness launch shape.
-/// Launch the harness's advisor for an optimize session: the binary plus any
-/// leading argv. `claude` opens interactively on the prompt; `opencode run`
-/// investigates headlessly — JSON events (`--format json`) so the raw tool
-/// dumps can be logged while only the agent's text streams, and a title so
-/// the sessions it seeds are recognizable in the store it feeds.
-fn launch_command(
-    harness: &Harness,
-) -> (&'static str, &'static [&'static str], optimize_mod::RunMode) {
-    match harness {
-        Harness::Claude => ("claude", &[], optimize_mod::RunMode::Interactive),
-        Harness::Opencode => (
-            "opencode",
-            &["run", "--format", "json", "--title", "saniwalens optimize"],
-            optimize_mod::RunMode::Headless,
-        ),
-        // The `kilo` binary is the measured agent CLI (Homebrew), and kilo is
-        // an OpenCode fork whose TUI takes a prompt: `kilo [project] --prompt
-        // <prompt>` opens the interactive session on the pointer prompt — the
-        // experience the claude launch gives, with the user present to approve
-        // the briefing read and steer (kilo gates every tool call where
-        // opencode does not, so a headless run would need `--auto` instead).
-        // A bare `kilo <text>` positional is treated as a file to open
-        // (measured), not a prompt — `--prompt` is the TUI's message surface.
-        Harness::Kilocode => ("kilo", &["--prompt"], optimize_mod::RunMode::Interactive),
     }
 }
 
@@ -680,14 +440,16 @@ enum DeliveryPayload<'a> {
     },
 }
 
-/// One delivery, assembled: mode, launch shape, payload. Built by `optimize`,
-/// run by `deliver` (`pbi/2026-10-29-06-feat-optimize-delivery-seam.md`).
+/// One delivery, assembled: mode, launch shape, the headless renderer the
+/// harness seam chose, payload. Built by `optimize`, run by `deliver`
+/// (`pbi/2026-10-29-06-feat-optimize-delivery-seam.md`).
 pub struct DeliveryPlan<'a> {
     mode: DeliveryMode,
     binary: &'static str,
     leading: &'static [&'static str],
     harness_name: &'static str,
     verbose: bool,
+    render: Option<RunLineRenderer>,
     payload: DeliveryPayload<'a>,
 }
 
@@ -702,19 +464,22 @@ impl<'a> DeliveryPlan<'a> {
             leading: &[],
             harness_name: "",
             verbose: false,
+            render: None,
             payload: DeliveryPayload::Full(prompt),
         }
     }
 
     /// A launch: the briefing travels behind a private pointer file, and
-    /// `pointer` assembles the argv prompt for that file's path.
+    /// `pointer` assembles the argv prompt for that file's path. The launch
+    /// shape — the binary plus its leading argv — travels as the one fact the
+    /// harness seam hands over (`Harness::launch_command`).
     pub fn launch(
-        binary: &'static str,
-        leading: &'static [&'static str],
+        (binary, leading): (&'static str, &'static [&'static str]),
         mode: DeliveryMode,
         briefing: String,
         harness_name: &'static str,
         verbose: bool,
+        render: Option<RunLineRenderer>,
         pointer: impl FnOnce(&Path) -> String + 'a,
     ) -> Self {
         Self {
@@ -723,6 +488,7 @@ impl<'a> DeliveryPlan<'a> {
             leading,
             harness_name,
             verbose,
+            render,
             payload: DeliveryPayload::Launch {
                 briefing,
                 pointer: Box::new(pointer),
@@ -744,12 +510,14 @@ pub trait AdvisorLaunch {
     ) -> Result<std::process::ExitStatus>;
 
     /// Spawn headless: the raw stream goes to a private log, the agent's text
-    /// to stdout. Returns the exit status and the log path.
+    /// to stdout, rendered line by line through the `render` the harness seam
+    /// chose. Returns the exit status and the log path.
     fn headless(
         &mut self,
         binary: &str,
         leading: &[&str],
         prompt: &str,
+        render: Option<RunLineRenderer>,
     ) -> Result<(std::process::ExitStatus, PathBuf)>;
 }
 
@@ -775,8 +543,9 @@ impl AdvisorLaunch for ProcessAdvisor {
         binary: &str,
         leading: &[&str],
         prompt: &str,
+        render: Option<RunLineRenderer>,
     ) -> Result<(std::process::ExitStatus, PathBuf)> {
-        run_headless(binary, leading, prompt)
+        run_headless(binary, leading, prompt, render)
     }
 }
 
@@ -793,6 +562,7 @@ pub fn deliver(plan: DeliveryPlan<'_>, advisor: &mut impl AdvisorLaunch) -> Resu
         leading,
         harness_name,
         verbose,
+        render,
         payload,
     } = plan;
     let (prompt, path) = match payload {
@@ -818,7 +588,7 @@ pub fn deliver(plan: DeliveryPlan<'_>, advisor: &mut impl AdvisorLaunch) -> Resu
     // to a private file and only the agent's text streams on stdout; verbose
     // keeps the raw streaming by handing the terminal over.
     let (result, run_log) = if mode == DeliveryMode::Headless && !verbose {
-        match advisor.headless(binary, leading, &prompt) {
+        match advisor.headless(binary, leading, &prompt, render) {
             Ok((status, log)) => (Ok(status), Some(log)),
             Err(err) => (Err(err), None),
         }
@@ -877,13 +647,14 @@ fn optimize(
     // The harness copy for every prompt and briefing rendered here — the
     // harness assembles its own (adapter side), so the core stays agnostic.
     let copy = sess.harness.copy();
-    let (binary, leading, run_mode) = launch_command(&sess.harness);
+    // The launch shape is the harness's own data (`Harness::launch_command`,
+    // beside its other arms), so the shell names no harness here.
+    let (binary, leading, run_mode) = sess.harness.launch_command();
 
     // One seam from here: the payload (the full prompt, or the rendered
     // briefing behind a private pointer file) and the mode are decided, then
-    // `deliver` runs them against the process adapter. `claude` opens an
-    // interactive TUI, `opencode run` goes headless, kilo's TUI takes
-    // `--prompt` (`docs/specs/harness.md`).
+    // `deliver` runs them against the process adapter — the launch shape and
+    // run mode coming from the harness's data arms (`docs/specs/harness.md`).
     let plan = match delivery_mode(print, run_mode) {
         DeliveryMode::Print => DeliveryPlan::print(optimize_mod::compose_prompt(
             &findings,
@@ -892,12 +663,12 @@ fn optimize(
             &copy,
         )),
         mode => DeliveryPlan::launch(
-            binary,
-            leading,
+            (binary, leading),
             mode,
             optimize_mod::render_briefing(&findings, filter, &copy),
             sess.harness.display_name(),
             verbose,
+            sess.harness.run_line_renderer(),
             |path| {
                 optimize_mod::launch_prompt(
                     &path.to_string_lossy(),
@@ -917,21 +688,22 @@ fn optimize(
 /// piped, write every raw line (and the child's stderr) to a private log, and
 /// surface only what the agent says — text parts on stdout (so a pipe like
 /// `| pbcopy` receives the narration and the plan), one-line progress markers
-/// on stderr. A heartbeat covers quiet stretches (a long tool call, model
-/// thinking) so the run never looks hung. Returns the log path so the caller
-/// can point at the full detail. The raw event shapes are unversioned
-/// upstream, so rendering is lenient: a line with no recognizable text stays
-/// in the log, and a run that renders nothing readable says so instead of
-/// leaving silence.
+/// on stderr. The `render_line` is the harness seam's choice
+/// (`Harness::run_line_renderer`), so this loop names no harness. A heartbeat
+/// covers quiet stretches (a long tool call, model thinking) so the run never
+/// looks hung. Returns the log path so the caller can point at the full
+/// detail. The raw event shapes are unversioned upstream, so rendering is
+/// lenient: a line with no recognizable text stays in the log, and a run that
+/// renders nothing readable says so instead of leaving silence.
 fn run_headless(
     binary: &str,
     leading: &[&str],
     prompt: &str,
+    render_line: Option<RunLineRenderer>,
 ) -> Result<(std::process::ExitStatus, PathBuf)> {
     use std::io::{BufRead, Write};
     use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-    use std::time::{Duration, Instant};
 
     let log_path = private_temp_path("saniwalens-run", "log");
     write_private_file(&log_path, "").context("create run log")?;
@@ -952,39 +724,16 @@ fn run_headless(
         ))
     );
 
-    // A dim beat every 30s while the advisor works: elapsed seconds and how
-    // many events have streamed, so silence reads as waiting, not a hang.
+    // A dim beat every 30s while the advisor works, so silence reads as
+    // waiting, not a hang — the quiet-stretch logic lives in `heartbeat`.
     let events = Arc::new(AtomicUsize::new(0));
     let stop = Arc::new(AtomicBool::new(false));
-    let heartbeat = {
-        let events = Arc::clone(&events);
-        let stop = Arc::clone(&stop);
-        std::thread::spawn(move || {
-            let start = Instant::now();
-            let mut next = 30u64;
-            loop {
-                if stop.load(Ordering::Relaxed) {
-                    return;
-                }
-                std::thread::sleep(Duration::from_millis(500));
-                if stop.load(Ordering::Relaxed) {
-                    return;
-                }
-                let elapsed = start.elapsed().as_secs();
-                if elapsed >= next {
-                    next += 30;
-                    eprintln!(
-                        "{}",
-                        Style::stderr().dim(&format!(
-                            "  … advisor working ({}s, {} events)",
-                            elapsed,
-                            events.load(Ordering::Relaxed)
-                        ))
-                    );
-                }
-            }
-        })
-    };
+    let (heartbeat, _beats) = heartbeat::spawn(
+        Arc::clone(&stop),
+        Arc::clone(&events),
+        heartbeat::CADENCE,
+        heartbeat::POLL,
+    );
 
     let mut launch = std::process::Command::new(binary);
     launch.args(leading).arg(prompt);
@@ -999,15 +748,15 @@ fn run_headless(
         let line = line.context("read the advisor's output")?;
         events.fetch_add(1, Ordering::Relaxed);
         writeln!(log, "{line}").context("write the run log")?;
-        match opencode_mod::render_run_line(&line) {
-            opencode_mod::RunEvent::Text(text) => {
+        match render_line.map_or(RunEvent::Silent, |render| render(&line)) {
+            RunEvent::Text(text) => {
                 readable = true;
                 println!("{text}");
             }
-            opencode_mod::RunEvent::Progress(tool) => {
+            RunEvent::Progress(tool) => {
                 eprintln!("{}", Style::stderr().dim(&format!("  → {tool}")));
             }
-            opencode_mod::RunEvent::Silent => {}
+            RunEvent::Silent => {}
         }
     }
     let status = child.wait()?;
@@ -3094,36 +2843,6 @@ mod tests {
         assert_eq!(cli.profile.as_deref(), Some("work"));
     }
 
-    #[test]
-    fn launch_command_runs_each_harness_own_agent() {
-        // `claude` opens interactively on the prompt; `opencode run` runs the
-        // advisor headless on JSON events (raw tool dumps loggable) with a
-        // recognizable session title (see `run_instructions`). kilo is an
-        // OpenCode fork and documents `kilo run [message..]` with `--format
-        // json` (raw JSON events) and `--title` — the same surface, so the
-        // launch is the opencode shape under kilo's binary.
-        assert_eq!(
-            launch_command(&Harness::Claude),
-            ("claude", &[] as &[&str], optimize_mod::RunMode::Interactive)
-        );
-        assert_eq!(
-            launch_command(&Harness::Opencode),
-            (
-                "opencode",
-                &["run", "--format", "json", "--title", "saniwalens optimize"] as &[&str],
-                optimize_mod::RunMode::Headless
-            )
-        );
-        assert_eq!(
-            launch_command(&Harness::Kilocode),
-            (
-                "kilo",
-                &["--prompt"] as &[&str],
-                optimize_mod::RunMode::Interactive
-            )
-        );
-    }
-
     // ---- PBI 06: the delivery seam ----
 
     /// A delivery double: records what would have been launched instead of
@@ -3172,6 +2891,7 @@ mod tests {
             binary: &str,
             leading: &[&str],
             prompt: &str,
+            _render: Option<RunLineRenderer>,
         ) -> Result<(std::process::ExitStatus, PathBuf)> {
             self.headless.push((
                 binary.to_string(),
@@ -3200,12 +2920,12 @@ mod tests {
         use std::cell::RefCell;
         let seen_path: RefCell<Option<PathBuf>> = RefCell::new(None);
         let plan = DeliveryPlan::launch(
-            "claude",
-            &[],
+            ("claude", &[]),
             DeliveryMode::Interactive,
             "the rendered briefing".to_string(),
             "Claude Code",
             false,
+            None,
             |path| {
                 *seen_path.borrow_mut() = Some(path.to_path_buf());
                 "POINTER PROMPT".to_string()
@@ -3228,12 +2948,12 @@ mod tests {
     #[test]
     fn headless_routes_through_the_logged_adapter_unless_verbose() {
         let headless_plan = DeliveryPlan::launch(
-            "opencode",
-            &["run", "--format", "json"],
+            ("opencode", &["run", "--format", "json"]),
             DeliveryMode::Headless,
             "briefing".to_string(),
             "opencode",
             false,
+            Harness::Opencode.run_line_renderer(),
             |_| "pointer".to_string(),
         );
         let mut advisor = RecordingAdvisor::new();
@@ -3244,12 +2964,12 @@ mod tests {
         // `--verbose` inherits stdio for the raw streaming instead
         // (`docs/specs/harness.md`).
         let verbose_plan = DeliveryPlan::launch(
-            "opencode",
-            &["run", "--format", "json"],
+            ("opencode", &["run", "--format", "json"]),
             DeliveryMode::Headless,
             "briefing".to_string(),
             "opencode",
             true,
+            Harness::Opencode.run_line_renderer(),
             |_| "pointer".to_string(),
         );
         let mut advisor = RecordingAdvisor::new();
@@ -3362,22 +3082,19 @@ mod tests {
         let cli = Cli::try_parse_from(["saniwalens", "usage", "--last", "7d"]).unwrap();
         let Command::Usage {
             by,
-            since,
-            until,
-            last,
+            period,
             format,
-            frozen,
-            db,
+            read,
         } = cli.command
         else {
             panic!("the command is `usage`");
         };
         assert_eq!(by, None);
-        assert_eq!(since, None);
-        assert_eq!(until, None);
-        assert_eq!(last.as_deref(), Some("7d"));
+        assert_eq!(period.since, None);
+        assert_eq!(period.until, None);
+        assert_eq!(period.last.as_deref(), Some("7d"));
         assert_eq!(format, None);
-        assert!(!frozen);
-        assert_eq!(db, None);
+        assert!(!read.frozen);
+        assert_eq!(read.db, None);
     }
 }

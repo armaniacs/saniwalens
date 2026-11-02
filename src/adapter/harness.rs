@@ -1,8 +1,8 @@
 //! Harness selection: which agent harness a run analyzes and where its
-//! files live. This module owns the per-harness *locations* (upstream
-//! conventions), never the formats themselves — plus the one catalog
-//! traversal that walks those locations for every harness. See
-//! `docs/specs/harness.md`.
+//! files live. This module owns the per-harness facts as data — the
+//! *locations* (upstream conventions, never the formats themselves), the
+//! optimize launch shape, and the one catalog traversal that walks those
+//! locations for every harness. See `docs/specs/harness.md`.
 
 use std::collections::HashSet;
 use std::fs;
@@ -14,7 +14,15 @@ use crate::adapter::config::{
     add_skill_site, read_agent_surfaces, read_claude_md_surfaces, read_command_surfaces,
     read_mcp_server_surfaces, read_rule_surfaces, read_skill_surfaces,
 };
+use crate::adapter::opencode;
+use crate::core::optimize::RunMode;
 use crate::core::surface::{Scope, Surface};
+
+/// A headless run-line renderer: one raw stdout line turned into the
+/// [`RunEvent`](opencode::RunEvent) the terminal shows. The signature is
+/// uniform so the shell's headless loop can run any harness's renderer
+/// without knowing its stream.
+pub type RunLineRenderer = fn(&str) -> opencode::RunEvent;
 
 /// The agent harness one store holds. One store never mixes harnesses, so
 /// this labels a whole run — never a row.
@@ -212,7 +220,8 @@ impl Harness {
     /// command and the views' auto-refresh call. The per-harness routines
     /// live beside their formats (`adapter::claude`, `adapter::opencode`,
     /// `adapter::kilocode`), so a new harness is a variant plus its adapter
-    /// module and `cli/mod.rs` does not change (`docs/specs/harness.md`).
+    /// module and `cli/mod.rs` does not change — on the analyze side here or
+    /// the launch side (`launch_command`, below) (`docs/specs/harness.md`).
     pub fn analyze(&self, input: Option<PathBuf>, db: &Path) -> Result<AnalyzeStats> {
         match self {
             Harness::Claude => crate::adapter::claude::analyze(input, db),
@@ -351,6 +360,51 @@ impl Harness {
             Harness::Claude => "transcript(s)",
             Harness::Opencode => "session(s)",
             Harness::Kilocode => "session(s)",
+        }
+    }
+
+    /// The launch shape for an optimize delivery: the binary plus any leading
+    /// argv, and the [`RunMode`] the seeded session runs in. `claude` opens
+    /// interactively on the prompt; `opencode run` investigates headlessly —
+    /// JSON events (`--format json`) so the raw tool dumps can be logged while
+    /// only the agent's text streams, and a title so the sessions it seeds are
+    /// recognizable in the store it feeds. Per-harness data beside the other
+    /// arms, so a new harness lands here and the shell's launch side neither
+    /// matches nor changes (`docs/specs/harness.md`).
+    pub fn launch_command(&self) -> (&'static str, &'static [&'static str], RunMode) {
+        match self {
+            Harness::Claude => ("claude", &[], RunMode::Interactive),
+            Harness::Opencode => (
+                "opencode",
+                &["run", "--format", "json", "--title", "saniwalens optimize"],
+                RunMode::Headless,
+            ),
+            // The `kilo` binary is the measured agent CLI (Homebrew), and kilo is
+            // an OpenCode fork whose TUI takes a prompt: `kilo [project] --prompt
+            // <prompt>` opens the interactive session on the pointer prompt — the
+            // experience the claude launch gives, with the user present to approve
+            // the briefing read and steer (kilo gates every tool call where
+            // opencode does not, so a headless run would need `--auto` instead).
+            // A bare `kilo <text>` positional is treated as a file to open
+            // (measured), not a prompt — `--prompt` is the TUI's message surface.
+            Harness::Kilocode => ("kilo", &["--prompt"], RunMode::Interactive),
+        }
+    }
+
+    /// The renderer for a headless run's raw stdout lines: the adapter fn
+    /// turning one raw line into a [`RunEvent`](opencode::RunEvent), handed to
+    /// the shell's headless loop as seam data (`run_headless` in `cli/mod.rs`),
+    /// so the loop neither names a harness nor matches on one. `opencode run
+    /// --format json` streams unversioned JSON events, so the renderer is the
+    /// lenient one; kilo is an OpenCode fork and shares the stream, so a
+    /// headless kilo run is the same arm. Claude's launch opens the
+    /// interactive TUI (`launch_command`), so it has no headless stream to
+    /// render. Per-harness data beside the launch shape, so a new harness
+    /// lands here and the loop never changes (`docs/specs/harness.md`).
+    pub fn run_line_renderer(&self) -> Option<RunLineRenderer> {
+        match self {
+            Harness::Claude => None,
+            Harness::Opencode | Harness::Kilocode => Some(opencode::render_run_line),
         }
     }
 
@@ -561,6 +615,59 @@ mod tests {
         assert_eq!(Harness::Claude.db_file_name(), "saniwalens.db");
         assert_eq!(Harness::Opencode.db_file_name(), "saniwalens-opencode.db");
         assert_eq!(Harness::Kilocode.db_file_name(), "saniwalens-kilocode.db");
+    }
+
+    // ---- PBI 38: the launch shape as data ----
+
+    #[test]
+    fn launch_command_runs_each_harness_own_agent() {
+        // `claude` opens interactively on the prompt; `opencode run` runs the
+        // advisor headless on JSON events (raw tool dumps loggable) with a
+        // recognizable session title (see `run_instructions`). kilo is an
+        // OpenCode fork, but its TUI takes a prompt rather than the opencode
+        // run surface: `kilo --prompt <prompt>` opens the interactive session
+        // on the pointer prompt, the experience the claude launch gives
+        // (`docs/specs/harness.md`, "`optimize` under opencode").
+        assert_eq!(
+            Harness::Claude.launch_command(),
+            ("claude", &[] as &[&str], RunMode::Interactive)
+        );
+        assert_eq!(
+            Harness::Opencode.launch_command(),
+            (
+                "opencode",
+                &["run", "--format", "json", "--title", "saniwalens optimize"] as &[&str],
+                RunMode::Headless
+            )
+        );
+        assert_eq!(
+            Harness::Kilocode.launch_command(),
+            ("kilo", &["--prompt"] as &[&str], RunMode::Interactive)
+        );
+    }
+
+    // ---- PBI 42: the headless run-line renderer as data ----
+
+    #[test]
+    fn run_line_renderer_hands_each_harness_own_stream() {
+        // `opencode run --format json` streams unversioned JSON events, so the
+        // seam hands the shell the adapter's lenient renderer; kilo is an
+        // OpenCode fork and shares the stream, so a headless kilo run needs no
+        // shell edit. Claude's launch opens the interactive TUI
+        // (`launch_command`), so it has no headless stream to render.
+        let line = r#"{"type":"tool_use","part":{"type":"tool","tool":"read"}}"#;
+        let opencode = Harness::Opencode
+            .run_line_renderer()
+            .expect("headless stream");
+        assert_eq!(
+            opencode(line),
+            opencode::RunEvent::Progress("read".to_string())
+        );
+        let kilo = Harness::Kilocode
+            .run_line_renderer()
+            .expect("headless stream");
+        assert_eq!(kilo(line), opencode::RunEvent::Progress("read".to_string()));
+        assert!(Harness::Claude.run_line_renderer().is_none());
     }
 
     #[test]

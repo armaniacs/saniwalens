@@ -25,6 +25,7 @@ prematurely). A change to code maps to the spec that owns its concern:
 | Harness dispatch (`Harness::analyze`), per-harness input routes, and analyzer-version keys (the analyze seam) | `docs/specs/harness.md` |
 | Event extraction, metric computation, span/nesting, subagent attribution (the pure core) | `docs/specs/events.md` |
 | The configuration-surface catalog and the cost×usage join (optimization wedges) | `docs/specs/surfaces.md` |
+| Pure shaping of fetched rows (the trend two-window joins: pairing, ordering, deltas; core-bound by the placement rule even while they still sit in `src/store.rs`) | `docs/specs/cli.md` |
 | SQLite schema, incremental ingest, idempotency (the store layer) | `docs/specs/storage.md` |
 | CLI commands, flags, time bucketing, output formats | `docs/specs/cli.md` |
 | Layer boundaries, two-stage flow, resilience to upstream format changes (cross-cutting) | `docs/specs/architecture.md` |
@@ -48,10 +49,10 @@ documents:
 - **Diagrams**: any Mermaid node that names a function, type, table, or file
   you just renamed or removed.
 - **Prose references**: renaming or moving a file dangles every prose path
-  that named it, in src doc comments, `docs/specs/`, README, and AGENTS.
-  Backticked `.rs` anchors in the current prose fail the reference gate
-  (`tests/prose_reference_gate.rs`) mechanically; doc comments and non-path
-  prose are invisible to it and still need the grep.
+  that named it, in src doc comments, `docs/specs/`, `.claude/rules/`, README,
+  and AGENTS. Backticked `.rs` anchors in the current prose fail the reference
+  gate (`tests/prose_reference_gate.rs`) mechanically; doc comments and
+  non-path prose are invisible to it and still need the grep.
 
 ## When the spec does NOT need to change
 

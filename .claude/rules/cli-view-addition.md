@@ -21,12 +21,12 @@ criteria:
 
 - **`src/cli/views/` is created in the same PR** (or the view file is added
   under it, once the directory exists) ― the view never lands inside
-  `mod.rs`, and it lands as one file there.
+  `cli/mod.rs`, and it lands as one file there.
 - **`src/cli/trend.rs` moves into `src/cli/views/` in the same commit** as the
   first view landing there. Its move cost does not depend on the timing, so
   the move is not a second, forgettable step.
-- **No view functions are appended to `mod.rs`**: a helper a view needs is
-  born in the view's file; the shell keeps dispatch. Growing `mod.rs` past
+- **No view functions are appended to `cli/mod.rs`**: a helper a view needs is
+  born in the view's file; the shell keeps dispatch. Growing `cli/mod.rs` past
   its budget fails the tripwire, and raising that budget is a review point in
   the same PR as the spec update it forces.
 - **The specs are updated in the same PR** ― both places the split touches in
@@ -34,7 +34,7 @@ criteria:
   view-landing rule), plus `docs/specs/cli.md` for the view's command
   contract.
 - **A golden test pins the view's JSON machine contract** (`docs/specs/cli.md`
-  calls the JSON output "the machine contract"). None exist yet, so the first
-  view PBI establishes the first golden, and every later view PBI adds its
-  own ― a move without a golden is validated by capture alone, which is not
-  the contract.
+  calls the JSON output "the machine contract"). The first one exists (PBI 39
+  pins trend's emitted JSON in `tests/trend_json_golden.rs`), and every later
+  view PBI adds its own ― a move without a golden is validated by capture
+  alone, which is not the contract.
