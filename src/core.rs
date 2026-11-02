@@ -14,4 +14,5 @@ pub mod span;
 pub mod subagent;
 pub mod surface;
 pub mod thrash;
+pub mod trend;
 pub mod usage;
