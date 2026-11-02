@@ -97,9 +97,17 @@ Pass `--db ./saniwalens.db` if you deliberately want a project-local one (and
 on stderr; pass `--frozen` to read the store exactly as it is. Running
 `saniwalens analyze` yourself is only needed to refresh without reading.
 
-## Other agent harnesses
+## Supported harnesses
 
-The same lens works on opencode and Kilo Code transcripts via `--harness`:
+`saniwalens` analyzes one agent harness per run, selected with `--harness`.
+`0.5.2` supports these three. The default stays `claude`, so every existing
+invocation keeps working byte-identically.
+
+| `--harness` | Agent | Transcripts | Config catalog | Store | `optimize` launch |
+| --- | --- | --- | --- | --- | --- |
+| `claude` (default) | Claude Code | `~/.claude/projects` | skills, rules, agents, MCP servers, `CLAUDE.md` | `saniwalens.db` | interactive `claude` session |
+| `opencode` | opencode | opencode database (`~/.local/share/opencode/opencode.db`) | commands, agents, `AGENTS.md` | `saniwalens-opencode.db` | headless `opencode run` advisor |
+| `kilocode` | Kilo Code | editor `globalStorage` task files (Code / Cursor / VSCodium) | commands, agents, skills, `AGENTS.md`, `.kilorules`, `kilo.json` `instructions[]` | `saniwalens-kilocode.db` | interactive `kilo --prompt` session |
 
 ```sh
 saniwalens analyze --harness kilocode      # reads the editor's globalStorage task files
@@ -107,11 +115,20 @@ saniwalens doctor --harness kilocode
 saniwalens optimize --harness kilocode     # opens an interactive `kilo --prompt` session
 ```
 
-Each harness keeps its own store (`saniwalens-opencode.db`, `saniwalens-kilocode.db`)
-and reads its own config ― `~/.config/opencode/`, `~/.config/kilo/` plus each
-analyzed project's own files ― so findings stay per harness, never mixed. The
-flag is explicit and the default stays `claude`; [`docs/specs/harness.md`](docs/specs/harness.md)
-holds the per-harness contract.
+Each harness keeps its own store (see the table) and reads its own config ―
+`~/.claude/`, `~/.config/opencode/`, `~/.config/kilo/` plus each analyzed
+project's own files ― so findings stay per harness, never mixed. There is
+deliberately no `auto`: with several harnesses installed, guessing would
+misattribute rows silently. [`docs/specs/harness.md`](docs/specs/harness.md)
+holds the per-harness contract, including what each harness cannot report yet
+(for example no subagent split under opencode/kilocode, no `prompts` view
+under opencode).
+
+Not supported in `0.5.2`: DSH (DeepSeek harness app) and any other harness.
+DSH support is the next candidate; see [`CONTRIBUTING.md`](CONTRIBUTING.md)
+for what a new-harness contribution needs (an OpenAI-compatible endpoint
+alone is not enough ― the transcript and config formats must be observable
+and OSS-reproducible).
 
 ## Config file
 

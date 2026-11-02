@@ -50,9 +50,9 @@ pub(crate) use window::*;
              follow-up command."
 )]
 pub struct Cli {
-    /// Which agent harness to analyze. Global so every command resolves its
-    /// store and input roots through it; the default keeps every existing
-    /// invocation byte-identical in behavior. See `docs/specs/harness.md`.
+    /// Which agent harness to analyze: claude (default) | opencode |
+    /// kilocode. Global so every command resolves its store and input
+    /// roots through it. See `docs/specs/harness.md`.
     #[arg(long, global = true)]
     harness: Option<String>,
     /// Named preset from the config file to run under. Global so every

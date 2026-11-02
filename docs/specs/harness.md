@@ -1,7 +1,7 @@
 # Harness Specification
 
 saniwalens analyzes sessions from more than one agent harness (Claude Code,
-opencode; kilocode and DSH to follow). This spec owns the **harness contract**:
+opencode, kilocode). This spec owns the **harness contract**:
 how the CLI selects a harness, where each harness's input and store live, and
 what each harness can and cannot report in v1. The per-harness *formats* live
 in their own specs (`session-format.md`, `session-format-opencode.md`); the
@@ -280,3 +280,11 @@ shell's only harness-dispatched step is the cross-harness write guard
 harness passes it unchanged; every other per-harness fact reaches the shell
 as seam data. Nothing in the Claude Code path moves ― that immobility is the
 contract this spec protects.
+
+## Non-goals in v1 (as of 0.5.2)
+
+DSH (DeepSeek harness app) and any fourth harness are not supported: no
+`Harness` variant, no input route, no store name, no format spec. DSH is the
+next candidate, tracked as a contribution, not a committed release item. See
+`CONTRIBUTING.md` for what a new-harness proposal must bring (observable
+transcript and config formats, OSS-reproducible fixtures).

@@ -32,7 +32,7 @@ Usage: saniwalens usage [OPTIONS]
 
 Options:
       --by <BY>            Bucket usage by time: year | month | week | day | hour (JST)
-      --harness <HARNESS>  Which agent harness to analyze. Global so every command resolves its store and input roots through it; the default keeps every existing invocation byte-identical in behavior. See `docs/specs/harness.md`
+      --harness <HARNESS>  Which agent harness to analyze: claude (default) | opencode | kilocode. Global so every command resolves its store and input roots through it. See `docs/specs/harness.md`
       --profile <PROFILE>  Named preset from the config file to run under. Global so every command resolves through it; an explicit --harness or --db still wins over whatever the profile sets. See `docs/specs/cli.md`
       --since <DATE>       Only count events on or after this date (YYYY-MM-DD, JST)
       --until <DATE>       Only count events through this date (YYYY-MM-DD, JST) — the whole day counts
@@ -49,7 +49,7 @@ const TREND_HELP: &str = r#"How usage moved: each kind of event, each skill, and
 Usage: saniwalens trend [OPTIONS]
 
 Options:
-      --harness <HARNESS>  Which agent harness to analyze. Global so every command resolves its store and input roots through it; the default keeps every existing invocation byte-identical in behavior. See `docs/specs/harness.md`
+      --harness <HARNESS>  Which agent harness to analyze: claude (default) | opencode | kilocode. Global so every command resolves its store and input roots through it. See `docs/specs/harness.md`
       --since <DATE>       Current window start (YYYY-MM-DD, JST). The window to compare it with is the same length immediately before it
       --profile <PROFILE>  Named preset from the config file to run under. Global so every command resolves through it; an explicit --harness or --db still wins over whatever the profile sets. See `docs/specs/cli.md`
       --until <DATE>       Current window end (YYYY-MM-DD, JST) — the whole day counts. Needs --since; alone, the window to compare against is undefined
@@ -66,7 +66,7 @@ const INVENTORY_HELP: &str = r#"Everything installed in your config (skills, rul
 Usage: saniwalens inventory [OPTIONS]
 
 Options:
-      --harness <HARNESS>  Which agent harness to analyze. Global so every command resolves its store and input roots through it; the default keeps every existing invocation byte-identical in behavior. See `docs/specs/harness.md`
+      --harness <HARNESS>  Which agent harness to analyze: claude (default) | opencode | kilocode. Global so every command resolves its store and input roots through it. See `docs/specs/harness.md`
       --scope <SCOPE>      Show one config layer only: global (~/.claude) | project (all projects' own config) | project:<slug> (one project's)
       --profile <PROFILE>  Named preset from the config file to run under. Global so every command resolves through it; an explicit --harness or --db still wins over whatever the profile sets. See `docs/specs/cli.md`
       --since <DATE>       Only count events on or after this date (YYYY-MM-DD, JST)
@@ -84,7 +84,7 @@ const WASTE_HELP: &str = r#"Cleanup opportunities: config that is never used, lo
 Usage: saniwalens waste [OPTIONS]
 
 Options:
-      --harness <HARNESS>  Which agent harness to analyze. Global so every command resolves its store and input roots through it; the default keeps every existing invocation byte-identical in behavior. See `docs/specs/harness.md`
+      --harness <HARNESS>  Which agent harness to analyze: claude (default) | opencode | kilocode. Global so every command resolves its store and input roots through it. See `docs/specs/harness.md`
       --scope <SCOPE>      Show one config layer only: global (~/.claude) | project (all projects' own config) | project:<slug> (one project's)
       --profile <PROFILE>  Named preset from the config file to run under. Global so every command resolves through it; an explicit --harness or --db still wins over whatever the profile sets. See `docs/specs/cli.md`
       --since <DATE>       Only count events on or after this date (YYYY-MM-DD, JST)
@@ -103,7 +103,7 @@ Usage: saniwalens overhead [OPTIONS]
 
 Options:
       --format <FORMAT>    Output format: table | markdown | json
-      --harness <HARNESS>  Which agent harness to analyze. Global so every command resolves its store and input roots through it; the default keeps every existing invocation byte-identical in behavior. See `docs/specs/harness.md`
+      --harness <HARNESS>  Which agent harness to analyze: claude (default) | opencode | kilocode. Global so every command resolves its store and input roots through it. See `docs/specs/harness.md`
       --profile <PROFILE>  Named preset from the config file to run under. Global so every command resolves through it; an explicit --harness or --db still wins over whatever the profile sets. See `docs/specs/cli.md`
       --since <DATE>       Only count events on or after this date (YYYY-MM-DD, JST)
       --until <DATE>       Only count events through this date (YYYY-MM-DD, JST) — the whole day counts
@@ -120,7 +120,7 @@ Usage: saniwalens prompts [OPTIONS]
 
 Options:
       --format <FORMAT>    Output format: table | markdown | json
-      --harness <HARNESS>  Which agent harness to analyze. Global so every command resolves its store and input roots through it; the default keeps every existing invocation byte-identical in behavior. See `docs/specs/harness.md`
+      --harness <HARNESS>  Which agent harness to analyze: claude (default) | opencode | kilocode. Global so every command resolves its store and input roots through it. See `docs/specs/harness.md`
       --profile <PROFILE>  Named preset from the config file to run under. Global so every command resolves through it; an explicit --harness or --db still wins over whatever the profile sets. See `docs/specs/cli.md`
       --since <DATE>       Only count events on or after this date (YYYY-MM-DD, JST)
       --until <DATE>       Only count events through this date (YYYY-MM-DD, JST) — the whole day counts
@@ -136,7 +136,7 @@ const FAILURES_HELP: &str = r#"Tool calls that kept failing the same way — rec
 Usage: saniwalens failures [OPTIONS]
 
 Options:
-      --harness <HARNESS>  Which agent harness to analyze. Global so every command resolves its store and input roots through it; the default keeps every existing invocation byte-identical in behavior. See `docs/specs/harness.md`
+      --harness <HARNESS>  Which agent harness to analyze: claude (default) | opencode | kilocode. Global so every command resolves its store and input roots through it. See `docs/specs/harness.md`
       --scope <SCOPE>      Show one config layer only: global (failures spread across projects — habits), project (each project's own failures), or project:<slug> (everything in that one project)
       --profile <PROFILE>  Named preset from the config file to run under. Global so every command resolves through it; an explicit --harness or --db still wins over whatever the profile sets. See `docs/specs/cli.md`
       --since <DATE>       Only count events on or after this date (YYYY-MM-DD, JST)
@@ -155,7 +155,7 @@ Usage: saniwalens stuck [OPTIONS]
 
 Options:
       --format <FORMAT>    Output format: table | markdown | json
-      --harness <HARNESS>  Which agent harness to analyze. Global so every command resolves its store and input roots through it; the default keeps every existing invocation byte-identical in behavior. See `docs/specs/harness.md`
+      --harness <HARNESS>  Which agent harness to analyze: claude (default) | opencode | kilocode. Global so every command resolves its store and input roots through it. See `docs/specs/harness.md`
       --profile <PROFILE>  Named preset from the config file to run under. Global so every command resolves through it; an explicit --harness or --db still wins over whatever the profile sets. See `docs/specs/cli.md`
       --since <DATE>       Only count events on or after this date (YYYY-MM-DD, JST)
       --until <DATE>       Only count events through this date (YYYY-MM-DD, JST) — the whole day counts
@@ -171,7 +171,7 @@ const DOCTOR_HELP: &str = r#"The health check — what to fix first, what your s
 Usage: saniwalens doctor [OPTIONS]
 
 Options:
-      --harness <HARNESS>  Which agent harness to analyze. Global so every command resolves its store and input roots through it; the default keeps every existing invocation byte-identical in behavior. See `docs/specs/harness.md`
+      --harness <HARNESS>  Which agent harness to analyze: claude (default) | opencode | kilocode. Global so every command resolves its store and input roots through it. See `docs/specs/harness.md`
       --scope <SCOPE>      Show one config layer only: global (~/.claude) | project (all projects' own config) | project:<slug> (one project's)
       --profile <PROFILE>  Named preset from the config file to run under. Global so every command resolves through it; an explicit --harness or --db still wins over whatever the profile sets. See `docs/specs/cli.md`
       --since <DATE>       Only count events on or after this date (YYYY-MM-DD, JST)

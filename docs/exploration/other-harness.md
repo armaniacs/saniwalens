@@ -130,3 +130,19 @@ target project.
 - [x] kilocode: token source of record → `ui_messages.json` `say=api_req_started` text JSON (`tokensIn/tokensOut/cacheWrites/cacheReads/cost/usageMissing`). Storage-root choice resolved in the v1 wiring (`kilocode_tasks_candidates`: Code → Cursor → VSCodium, first existing). Still open: project-side rules/modes locations
 - [ ] DSH: hosting event for `usage`, subagent-spawn markers, skill/agent/MCP definition sites
 - [ ] General: default per-harness DB file names (settled when the harness spec is drafted)
+
+## 6. DSH as the next candidate (2026-11-03, v0.5.2)
+
+`armaniacs/saniwalens` has issues disabled, so this file is the tracking
+point instead of an issue. Status as of v0.5.2 (supported: claude, opencode,
+kilocode):
+
+- The maintainer started using the DeepSeek harness app; DSH is the next
+  support candidate, not a committed release item (`docs/specs/harness.md`,
+  Non-goals section).
+- What to observe next is exactly the open DSH row above: the hosting event
+  for `usage`, subagent-spawn markers (`delegationDepth`, the `task`-family
+  tool), and skill/agent/MCP definition sites under `~/.dsh/profiles/`.
+- Acceptance bar is `CONTRIBUTING.md` (observable formats, OSS-grounded
+  fixtures, maintenance outlook). Recommendations for other untested agents
+  are welcome in the same shape.
