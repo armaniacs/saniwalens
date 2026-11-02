@@ -107,11 +107,48 @@ const OBSERVE: Duration = Duration::from_secs(2);
 
 /// Stop the heartbeat thread on the way out, panic or not. Without it a failed
 /// assertion leaves the thread beating to stderr for the rest of the binary.
-struct StopOnDrop(Arc<AtomicBool>);
+/// The guard owns the handle: the test's normal path and a panic path both go
+/// through this Drop, so the explicit join cannot be skipped.
+struct StopOnDrop {
+    stop: Arc<AtomicBool>,
+    handle: Option<std::thread::JoinHandle<()>>,
+}
+
+impl StopOnDrop {
+    fn new(stop: Arc<AtomicBool>, handle: std::thread::JoinHandle<()>) -> Self {
+        Self {
+            stop,
+            handle: Some(handle),
+        }
+    }
+
+    fn stop(&self) {
+        self.stop.store(true, Ordering::Relaxed);
+    }
+}
 
 impl Drop for StopOnDrop {
     fn drop(&mut self) {
-        self.0.store(true, Ordering::Relaxed);
+        use std::io::Write;
+
+        self.stop.store(true, Ordering::Relaxed);
+        let Some(handle) = self.handle.take() else {
+            return;
+        };
+        let deadline = Instant::now() + OBSERVE;
+        while !handle.is_finished() && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        if handle.is_finished() {
+            let _ = handle.join();
+        } else {
+            // A stuck thread cannot be killed; detaching is the only
+            // non-panicking choice. One line, no panic in Drop.
+            let _ = writeln!(
+                std::io::stderr().lock(),
+                "heartbeat did not stop within {OBSERVE:?}; detaching"
+            );
+        }
     }
 }
 
@@ -131,7 +168,7 @@ fn the_heartbeat_samples_events_and_stops_cleanly() {
         Duration::from_millis(1),
         Duration::from_millis(5),
     );
-    let _stop_on_drop = StopOnDrop(Arc::clone(&stop));
+    let stop_on_drop = StopOnDrop::new(Arc::clone(&stop), handle);
 
     // The first beat samples the run before any event has streamed, so it
     // carries 0. Waiting for it here makes the order deterministic: the add
@@ -165,8 +202,15 @@ fn the_heartbeat_samples_events_and_stops_cleanly() {
     // most one beat is sent between the flag being set and the second stop
     // check observing it — a structural invariant of the two checks, not a
     // quantity this test can count.
-    // The disconnect cannot tell a stop-honoring exit from an early self-destruction.
-    stop.store(true, Ordering::Relaxed);
+    // First prove the loop is still alive after the target count: a beat that
+    // arrives now cannot be the count-3 beat that was already consumed. Without
+    // this, an early self-destruction right after the target beat would look
+    // exactly like a stop-honoring exit.
+    let (_, after) = beats
+        .recv_timeout(OBSERVE)
+        .expect("a beat after the target count");
+    assert_eq!(after, 3, "the loop is still sampling after the target beat");
+    stop_on_drop.stop();
     let deadline = Instant::now() + OBSERVE;
     loop {
         let remaining = deadline.saturating_duration_since(Instant::now());
@@ -181,5 +225,7 @@ fn the_heartbeat_samples_events_and_stops_cleanly() {
             }
         }
     }
-    handle.join().expect("the heartbeat thread exits cleanly");
+    // The guard owns the handle: its Drop stops the beat and joins within the
+    // observation budget. No second explicit join here.
+    drop(stop_on_drop);
 }
