@@ -89,9 +89,8 @@ enum Command {
         by: Option<String>,
         #[command(flatten)]
         period: PeriodArgs,
-        /// Output format: table | markdown.
-        #[arg(long)]
-        format: Option<String>,
+        #[command(flatten)]
+        format: FormatArgs,
         #[command(flatten)]
         read: ReadArgs,
     },
@@ -101,9 +100,8 @@ enum Command {
     Trend {
         #[command(flatten)]
         pair: PairArgs,
-        /// Output format: table | markdown | json.
-        #[arg(long)]
-        format: Option<String>,
+        #[command(flatten)]
+        format: FormatArgs,
         #[command(flatten)]
         read: ReadArgs,
     },
@@ -116,9 +114,8 @@ enum Command {
         scope: Option<String>,
         #[command(flatten)]
         period: PeriodArgs,
-        /// Output format: table | markdown.
-        #[arg(long)]
-        format: Option<String>,
+        #[command(flatten)]
+        format: FormatArgs,
         #[command(flatten)]
         read: ReadArgs,
     },
@@ -132,18 +129,16 @@ enum Command {
         scope: Option<String>,
         #[command(flatten)]
         period: PeriodArgs,
-        /// Output format: table | markdown.
-        #[arg(long)]
-        format: Option<String>,
+        #[command(flatten)]
+        format: FormatArgs,
         #[command(flatten)]
         read: ReadArgs,
     },
     /// What every session pays in context before any work starts, and how
     /// much of that comes from your own config files vs the harness itself.
     Overhead {
-        /// Output format: table | markdown.
-        #[arg(long)]
-        format: Option<String>,
+        #[command(flatten)]
+        format: FormatArgs,
         #[command(flatten)]
         period: PeriodArgs,
         #[command(flatten)]
@@ -153,9 +148,8 @@ enum Command {
     /// correcting ("no, instead…"), and questioning prompts — and what that
     /// mix suggests changing.
     Prompts {
-        /// Output format: table | markdown.
-        #[arg(long)]
-        format: Option<String>,
+        #[command(flatten)]
+        format: FormatArgs,
         #[command(flatten)]
         period: PeriodArgs,
         #[command(flatten)]
@@ -171,18 +165,16 @@ enum Command {
         scope: Option<String>,
         #[command(flatten)]
         period: PeriodArgs,
-        /// Output format: table | markdown.
-        #[arg(long)]
-        format: Option<String>,
+        #[command(flatten)]
+        format: FormatArgs,
         #[command(flatten)]
         read: ReadArgs,
     },
     /// Files Claude kept re-editing in rapid bursts — where it got stuck
     /// retrying instead of making progress.
     Stuck {
-        /// Output format: table | markdown.
-        #[arg(long)]
-        format: Option<String>,
+        #[command(flatten)]
+        format: FormatArgs,
         #[command(flatten)]
         period: PeriodArgs,
         #[command(flatten)]
@@ -197,9 +189,8 @@ enum Command {
         scope: Option<String>,
         #[command(flatten)]
         period: PeriodArgs,
-        /// Output format: table (human text) | json (the routed findings).
-        #[arg(long)]
-        format: Option<String>,
+        #[command(flatten)]
+        format: DoctorFormatArgs,
         #[command(flatten)]
         read: ReadArgs,
     },
@@ -209,9 +200,8 @@ enum Command {
     Sql {
         /// The SQL to run. If omitted, the query is read from stdin.
         query: Option<String>,
-        /// Output format: table | markdown.
-        #[arg(long)]
-        format: Option<String>,
+        #[command(flatten)]
+        format: FormatArgs,
         /// Store path (default: $XDG_STATE_HOME/saniwalens/saniwalens.db).
         #[arg(long)]
         db: Option<PathBuf>,
@@ -2992,7 +2982,7 @@ mod tests {
         assert_eq!(period.since, None);
         assert_eq!(period.until, None);
         assert_eq!(period.last.as_deref(), Some("7d"));
-        assert_eq!(format, None);
+        assert!(format.as_deref().is_none());
         assert!(!read.frozen);
         assert_eq!(read.db, None);
     }

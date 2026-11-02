@@ -37,7 +37,7 @@ Options:
       --since <DATE>       Only count events on or after this date (YYYY-MM-DD, JST)
       --until <DATE>       Only count events through this date (YYYY-MM-DD, JST) — the whole day counts
       --last <SPAN>        Rolling window ending now: <N>d | <N>h | <N>w (e.g. 7d). Exclusive with the explicit dates
-      --format <FORMAT>    Output format: table | markdown
+      --format <FORMAT>    Output format: table | markdown | json
       --frozen             Read the store as-is; skip the automatic refresh
       --db <DB>            Store path (default: $XDG_STATE_HOME/saniwalens/saniwalens.db)
   -h, --help               Print help
@@ -72,7 +72,7 @@ Options:
       --since <DATE>       Only count events on or after this date (YYYY-MM-DD, JST)
       --until <DATE>       Only count events through this date (YYYY-MM-DD, JST) — the whole day counts
       --last <SPAN>        Rolling window ending now: <N>d | <N>h | <N>w (e.g. 7d). Exclusive with the explicit dates
-      --format <FORMAT>    Output format: table | markdown
+      --format <FORMAT>    Output format: table | markdown | json
       --frozen             Read the store as-is; skip the automatic refresh
       --db <DB>            Store path (default: $XDG_STATE_HOME/saniwalens/saniwalens.db)
   -h, --help               Print help
@@ -90,7 +90,7 @@ Options:
       --since <DATE>       Only count events on or after this date (YYYY-MM-DD, JST)
       --until <DATE>       Only count events through this date (YYYY-MM-DD, JST) — the whole day counts
       --last <SPAN>        Rolling window ending now: <N>d | <N>h | <N>w (e.g. 7d). Exclusive with the explicit dates
-      --format <FORMAT>    Output format: table | markdown
+      --format <FORMAT>    Output format: table | markdown | json
       --frozen             Read the store as-is; skip the automatic refresh
       --db <DB>            Store path (default: $XDG_STATE_HOME/saniwalens/saniwalens.db)
   -h, --help               Print help
@@ -102,7 +102,7 @@ const OVERHEAD_HELP: &str = r#"What every session pays in context before any wor
 Usage: saniwalens overhead [OPTIONS]
 
 Options:
-      --format <FORMAT>    Output format: table | markdown
+      --format <FORMAT>    Output format: table | markdown | json
       --harness <HARNESS>  Which agent harness to analyze. Global so every command resolves its store and input roots through it; the default keeps every existing invocation byte-identical in behavior. See `docs/specs/harness.md`
       --profile <PROFILE>  Named preset from the config file to run under. Global so every command resolves through it; an explicit --harness or --db still wins over whatever the profile sets. See `docs/specs/cli.md`
       --since <DATE>       Only count events on or after this date (YYYY-MM-DD, JST)
@@ -119,7 +119,7 @@ const PROMPTS_HELP: &str = r#"How you steer Claude: the mix of instructing, stee
 Usage: saniwalens prompts [OPTIONS]
 
 Options:
-      --format <FORMAT>    Output format: table | markdown
+      --format <FORMAT>    Output format: table | markdown | json
       --harness <HARNESS>  Which agent harness to analyze. Global so every command resolves its store and input roots through it; the default keeps every existing invocation byte-identical in behavior. See `docs/specs/harness.md`
       --profile <PROFILE>  Named preset from the config file to run under. Global so every command resolves through it; an explicit --harness or --db still wins over whatever the profile sets. See `docs/specs/cli.md`
       --since <DATE>       Only count events on or after this date (YYYY-MM-DD, JST)
@@ -142,7 +142,7 @@ Options:
       --since <DATE>       Only count events on or after this date (YYYY-MM-DD, JST)
       --until <DATE>       Only count events through this date (YYYY-MM-DD, JST) — the whole day counts
       --last <SPAN>        Rolling window ending now: <N>d | <N>h | <N>w (e.g. 7d). Exclusive with the explicit dates
-      --format <FORMAT>    Output format: table | markdown
+      --format <FORMAT>    Output format: table | markdown | json
       --frozen             Read the store as-is; skip the automatic refresh
       --db <DB>            Store path (default: $XDG_STATE_HOME/saniwalens/saniwalens.db)
   -h, --help               Print help
@@ -154,7 +154,7 @@ const STUCK_HELP: &str = r#"Files Claude kept re-editing in rapid bursts — whe
 Usage: saniwalens stuck [OPTIONS]
 
 Options:
-      --format <FORMAT>    Output format: table | markdown
+      --format <FORMAT>    Output format: table | markdown | json
       --harness <HARNESS>  Which agent harness to analyze. Global so every command resolves its store and input roots through it; the default keeps every existing invocation byte-identical in behavior. See `docs/specs/harness.md`
       --profile <PROFILE>  Named preset from the config file to run under. Global so every command resolves through it; an explicit --harness or --db still wins over whatever the profile sets. See `docs/specs/cli.md`
       --since <DATE>       Only count events on or after this date (YYYY-MM-DD, JST)
@@ -331,5 +331,30 @@ fn every_windowed_views_help_is_pinned_byte_for_byte() {
             actual, expected,
             "{view} --help drifted from its capture — actual:\n{actual}"
         );
+    }
+}
+
+#[test]
+fn each_windowed_view_declares_format_once() {
+    let windowed = windowed_views();
+    for subcommand in saniwalens::cli::Cli::command().get_subcommands() {
+        let count = subcommand
+            .get_arguments()
+            .filter(|arg| arg.get_long() == Some("format"))
+            .count();
+        if windowed.iter().any(|view| view == subcommand.get_name()) {
+            assert_eq!(
+                count,
+                1,
+                "{} must declare --format exactly once",
+                subcommand.get_name()
+            );
+        } else {
+            assert!(
+                count <= 1,
+                "{} declares --format more than once",
+                subcommand.get_name()
+            );
+        }
     }
 }
