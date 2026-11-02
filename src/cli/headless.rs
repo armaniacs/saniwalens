@@ -14,8 +14,9 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdout, Command, ExitStatus, Stdio};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::mpsc::Receiver;
+use std::sync::mpsc::{Receiver, RecvTimeoutError, channel};
 use std::thread::JoinHandle;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 
@@ -41,6 +42,7 @@ pub(crate) struct HeadlessRun {
     log: fs::File,
     child_err: Option<fs::File>,
     child: Option<Child>,
+    reader: Option<JoinHandle<()>>,
     heartbeat: Option<JoinHandle<()>>,
 }
 
@@ -83,6 +85,7 @@ impl HeadlessRun {
             log,
             child_err: Some(child_err),
             child: None,
+            reader: None,
             heartbeat: Some(heartbeat),
         })
     }
@@ -102,6 +105,19 @@ impl HeadlessRun {
         self.child.as_mut().and_then(|child| child.stdout.take())
     }
 
+    /// The thread draining stdout. The guard joins it after killing the child,
+    /// so a timeout cannot leave a reader blocked on a dead pipe.
+    fn adopt_reader(&mut self, reader: JoinHandle<()>) {
+        self.reader = Some(reader);
+    }
+
+    /// Stop owning the reader. A timeout can leave a grandchild holding the
+    /// stdout pipe, so joining here would wait for that grandchild; detaching
+    /// lets the timeout return while the reader exits when the pipe closes.
+    fn abandon_reader(&mut self) {
+        self.reader.take();
+    }
+
     /// Count one streamed line for the beat.
     fn count_event(&self) {
         self.events.fetch_add(1, Ordering::Relaxed);
@@ -118,18 +134,38 @@ impl HeadlessRun {
     /// Wait for the child and hand back its status. The child stays in the
     /// guard until the wait succeeds, so a failed wait still leaves it for
     /// `Drop` to kill and reap; only a waited child is taken out.
-    fn wait_for_status(&mut self) -> Result<ExitStatus> {
-        let status = {
-            let child = self
-                .child
-                .as_mut()
-                .context("the advisor child is missing")?;
-            child.wait().context("wait for the advisor")
+    fn wait_for_status(&mut self, deadline: Option<Instant>) -> Result<ExitStatus> {
+        let Some(deadline) = deadline else {
+            let status = {
+                let child = self
+                    .child
+                    .as_mut()
+                    .context("the advisor child is missing")?;
+                child.wait().context("wait for the advisor")
+            };
+            if status.is_ok() {
+                self.child = None;
+            }
+            return status;
         };
-        if status.is_ok() {
-            self.child = None;
+
+        loop {
+            let status = {
+                let child = self
+                    .child
+                    .as_mut()
+                    .context("the advisor child is missing")?;
+                child.try_wait().context("wait for the advisor")?
+            };
+            if let Some(status) = status {
+                self.child = None;
+                return Ok(status);
+            }
+            if Instant::now() >= deadline {
+                anyhow::bail!("the advisor did not exit before the timeout");
+            }
+            std::thread::sleep(Duration::from_millis(10));
         }
-        status
     }
 }
 
@@ -142,10 +178,39 @@ impl Drop for HeadlessRun {
             let _ = child.kill();
             let _ = child.wait();
         }
+        if let Some(handle) = self.reader.take() {
+            let _ = handle.join();
+        }
         if let Some(handle) = self.heartbeat.take() {
             let _ = handle.join();
         }
     }
+}
+
+/// Parse `--timeout`: a positive number with an optional `ms`, `s`, or `m`
+/// suffix; a bare number is seconds. Zero and negatives are refused, since a
+/// zero deadline would fail before the advisor could start.
+pub(crate) fn parse_timeout(value: Option<&str>) -> Result<Option<Duration>> {
+    let Some(value) = value else {
+        return Ok(None);
+    };
+    let value = value.trim();
+    let (number, unit_secs) = if let Some(rest) = value.strip_suffix("ms") {
+        (rest, 0.001)
+    } else if let Some(rest) = value.strip_suffix('s') {
+        (rest, 1.0)
+    } else if let Some(rest) = value.strip_suffix('m') {
+        (rest, 60.0)
+    } else {
+        (value, 1.0)
+    };
+    let amount: f64 = number
+        .parse()
+        .with_context(|| format!("invalid --timeout '{value}' (e.g. 30s, 2m, 500ms)"))?;
+    if !amount.is_finite() || amount <= 0.0 {
+        anyhow::bail!("--timeout must be positive (got '{value}')");
+    }
+    Ok(Some(Duration::from_secs_f64(amount * unit_secs)))
 }
 
 /// Run the headless advisor with its raw output logged: spawn with stdout
@@ -169,10 +234,12 @@ pub(crate) fn run_headless(
     prompt: &str,
     render_line: Option<RunLineRenderer>,
     beat: Beat,
+    timeout: Option<Duration>,
 ) -> Result<(ExitStatus, PathBuf)> {
     let mut run = HeadlessRun::start(beat)?;
     let log_path = run.log_path().to_path_buf();
-    let (status, readable) = match drive(&mut run, binary, leading, prompt, render_line) {
+    let deadline = timeout.map(|limit| Instant::now() + limit);
+    let (status, readable) = match drive(&mut run, binary, leading, prompt, render_line, deadline) {
         Ok(driven) => driven,
         Err(err) => {
             return Err(err).with_context(|| format!("{RAW_LOG_CONTEXT}: {}", log_path.display()));
@@ -199,6 +266,7 @@ fn drive(
     leading: &[&str],
     prompt: &str,
     render_line: Option<RunLineRenderer>,
+    deadline: Option<Instant>,
 ) -> Result<(ExitStatus, bool)> {
     let mut launch = Command::new(binary);
     launch.args(leading).arg(prompt);
@@ -215,9 +283,35 @@ fn drive(
     run.adopt(child);
     let stdout = run.take_stdout().context("pipe the advisor's stdout")?;
 
+    // A reader thread makes the deadline reach the blocking `read_line`: the
+    // main loop waits on the channel, so a hung child cannot pin it.
+    let (line_tx, line_rx) = channel();
+    let reader = std::thread::spawn(move || {
+        for line in std::io::BufReader::new(stdout).lines() {
+            if line_tx.send(line).is_err() {
+                break;
+            }
+        }
+    });
+    run.adopt_reader(reader);
+
     let mut readable = false;
-    for line in std::io::BufReader::new(stdout).lines() {
-        let line = line.context("read the advisor's output")?;
+    loop {
+        let line = match next_line(&line_rx, deadline) {
+            Ok(Some(line)) => line,
+            Ok(None) => break,
+            Err(err) => {
+                run.abandon_reader();
+                return Err(err);
+            }
+        };
+        let line = match line {
+            Ok(line) => line,
+            Err(err) => {
+                run.abandon_reader();
+                return Err(err).context("read the advisor's output");
+            }
+        };
         run.count_event();
         writeln!(run.log(), "{line}").context("write the run log")?;
         match render_line.map_or(RunEvent::Silent, |render| render(&line)) {
@@ -231,8 +325,33 @@ fn drive(
             RunEvent::Silent => {}
         }
     }
-    let status = run.wait_for_status()?;
+    let status = run.wait_for_status(deadline)?;
     Ok((status, readable))
+}
+
+/// The next raw line, or `None` when the reader disconnected. With a deadline,
+/// a silent child becomes a timeout instead of an indefinite wait.
+fn next_line(
+    lines: &Receiver<std::io::Result<String>>,
+    deadline: Option<Instant>,
+) -> Result<Option<std::io::Result<String>>> {
+    let Some(deadline) = deadline else {
+        return match lines.recv() {
+            Ok(line) => Ok(Some(line)),
+            Err(_) => Ok(None),
+        };
+    };
+    let remaining = deadline.saturating_duration_since(Instant::now());
+    if remaining.is_zero() {
+        anyhow::bail!("the advisor did not finish before the timeout");
+    }
+    match lines.recv_timeout(remaining) {
+        Ok(line) => Ok(Some(line)),
+        Err(RecvTimeoutError::Timeout) => {
+            anyhow::bail!("the advisor did not finish before the timeout")
+        }
+        Err(RecvTimeoutError::Disconnected) => Ok(None),
+    }
 }
 
 #[cfg(all(test, unix))]
@@ -286,6 +405,7 @@ mod tests {
             "ignored",
             None,
             fast_beat(),
+            None,
         )
         .expect_err("the invalid UTF-8 line fails the read");
         let log = raw_log_path(&err).expect("the failure names the raw log");
@@ -311,6 +431,51 @@ mod tests {
     }
 
     #[test]
+    fn a_timeout_kills_the_child_and_names_the_log() {
+        let pid_file =
+            std::env::temp_dir().join(format!("saniwalens-timeout-pid-{}", std::process::id()));
+        let script = format!("echo $$ > '{}'; exec sleep 5", pid_file.display());
+        let started = Instant::now();
+        let err = run_headless(
+            "/bin/sh",
+            &["-c", script.as_str()],
+            "ignored",
+            None,
+            fast_beat(),
+            Some(Duration::from_millis(100)),
+        )
+        .expect_err("the silent child times out");
+        assert!(
+            started.elapsed() < Duration::from_secs(2),
+            "the timeout did not return promptly: {:?}",
+            started.elapsed()
+        );
+        let rendered = format!("{err:#}");
+        assert!(
+            rendered.contains("timeout"),
+            "the failure does not name the timeout: {rendered}"
+        );
+        // Best-effort cleanup: the branch predates the shared log-path helper.
+        if let Some(log) = err.chain().find_map(|cause| {
+            cause
+                .to_string()
+                .strip_prefix("raw output: ")
+                .map(PathBuf::from)
+        }) {
+            let _ = std::fs::remove_file(log);
+        }
+        let pid = std::fs::read_to_string(&pid_file).expect("the child wrote its pid");
+        let _ = std::fs::remove_file(&pid_file);
+        let alive = Command::new("kill")
+            .arg("-0")
+            .arg(pid.trim())
+            .stderr(Stdio::null())
+            .status()
+            .expect("kill -0 runs");
+        assert!(!alive.success(), "the child survived the timeout");
+    }
+
+    #[test]
     fn a_spawn_failure_leaves_no_child_and_no_beat() {
         let err = run_headless(
             "/nonexistent-saniwalens-headless-binary",
@@ -318,6 +483,7 @@ mod tests {
             "ignored",
             None,
             fast_beat(),
+            None,
         )
         .expect_err("a missing binary fails the spawn");
         let log = raw_log_path(&err).expect("the failure names the raw log");
@@ -336,6 +502,7 @@ mod tests {
             "ignored",
             None,
             fast_beat(),
+            None,
         )
         .expect("the child succeeds");
         assert!(status.success(), "the child exit status: {status}");
@@ -356,5 +523,34 @@ mod tests {
             "the heartbeat did not stop within a poll: {:?}",
             started.elapsed()
         );
+    }
+
+    #[test]
+    fn timeout_accepts_seconds_minutes_and_milliseconds() {
+        assert_eq!(
+            parse_timeout(Some("30s")).unwrap(),
+            Some(Duration::from_secs(30))
+        );
+        assert_eq!(
+            parse_timeout(Some("2m")).unwrap(),
+            Some(Duration::from_secs(120))
+        );
+        assert_eq!(
+            parse_timeout(Some("500ms")).unwrap(),
+            Some(Duration::from_millis(500))
+        );
+        assert_eq!(
+            parse_timeout(Some("7")).unwrap(),
+            Some(Duration::from_secs(7))
+        );
+        assert_eq!(parse_timeout(None).unwrap(), None);
+    }
+
+    #[test]
+    fn timeout_rejects_zero_and_garbage() {
+        assert!(parse_timeout(Some("0")).is_err());
+        assert!(parse_timeout(Some("0s")).is_err());
+        assert!(parse_timeout(Some("-1s")).is_err());
+        assert!(parse_timeout(Some("soon")).is_err());
     }
 }

@@ -55,6 +55,7 @@ impl AdvisorLaunch for HeadlessRecorder {
         leading: &[&str],
         prompt: &str,
         render: Option<RunLineRenderer>,
+        _timeout: Option<Duration>,
     ) -> Result<(std::process::ExitStatus, PathBuf)> {
         self.headless = Some((
             binary.to_string(),
@@ -79,6 +80,7 @@ fn the_quiet_headless_delivery_hands_the_advisor_the_seam_renderer() {
         "opencode",
         false,
         Harness::Opencode.run_line_renderer(),
+        None,
         |_| "pointer".to_string(),
     );
     let mut advisor = HeadlessRecorder {

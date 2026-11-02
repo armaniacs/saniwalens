@@ -163,6 +163,10 @@ that renders nothing readable says so instead of leaving silence. Every exit
 from the run ― success, a failed read, a failed spawn, or a failed wait ―
 stops the beat and reaps the child; a failure is reported with the raw log's
 path so the full output is still reachable (`cli/headless.rs`).
+`--timeout <DURATION>` bounds the wait; on expiry the child is killed and reaped
+and the error names the raw log. A grandchild that outlives the direct child can
+keep the pipe open: the reader is detached on timeout so the command still
+returns promptly, and the residual process is a known limitation.
 `--verbose` inherits stdio for the raw streaming instead.
 
 Under kilocode the briefing composes from the store either way, so `--print`

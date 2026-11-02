@@ -233,6 +233,9 @@ enum Command {
         /// (headless opencode runs log raw output to a file by default).
         #[arg(long)]
         verbose: bool,
+        /// Stop a headless advisor after this long (e.g. 30s, 2m, 500ms).
+        #[arg(long, value_name = "DURATION")]
+        timeout: Option<String>,
     },
 }
 
@@ -381,6 +384,7 @@ pub fn run() -> Result<()> {
             frozen,
             print,
             verbose,
+            timeout,
         } => {
             // Resolve (including the legacy-store move) before parsing --scope,
             // then open after — the pre-Session dispatch's exact order, kept so
@@ -388,7 +392,8 @@ pub fn run() -> Result<()> {
             let path = Session::resolve_path(&harness, db, config_db.as_deref(), &env)?;
             let filter = parse_scope(scope.as_deref())?;
             let sess = Session::open_resolved(&harness, path)?;
-            optimize(&sess, projects, &filter, frozen, print, verbose)
+            let timeout = headless::parse_timeout(timeout.as_deref())?;
+            optimize(&sess, projects, &filter, frozen, print, verbose, timeout)
         }
     }
 }
@@ -443,6 +448,7 @@ pub struct DeliveryPlan<'a> {
     harness_name: &'static str,
     verbose: bool,
     render: Option<RunLineRenderer>,
+    timeout: Option<std::time::Duration>,
     payload: DeliveryPayload<'a>,
 }
 
@@ -458,6 +464,7 @@ impl<'a> DeliveryPlan<'a> {
             harness_name: "",
             verbose: false,
             render: None,
+            timeout: None,
             payload: DeliveryPayload::Full(prompt),
         }
     }
@@ -466,6 +473,7 @@ impl<'a> DeliveryPlan<'a> {
     /// `pointer` assembles the argv prompt for that file's path. The launch
     /// shape — the binary plus its leading argv — travels as the one fact the
     /// harness seam hands over (`Harness::launch_command`).
+    #[allow(clippy::too_many_arguments)]
     pub fn launch(
         (binary, leading): (&'static str, &'static [&'static str]),
         mode: DeliveryMode,
@@ -473,6 +481,7 @@ impl<'a> DeliveryPlan<'a> {
         harness_name: &'static str,
         verbose: bool,
         render: Option<RunLineRenderer>,
+        timeout: Option<std::time::Duration>,
         pointer: impl FnOnce(&Path) -> String + 'a,
     ) -> Self {
         Self {
@@ -482,6 +491,7 @@ impl<'a> DeliveryPlan<'a> {
             harness_name,
             verbose,
             render,
+            timeout,
             payload: DeliveryPayload::Launch {
                 briefing,
                 pointer: Box::new(pointer),
@@ -511,6 +521,7 @@ pub trait AdvisorLaunch {
         leading: &[&str],
         prompt: &str,
         render: Option<RunLineRenderer>,
+        timeout: Option<std::time::Duration>,
     ) -> Result<(std::process::ExitStatus, PathBuf)>;
 }
 
@@ -537,8 +548,16 @@ impl AdvisorLaunch for ProcessAdvisor {
         leading: &[&str],
         prompt: &str,
         render: Option<RunLineRenderer>,
+        timeout: Option<std::time::Duration>,
     ) -> Result<(std::process::ExitStatus, PathBuf)> {
-        headless::run_headless(binary, leading, prompt, render, headless::Beat::default())
+        headless::run_headless(
+            binary,
+            leading,
+            prompt,
+            render,
+            headless::Beat::default(),
+            timeout,
+        )
     }
 }
 
@@ -556,6 +575,7 @@ pub fn deliver(plan: DeliveryPlan<'_>, advisor: &mut impl AdvisorLaunch) -> Resu
         harness_name,
         verbose,
         render,
+        timeout,
         payload,
     } = plan;
     let (prompt, path) = match payload {
@@ -576,7 +596,7 @@ pub fn deliver(plan: DeliveryPlan<'_>, advisor: &mut impl AdvisorLaunch) -> Resu
     // Headless harnesses run piped unless --verbose: the raw stream is logged
     // to a private file; text streams on stdout, verbose keeps the raw stream.
     let (result, run_log) = if mode == DeliveryMode::Headless && !verbose {
-        match advisor.headless(binary, leading, &prompt, render) {
+        match advisor.headless(binary, leading, &prompt, render, timeout) {
             Ok((status, log)) => (Ok(status), Some(log)),
             Err(err) => (Err(err), None),
         }
@@ -608,6 +628,7 @@ pub fn deliver(plan: DeliveryPlan<'_>, advisor: &mut impl AdvisorLaunch) -> Resu
 /// on argv — never the data, which `ps` would otherwise expose. The file is
 /// removed as soon as the session ends. `--print` instead writes the full prompt
 /// (briefing inline) to stdout for piping / inspection.
+#[allow(clippy::too_many_arguments)]
 fn optimize(
     sess: &Session,
     projects: Option<PathBuf>,
@@ -615,6 +636,7 @@ fn optimize(
     frozen: bool,
     print: bool,
     verbose: bool,
+    timeout: Option<std::time::Duration>,
 ) -> Result<()> {
     if !frozen {
         let stats = run_analyze(&sess.harness, projects, &sess.db_path)?;
@@ -662,6 +684,7 @@ fn optimize(
             sess.harness.display_name(),
             verbose,
             sess.harness.run_line_renderer(),
+            timeout,
             |path| {
                 optimize_mod::launch_prompt(
                     &path.to_string_lossy(),
@@ -2792,6 +2815,7 @@ mod tests {
             leading: &[&str],
             prompt: &str,
             _render: Option<RunLineRenderer>,
+            _timeout: Option<std::time::Duration>,
         ) -> Result<(std::process::ExitStatus, PathBuf)> {
             self.headless.push((
                 binary.to_string(),
@@ -2826,6 +2850,7 @@ mod tests {
             "Claude Code",
             false,
             None,
+            None,
             |path| {
                 *seen_path.borrow_mut() = Some(path.to_path_buf());
                 "POINTER PROMPT".to_string()
@@ -2854,6 +2879,7 @@ mod tests {
             "opencode",
             false,
             Harness::Opencode.run_line_renderer(),
+            None,
             |_| "pointer".to_string(),
         );
         let mut advisor = RecordingAdvisor::new();
@@ -2870,6 +2896,7 @@ mod tests {
             "opencode",
             true,
             Harness::Opencode.run_line_renderer(),
+            None,
             |_| "pointer".to_string(),
         );
         let mut advisor = RecordingAdvisor::new();

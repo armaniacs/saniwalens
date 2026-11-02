@@ -468,7 +468,7 @@ lists the full schema.
 
 ```
 saniwalens optimize [--projects <dir>] [--db <path>] [--scope global|project[:<slug>]]
-                [--frozen] [--print] [--verbose]
+                [--frozen] [--print] [--verbose] [--timeout <DURATION>]
 ```
 
 The AI-proposal consumer (`architecture.md`): rather than emit static
@@ -481,7 +481,10 @@ logs to a private file (`--verbose` restores the raw stream) and prints the
 plan without editing. The private log lives for the whole run and is named in
 any failure, so a failed advisor still leaves its full output reachable; the
 run's child and heartbeat thread are torn down on every exit path, not only on
-success (`cli/headless.rs`). The prompt makes
+success (`cli/headless.rs`). `--timeout <DURATION>` (e.g. `30s`, `2m`, `500ms`)
+bounds a headless run; when it expires the child is killed and reaped and the
+error names the raw log. It is off by default, so a legitimately long run is not
+cut short. The prompt makes
 the session **investigate autonomously to a conclusion**: it pins down each root
 cause and proposes a concrete fix, rather than handing the analysis back with a
 "which area do you want to start with?". It prioritises work friction over config
