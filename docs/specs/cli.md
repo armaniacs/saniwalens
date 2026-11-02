@@ -556,4 +556,7 @@ section's wiring stays put. The headless run's raw lines render through
 per-harness data as well: the plan carries the renderer the harness seam
 chose (`Harness::run_line_renderer`), and the logged pipe applies it line by
 line, so the loop never names a harness and a new harness's stream needs no
-shell edit.
+shell edit. `deliver` returns `Result<()>`, not a typed outcome: its only caller
+(`optimize`) needs success/failure, and a non-zero exit is already turned into
+an error naming the raw log; a `DeliveryOutcome` is deferred until a consumer
+needs the status or the log. PBI 57 records this decision.
