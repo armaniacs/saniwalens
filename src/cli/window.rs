@@ -59,6 +59,37 @@ pub(crate) struct PairArgs {
     pub(crate) last: Option<String>,
 }
 
+/// The one `--format` declaration for the table/markdown/json views. Flattened
+/// into every view that accepts all three, so the wording cannot drift view by
+/// view and a new view cannot omit the flag.
+#[derive(clap::Args)]
+pub(crate) struct FormatArgs {
+    /// Output format: table | markdown | json.
+    #[arg(long)]
+    pub(crate) format: Option<String>,
+}
+
+impl FormatArgs {
+    pub(crate) fn as_deref(&self) -> Option<&str> {
+        self.format.as_deref()
+    }
+}
+
+/// Doctor's narrower `--format`: its human form is its own text layout, not a
+/// table, so it accepts only table or json.
+#[derive(clap::Args)]
+pub(crate) struct DoctorFormatArgs {
+    /// Output format: table (human text) | json (the routed findings).
+    #[arg(long)]
+    pub(crate) format: Option<String>,
+}
+
+impl DoctorFormatArgs {
+    pub(crate) fn as_deref(&self) -> Option<&str> {
+        self.format.as_deref()
+    }
+}
+
 /// The read-path flags every report view shares: read the store as-is
 /// (`--frozen`) or pick the store (`--db`).
 #[derive(clap::Args)]
