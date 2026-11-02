@@ -159,9 +159,9 @@ fn is_history(relative: &Path) -> bool {
 /// extension are part of the contract, so `docs/specs/nested/x.md` and a
 /// non-`.md` lookalike are not current prose.
 fn is_current_prose(relative: &Path) -> bool {
-    if !relative
+    if relative
         .extension()
-        .is_some_and(|extension| extension == OsStr::new("md"))
+        .is_none_or(|extension| extension != OsStr::new("md"))
     {
         return false;
     }
