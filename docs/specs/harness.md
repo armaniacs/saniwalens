@@ -210,7 +210,8 @@ stderr) are dropped rather than replayed, so the resume shows one beat and the
 next one waits a full cadence instead of a back-to-back burst. The phase is not
 anchored to the start, and because the loop only looks after each poll, a
 cadence shorter than the poll is degenerate and beats on the poll, not on the
-cadence.
+cadence. `Beat` rejects a zero cadence or a zero poll at construction, so the
+test seam cannot silently turn into a tight loop or a per-poll beat.
 
 ## Report copy names the harness
 

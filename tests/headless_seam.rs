@@ -165,8 +165,8 @@ fn the_heartbeat_samples_events_and_stops_cleanly() {
     let (handle, beats) = heartbeat::spawn(
         Arc::clone(&stop),
         Arc::clone(&events),
-        Duration::from_millis(1),
-        Duration::from_millis(5),
+        heartbeat::Beat::new(Duration::from_millis(1), Duration::from_millis(5))
+            .expect("the test beat is non-zero"),
     );
     let stop_on_drop = StopOnDrop::new(Arc::clone(&stop), handle);
 
