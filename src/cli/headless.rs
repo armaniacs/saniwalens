@@ -16,7 +16,6 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::Receiver;
 use std::thread::JoinHandle;
-use std::time::Duration;
 
 use anyhow::{Context, Result};
 
@@ -25,24 +24,8 @@ use crate::adapter::opencode::RunEvent;
 use crate::session::Style;
 
 use super::heartbeat;
+pub(crate) use super::heartbeat::Beat;
 use super::{private_temp_path, write_private_file};
-
-/// The beat cadence and stop-poll interval a headless run uses. Defaults to
-/// the production constants; tests shrink both so the beat is observable.
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct Beat {
-    pub(crate) cadence: Duration,
-    pub(crate) poll: Duration,
-}
-
-impl Default for Beat {
-    fn default() -> Self {
-        Self {
-            cadence: heartbeat::CADENCE,
-            poll: heartbeat::POLL,
-        }
-    }
-}
 
 /// One headless run's resources: the private log, the child's stderr handle,
 /// the child itself, and the heartbeat thread. The guard owns all of them, so
@@ -90,12 +73,7 @@ impl HeadlessRun {
         // `heartbeat`.
         let events = Arc::new(AtomicUsize::new(0));
         let stop = Arc::new(AtomicBool::new(false));
-        let (heartbeat, beats) = heartbeat::spawn(
-            Arc::clone(&stop),
-            Arc::clone(&events),
-            beat.cadence,
-            beat.poll,
-        );
+        let (heartbeat, beats) = heartbeat::spawn(Arc::clone(&stop), Arc::clone(&events), beat);
 
         Ok(Self {
             stop,
@@ -260,13 +238,11 @@ fn drive(
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
-    use std::time::Instant;
+    use std::time::{Duration, Instant};
 
     fn fast_beat() -> Beat {
-        Beat {
-            cadence: Duration::from_millis(1),
-            poll: Duration::from_millis(5),
-        }
+        Beat::new(Duration::from_millis(1), Duration::from_millis(5))
+            .expect("the fast test beat is non-zero")
     }
 
     /// The raw log path carried by the failure context. The outermost

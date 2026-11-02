@@ -23,6 +23,34 @@ pub const CADENCE: Duration = Duration::from_secs(30);
 /// How often the thread re-checks the `stop` flag between beats.
 pub const POLL: Duration = Duration::from_millis(500);
 
+/// The beat cadence and stop-poll interval a headless run uses. The fields are
+/// non-zero by construction: a zero cadence would beat once per poll, and a
+/// zero poll would spin, so both are rejected at the seam instead of silently
+/// changing how the run behaves.
+#[derive(Debug, Clone, Copy)]
+pub struct Beat {
+    pub(crate) cadence: Duration,
+    pub(crate) poll: Duration,
+}
+
+impl Beat {
+    pub fn new(cadence: Duration, poll: Duration) -> anyhow::Result<Self> {
+        if cadence.is_zero() {
+            anyhow::bail!("beat cadence must be non-zero (got 0); use a positive Duration");
+        }
+        if poll.is_zero() {
+            anyhow::bail!("beat poll must be non-zero (got 0); use a positive Duration");
+        }
+        Ok(Self { cadence, poll })
+    }
+}
+
+impl Default for Beat {
+    fn default() -> Self {
+        Self::new(CADENCE, POLL).expect("production beat constants are non-zero")
+    }
+}
+
 /// The deadline for the beat after one observed at `elapsed`: one `cadence`
 /// later, counted from the observation rather than from the previous deadline.
 /// A stall therefore costs the slots it swallowed instead of replaying them
@@ -53,23 +81,22 @@ fn take_beat(elapsed: Duration, next: &mut Duration, cadence: Duration) -> bool 
 pub fn spawn(
     stop: Arc<AtomicBool>,
     events: Arc<AtomicUsize>,
-    cadence: Duration,
-    poll: Duration,
+    beat: Beat,
 ) -> (std::thread::JoinHandle<()>, Receiver<(u64, usize)>) {
     let (sender, receiver) = channel();
     let handle = std::thread::spawn(move || {
         let start = Instant::now();
-        let mut next = cadence;
+        let mut next = beat.cadence;
         loop {
             if stop.load(Ordering::Relaxed) {
                 return;
             }
-            std::thread::sleep(poll);
+            std::thread::sleep(beat.poll);
             if stop.load(Ordering::Relaxed) {
                 return;
             }
             let elapsed = start.elapsed();
-            if take_beat(elapsed, &mut next, cadence) {
+            if take_beat(elapsed, &mut next, beat.cadence) {
                 let secs = elapsed.as_secs();
                 let count = events.load(Ordering::Relaxed);
                 eprintln!(
@@ -167,8 +194,8 @@ mod tests {
         let (handle, beats) = spawn(
             Arc::clone(&stop),
             Arc::new(AtomicUsize::new(0)),
-            Duration::from_millis(5),
-            Duration::from_millis(1),
+            Beat::new(Duration::from_millis(5), Duration::from_millis(1))
+                .expect("the test beat is non-zero"),
         );
         assert_eq!(
             beats.recv_timeout(Duration::from_secs(2)),
@@ -176,5 +203,30 @@ mod tests {
             "a stop flag set before the first poll ends the thread without a beat"
         );
         handle.join().unwrap();
+    }
+
+    #[test]
+    fn a_zero_cadence_is_rejected() {
+        let err = Beat::new(Duration::ZERO, POLL).expect_err("zero cadence is not a beat");
+        assert!(
+            err.to_string().contains("cadence"),
+            "the error names the cadence field: {err}"
+        );
+    }
+
+    #[test]
+    fn a_zero_poll_is_rejected() {
+        let err = Beat::new(CADENCE, Duration::ZERO).expect_err("zero poll is not a beat");
+        assert!(
+            err.to_string().contains("poll"),
+            "the error names the poll field: {err}"
+        );
+    }
+
+    #[test]
+    fn the_default_beat_is_the_production_pair() {
+        let beat = Beat::default();
+        assert_eq!(beat.cadence, CADENCE);
+        assert_eq!(beat.poll, POLL);
     }
 }
