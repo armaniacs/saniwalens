@@ -278,8 +278,13 @@ fn in_calendar(epoch: i64) -> bool {
     (CALENDAR_MIN_EPOCH..=CALENDAR_MAX_EPOCH).contains(&epoch)
 }
 
-/// The window's resolved instants as RFC 3339 strings in the given zone:
-/// `(since, until)` — the bounds that exist only.
+/// The window's resolved instants as `%Y-%m-%dT%H:%M:%S%:z` strings — RFC 3339
+/// with the offset — in the given zone: `(since, until)`, the bounds that exist
+/// only. At the calendar's own ends the rendered wall clock sits at most one
+/// zone width (less than a day) outside the calendar while the instant it names
+/// stays exact, and the spelled-out date is at most one day outside (RFC 3339
+/// names years 0000..=9999 only); the render is pinned there rather than
+/// refused.
 pub fn bounds(range: TimeRange, tz_offset_secs: i32) -> (Option<String>, Option<String>) {
     let tz = FixedOffset::east_opt(tz_offset_secs).expect("valid tz offset");
     let instant = |epoch: i64| {
@@ -289,10 +294,14 @@ pub fn bounds(range: TimeRange, tz_offset_secs: i32) -> (Option<String>, Option<
         // calendar or for an ambiguous local time, and a fixed offset cannot
         // have one. There is no unrenderable instant to fall back on — the
         // empty-string branch is gone, so an out-of-calendar bound cannot be
-        // silently absorbed here.
+        // silently absorbed here. The instant is in-calendar, but the wall
+        // clock it renders at a calendar end can leave the calendar by up to one
+        // zone width (under a day), so the spelled-out date by up to one day:
+        // that presentation spill is pinned by the tests (`mod tests`), never
+        // absorbed.
         tz.timestamp_opt(epoch, 0)
             .single()
-            .expect("an in-calendar instant renders in any valid offset")
+            .expect("TimeRange holds an in-calendar epoch: resolve validates both ends")
             .format("%Y-%m-%dT%H:%M:%S%:z")
             .to_string()
     };
@@ -318,8 +327,12 @@ pub fn display(range: TimeRange, tz_offset_secs: i32) -> String {
 mod tests {
     use super::*;
     use crate::core::bucket::JST_OFFSET_SECS;
+    use chrono::{DateTime, Datelike};
 
     const NOW: i64 = 1_000_000;
+    /// The west offset (`-08:00`) the date path's ceiling check exists for: its
+    /// sign is what can push a named day's last second past the calendar.
+    const WEST_8H: i32 = -28_800;
 
     fn resolve(
         since: Option<&str>,
@@ -769,7 +782,6 @@ mod tests {
         // The day end under a west offset: the conversion keeps NaiveDate::MAX's
         // midnight inside the calendar, but the +86,399 after it leaves the
         // ceiling — refused with the empty-window error naming `--until`.
-        const WEST_8H: i32 = -28_800;
         let err = super::resolve(None, Some("+262142-12-31"), None, 0, WEST_8H).unwrap_err();
         assert!(err.contains("empty window: --until +262142-12-31"), "{err}");
         assert!(
@@ -797,23 +809,168 @@ mod tests {
         assert!(in_calendar(range.start.expect("the start resolves")));
     }
 
+    /// The offset a bound ends with. `%:z` renders hours and minutes, never
+    /// seconds, and rounds a seconds remainder to the nearest minute — which is
+    /// why the `--tz` domain is minute-granular (`docs/specs/cli.md`, Time
+    /// bucketing).
+    fn offset_suffix(zone: i32) -> String {
+        debug_assert_eq!(zone % 60, 0, "the swept zones are minute-granular");
+        let sign = if zone < 0 { '-' } else { '+' };
+        // `%:z` rounds a seconds remainder to the nearest minute, so the total
+        // minutes are rounded before they are split into hours and minutes.
+        let total = (zone.abs() + 30) / 60;
+        format!("{sign}{:02}:{:02}", total / 60, total % 60)
+    }
+
+    /// Whether RFC 3339 can name the local wall clock's year: `date-fullyear`
+    /// is four digits, 0000..=9999. The calendar's own edge years (-262143 and
+    /// +262142) are outside it, so those renders are checked through the naive
+    /// wall clock instead.
+    fn rfc3339_names_year(local: i64) -> bool {
+        DateTime::from_timestamp(local, 0).is_some_and(|wall| (0..=9999).contains(&wall.year()))
+    }
+
+    /// The bytes a presentation spill must render. The wall clock is
+    /// `epoch + zone`, and a spill is an in-calendar instant within one zone
+    /// width of a calendar end, so its local date is exactly one day past
+    /// `NaiveDate::MAX` (east offset) or one day before `NaiveDate::MIN` (west
+    /// offset). Built from those edge dates and the wall-clock time of day
+    /// rather than from the renderer, so a chrono format change shows up as a
+    /// diff instead of moving both sides together.
+    fn presentation_spill(epoch: i64, zone: i32) -> String {
+        debug_assert!(zone != 0, "a zero offset cannot spill past the calendar");
+        debug_assert!(
+            zone.unsigned_abs() < 86_400,
+            "a spill is at most one zone width past an end"
+        );
+        let local = epoch + i64::from(zone);
+        let date = if zone > 0 {
+            "+262143-01-01" // the day after NaiveDate::MAX
+        } else {
+            "-262144-12-31" // the day before NaiveDate::MIN
+        };
+        let secs = local.rem_euclid(86_400);
+        format!(
+            "{date}T{:02}:{:02}:{:02}{}",
+            secs / 3_600,
+            secs % 3_600 / 60,
+            secs % 60,
+            offset_suffix(zone)
+        )
+    }
+
+    /// The oracle every drawn bound is checked against: it names the instant it
+    /// was drawn for, not merely a non-empty string with the requested offset.
+    /// An in-calendar render round-trips — through RFC 3339 when the local year
+    /// is one RFC 3339 can name, through the naive wall clock at the calendar's
+    /// edge years. A render whose wall clock leaves the calendar names a local
+    /// date that does not exist: that is the presentation spill, pinned byte
+    /// for byte.
+    fn assert_bound_names_the_instant(name: &str, side: &str, epoch: i64, zone: i32, bound: &str) {
+        let local = epoch + i64::from(zone);
+        if !in_calendar(local) {
+            assert_eq!(
+                presentation_spill(epoch, zone),
+                bound,
+                "the presentation spill changed for {name} {side}"
+            );
+            return;
+        }
+        if rfc3339_names_year(local) {
+            let parsed = DateTime::parse_from_rfc3339(bound)
+                .unwrap_or_else(|e| panic!("{name} {side} is not RFC 3339: {bound} ({e})"));
+            assert_eq!(
+                parsed.timestamp(),
+                epoch,
+                "the bound names another instant for {name} {side}: {bound}"
+            );
+        } else {
+            let suffix = offset_suffix(zone);
+            let wall = bound
+                .strip_suffix(&suffix)
+                .unwrap_or_else(|| panic!("the offset is missing for {name} {side}: {bound}"));
+            let naive = NaiveDateTime::parse_from_str(wall, "%Y-%m-%dT%H:%M:%S")
+                .unwrap_or_else(|e| panic!("{name} {side} is not a wall clock: {bound} ({e})"));
+            assert_eq!(
+                naive.and_utc().timestamp(),
+                local,
+                "the bound names another wall clock for {name} {side}: {bound}"
+            );
+        }
+    }
+
     #[test]
-    fn every_accepted_window_renders_non_empty_bounds() {
+    fn the_presentation_spill_at_a_calendar_end_is_pinned_byte_for_byte() {
+        // The calendar's floor and ceiling are instants the resolve entry
+        // accepts, but a non-zero presentation zone pushes the rendered local
+        // date one day outside the calendar, where `NaiveDate` has no date to
+        // name. The instant stays exact and no real clock reaches these years,
+        // so the render is a documented limit rather than a refused window: the
+        // bytes are pinned so a chrono change in the extended-year format or in
+        // the offset rendering shows up as a diff.
+        const CAL_MIN: i64 = -8_334_601_228_800;
+        const CAL_MAX: i64 = 8_210_266_876_799;
+        let (_, ceiling) = bounds(
+            TimeRange {
+                start: None,
+                end: Some(CAL_MAX),
+            },
+            JST_OFFSET_SECS,
+        );
+        assert_eq!(
+            ceiling.as_deref(),
+            Some("+262143-01-01T08:59:59+09:00"),
+            "the JST spill past the calendar's ceiling changed"
+        );
+        let (floor, _) = bounds(
+            TimeRange {
+                start: Some(CAL_MIN),
+                end: None,
+            },
+            WEST_8H,
+        );
+        assert_eq!(
+            floor.as_deref(),
+            Some("-262144-12-31T16:00:00-08:00"),
+            "the west spill below the calendar's floor changed"
+        );
+    }
+
+    #[test]
+    fn every_accepted_window_renders_bounds_that_name_their_instant() {
         // The disclosure line and the JSON window must never carry an empty
-        // since/until: out-of-calendar input is refused at the resolve entry
-        // and at the pair's derived previous, so anything accepted renders
-        // as a date that exists. Swept with the clock injected at both
-        // calendar ends — where the UTC bound meets the +09:00 presentation,
-        // the edge a render-only spill would show at — every rendered bound
-        // carries its offset. The date path is swept too, in both zones the
-        // pure transform must survive: the JST presentation zone every caller
-        // passes today, and a west offset — the declared `--tz` zone (Time
-        // bucketing), unwired today — whose sign is what can push the day
-        // end past the calendar's ceiling.
+        // since/until, and each bound must name the instant it was drawn for:
+        // out-of-calendar input is refused at the resolve entry and at the
+        // pair's derived previous, so anything accepted is in-calendar, and
+        // the sweep checks what that means instead of only that the string is
+        // non-empty with the requested offset. Clocks are injected at both
+        // calendar ends — where the UTC bound meets the presentation zone, the
+        // edge a render-only spill shows at — and the date path is swept over
+        // the representative zones below. The renderer has no `Result`: a bound
+        // is either the instant it was drawn for, or (within one zone width of
+        // a calendar end) the pinned presentation spill.
         const CAL_MIN: i64 = -8_334_601_228_800;
         const CAL_MAX: i64 = 8_210_266_876_799;
         let clocks = [CAL_MIN, CAL_MIN + 2 * 86_400, NOW, CAL_MAX];
-        let zones = [JST_OFFSET_SECS, -28_800];
+        // Ten representative zones: JST (the presentation zone every caller
+        // passes today, which is the +32,400 point), the west offset whose sign
+        // can push the day end past the ceiling, UTC, the smallest east/west
+        // minute, a minute remainder on both sides, -09:00, and the domain's
+        // ends. `%:z` rounds to the nearest minute, so a finer grid asserts
+        // nothing this one cannot; the whole minute-granularity domain is swept
+        // in its own test below.
+        let zones = [
+            JST_OFFSET_SECS, // +09:00 — the presentation zone every caller passes
+            WEST_8H,         // -08:00 — the offset the day-end check exists for
+            0,               // UTC
+            60,              // +00:01 — the smallest east minute
+            -60,             // -00:01 — the smallest west minute
+            5_400,           // +01:30 — a minute remainder
+            -5_400,          // -01:30
+            -32_400,         // -09:00 — the day-length offset the other way
+            86_340,          // +23:59 — the domain's east end
+            -86_340,         // -23:59 — the domain's west end
+        ];
         let spans = [
             "1h",
             "7d",
@@ -833,30 +990,26 @@ mod tests {
         ];
         let check = |name: &str, zone: i32, range: TimeRange| {
             let (since, until) = bounds(range, zone);
-            let suffix = if zone >= 0 {
-                format!("+{:02}:00", zone / 3_600)
-            } else {
-                format!("-{:02}:00", -zone / 3_600)
-            };
-            // No None-skip: each side is asserted in both directions — a
-            // drawn bound renders (never empty, offset carried), an undrawn
+            let suffix = offset_suffix(zone);
+            // No None-skip: each side is asserted in both directions — a drawn
+            // bound names its instant (never empty, offset carried), an undrawn
             // one renders nothing.
-            for (side, drawn, bound) in [
-                ("since", range.start.is_some(), since),
-                ("until", range.end.is_some(), until),
-            ] {
-                if drawn {
-                    let bound = bound.expect("a drawn bound renders");
-                    assert!(!bound.is_empty(), "empty {side} for {name}");
-                    assert!(
-                        bound.ends_with(&suffix),
-                        "the offset is missing for {name}: {bound}"
-                    );
-                } else {
-                    assert!(
+            for (side, epoch, bound) in [("since", range.start, since), ("until", range.end, until)]
+            {
+                match epoch {
+                    Some(epoch) => {
+                        let bound = bound.expect("a drawn bound renders");
+                        assert!(!bound.is_empty(), "empty {side} for {name}");
+                        assert!(
+                            bound.ends_with(&suffix),
+                            "the offset is missing for {name}: {bound}"
+                        );
+                        assert_bound_names_the_instant(name, side, epoch, zone, &bound);
+                    }
+                    None => assert!(
                         bound.is_none(),
                         "an undrawn {side} rendered for {name}: {bound:?}"
-                    );
+                    ),
                 }
             }
         };
@@ -876,8 +1029,8 @@ mod tests {
             }
             for zone in zones {
                 for date in dates {
-                    // The named-day window the date path builds: one flag at
-                    // a time, both zones.
+                    // The named-day window the date path builds: one flag at a
+                    // time, every representative zone.
                     match super::resolve(Some(date), None, None, now, zone) {
                         Ok(range) => check(&format!("--since {date}"), zone, range),
                         Err(err) => assert!(err.contains("--since"), "{err}"),
@@ -901,5 +1054,48 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn every_minute_granular_offset_renders_the_calendar_ends() {
+        // The `--tz` domain is minute-granular: -86,340..=86,340 seconds in
+        // 60-second steps, 2,879 offsets (`docs/specs/cli.md`, Time
+        // bucketing). `bounds` is called directly at the calendar's four ends
+        // for every one of them: the renderer must not panic, the bound must be
+        // non-empty, and it must name its instant — or, within one zone width
+        // of an end, the pinned presentation spill. The seconds-granularity
+        // domain (172,799 offsets) is deliberately not swept: `%:z` rounds to
+        // the nearest minute, so it reaches no render this grid does not, at
+        // ~48 s.
+        const CAL_MIN: i64 = -8_334_601_228_800;
+        const CAL_MAX: i64 = 8_210_266_876_799;
+        let ends = [CAL_MIN, CAL_MIN + 32_400, CAL_MAX - 32_400, CAL_MAX];
+        let mut bounds_checked = 0usize;
+        for minutes in -1_439..=1_439 {
+            let zone = minutes * 60;
+            for epoch in ends {
+                let range = TimeRange {
+                    start: Some(epoch),
+                    end: Some(epoch),
+                };
+                let (since, until) = bounds(range, zone);
+                for (side, bound) in [("since", since), ("until", until)] {
+                    let bound = bound.expect("a calendar-end instant renders");
+                    assert!(
+                        !bound.is_empty(),
+                        "empty {side} at epoch {epoch}, zone {zone}"
+                    );
+                    assert_bound_names_the_instant(
+                        &format!("calendar end epoch {epoch} zone {zone}"),
+                        side,
+                        epoch,
+                        zone,
+                        &bound,
+                    );
+                    bounds_checked += 1;
+                }
+            }
+        }
+        assert_eq!(bounds_checked, 2 * 4 * 2_879);
     }
 }

@@ -98,7 +98,7 @@ flowchart TD
 | **adapter** | The raw shapes of *both* inputs: transcript JSONL (record types, field names, `subagents/` layout) and config files (skill/rule frontmatter, `settings.json`, MCP schemas, `CLAUDE.md`). Maps them into the internal domain model. | The SQLite schema; how costs are computed. |
 | **core** | Event extraction, static-cost weighing inputs, the catalog×usage join, the trend view's two-window joins, the briefing's findings assembly (`core::findings`), and aggregation ― all **pure functions** over the domain model; a function that only shapes rows already fetched from the store is core's wherever it is called from today (the placement rule below). No I/O, no clock, no DB. | Claude Code field names or config path conventions; SQL. |
 | **store** | Persisting and querying `sessions` / `surfaces` / `events` in SQLite. | Raw input shapes. |
-| **report** | Turning query results into tables / Markdown and ranking wedges. In `src/`: `cli/mod.rs` (the shell, every view except trend, and the public CLI API), `cli/trend.rs` (the trend view and the one typed payload both its table and its JSON derive from), `cli/window.rs` (the windowed flag surface every view shares: the period flags declared once as clap args groups and the one windowed session-open dispatch the report arms resolve through), `cli/report.rs` (format, renderer, framing). A new view becomes one file under `cli/views/`, created when the next view lands; views never re-grow a shared file. The view-landing rule below makes that a per-PR obligation, not a remembered intention. | Raw input shapes; SQL beyond the store's API. |
+| **report** | Turning query results into tables / Markdown and ranking wedges. In `src/`: `cli/mod.rs` (the shell, every view except trend, and the public CLI API), `cli/trend.rs` (the trend view and the one typed payload both its table and its JSON derive from), `cli/window.rs` (the windowed flag surface every view shares: the period flags declared once as clap args groups, the `--format` values each view accepts, and the windowed session-open dispatch the report arms resolve through ― `open` for the views without `--scope`, `open_scoped` for the scoped ones, `open_scoped_table_json` for doctor's narrower `--format`, `open_pair` for trend), `cli/headless.rs` (the headless advisor run: the logged pipe and the one guard owning the child and the heartbeat for the run's lifetime), `cli/report.rs` (format, renderer, framing). A new view becomes one file under `cli/views/`, created when the next view lands; views never re-grow a shared file. The view-landing rule below makes that a per-PR obligation, not a remembered intention. | Raw input shapes; SQL beyond the store's API. |
 
 ### The view-landing rule (per PR)
 
@@ -143,8 +143,19 @@ values, no SQLite ― is core's wherever it is called from today
   `store.rs` fires the same obligation in the PR that lands it.
 - The trigger is grep-able, not a parser: the rule enumerates the symbols, and
   `tests/pure_join_placement.rs` fails when the enumeration and `store.rs`
-  drift apart. When the move lands, the core row above, the rule's
-  enumeration, and the ledger's deferral note move with it in the same PR.
+  drift apart. When the move lands, the core row above, the rule's enumeration,
+  the ledger's deferral note, and the tripwire's own move side all change in
+  the same PR.
+
+When the move lands, four points land in one PR: the core row above, the
+rule's enumeration, the ledger's deferral note, and the tripwire itself. The
+tripwire's direction flips with the move ― its move-side test stops asserting
+that the definitions still sit in `src/store.rs` and starts asserting that they
+sit in core and no longer in the store, while the constant keeps every entry.
+The flip is not a follow-up: an emptied array makes both sides of the tripwire
+pass vacuously, and a tombstone comment satisfies a raw `contains`.
+Retiring the tripwire instead rewrites the two prose anchors that name it (the
+rule and this section) in the same PR.
 
 The contract between adapter and everything else is the **internal domain
 model** ― tool-centric names stable across Claude Code releases. Renaming an

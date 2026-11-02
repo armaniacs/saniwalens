@@ -159,7 +159,10 @@ the plan) on stdout, one-line tool markers on stderr ― while every raw line
 and the child's stderr go to a private (`0600`) log file whose path is
 printed up front. Rendering is lenient (the upstream event shapes are
 unversioned): a line with no recognizable text stays in the log, and a run
-that renders nothing readable says so instead of leaving silence.
+that renders nothing readable says so instead of leaving silence. Every exit
+from the run ― success, a failed read, a failed spawn, or a failed wait ―
+stops the beat and reaps the child; a failure is reported with the raw log's
+path so the full output is still reachable (`cli/headless.rs`).
 `--verbose` inherits stdio for the raw streaming instead.
 
 Under kilocode the briefing composes from the store either way, so `--print`
@@ -181,14 +184,33 @@ contract the analyze seam keeps (`Harness::analyze`).
 The headless raw stream renders through per-harness data on the seam too:
 `Harness::run_line_renderer` (`adapter::harness`) returns the adapter fn that
 turns one raw line into a `RunEvent` beside the launch shape, and the
-delivery plan carries it to `run_headless`, so the shell's logged loop
+delivery plan carries it to `run_headless`, so the `cli/headless.rs` logged loop
 receives the seam's choice instead of naming a module. Rendering stays lenient
 either way (the upstream event shapes are unversioned). Claude's launch opens
 interactively, so it has no headless renderer; kilo is an OpenCode fork and
 shares the event stream, so a headless kilo run is the same arm ― still gated
 on `--auto` by the launch shape above. The quiet-stretch logic the loop leans
-on lives in one place too (`heartbeat`, `cli/heartbeat.rs`), so the beat
-cadence and the stop handling are pinned by a test, not by the spawn.
+on lives in one place too (`heartbeat`, `cli/heartbeat.rs`), so the due
+decision is a pure function and the beat model in its tests drives the same
+decision as the spawn. What the seam's test pins is the sample sequence and
+the stop, not the spacing: a beat carries the count it reads when it fires (0
+before any event streams, then the count at that moment), and after `stop`
+flips the thread exits and the receiver disconnects. The wall-clock spacing
+between emitted beats is not observed by a test (the pure decision's spacing
+is pinned by `cli::heartbeat` unit tests). At most one beat is sent between
+the flag being set and the second stop check observing it: a structural
+invariant of the loop's two checks, not an observed quantity ― a beat queued
+before the stop is indistinguishable from one sent after it.
+`CADENCE` (30s) is the minimum scheduled spacing between beats and `POLL` (500ms) is how
+often the thread wakes to re-check `stop` and to see whether the next beat is
+due. A beat fires when the observed elapsed time reaches its deadline, and the
+following deadline is then counted one cadence from that observation, not from
+the old deadline: the slots a stall swallowed (a process freeze, a blocked
+stderr) are dropped rather than replayed, so the resume shows one beat and the
+next one waits a full cadence instead of a back-to-back burst. The phase is not
+anchored to the start, and because the loop only looks after each poll, a
+cadence shorter than the poll is degenerate and beats on the poll, not on the
+cadence.
 
 ## Report copy names the harness
 

@@ -5,37 +5,28 @@
 //! status or the streams: here the binary's own stdio is real, and the
 //! paths it would touch are synthetic.
 
-use std::path::PathBuf;
+mod common;
 
-/// A per-test scratch dir, cleaned up afterwards — synthetic only. The
-/// `.claude/projects` dir is created empty so the read paths' auto-analyze
-/// walks a synthetic tree instead of erroring on a missing one.
-fn scratch_dir(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!(
-        "saniwalens-period-errors-{}-{name}",
-        std::process::id()
-    ));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(dir.join(".claude").join("projects")).unwrap();
-    dir
-}
+use common::ScratchDir;
 
 /// Run the binary on a synthetic home and a scratch db, and return the raw
 /// output. The period parse fails before the session opens, so no store is
 /// needed — the paths it would touch are synthetic either way.
 fn run(name: &str, args: &[&str]) -> std::process::Output {
-    let dir = scratch_dir(name);
-    let out = std::process::Command::new(env!("CARGO_BIN_EXE_saniwalens"))
+    // Synthetic only. The `.claude/projects` dir is created empty so the read
+    // paths' auto-analyze walks a synthetic tree instead of erroring on a
+    // missing one.
+    let dir = ScratchDir::new("saniwalens-period-errors", name);
+    std::fs::create_dir_all(dir.join(".claude").join("projects")).unwrap();
+    std::process::Command::new(env!("CARGO_BIN_EXE_saniwalens"))
         .args(args)
         .arg("--db")
         .arg(dir.join("store.db"))
-        .env("HOME", &dir)
+        .env("HOME", &*dir)
         .env("CLAUDE_CONFIG_DIR", dir.join(".claude"))
         .env("XDG_STATE_HOME", dir.join("state"))
         .output()
-        .expect("the binary runs");
-    let _ = std::fs::remove_dir_all(&dir);
-    out
+        .expect("the binary runs")
 }
 
 #[test]

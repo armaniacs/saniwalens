@@ -50,9 +50,16 @@ documents:
   you just renamed or removed.
 - **Prose references**: renaming or moving a file dangles every prose path
   that named it, in src doc comments, `docs/specs/`, `.claude/rules/`, README,
-  and AGENTS. Backticked `.rs` anchors in the current prose fail the reference
-  gate (`tests/prose_reference_gate.rs`) mechanically; doc comments and
-  non-path prose are invisible to it and still need the grep.
+  and AGENTS. The gate (`tests/prose_reference_gate.rs`) scans the current
+  prose only ― `docs/specs/*.md`, `.claude/rules/*.md`, `README.md`, and
+  `AGENTS.md` ― and its scan-list test classifies every scanned file from
+  root-relative path components, so a checkout path that spells `pbi` or
+  `docs/pr`, a separator, or a lookalike name (`docs/privacy.md`,
+  `pbi-notes.md`, `docs/specs-history/`) cannot move a file between current
+  prose and history. `docs/pr`, `docs/exploration`, `pbi/`, and `CHANGELOG.md`
+  are history and out of scope. Backticked `.rs` anchors in the current prose
+  fail the gate mechanically; doc comments and non-path prose are invisible to
+  it and still need the grep.
 
 ## When the spec does NOT need to change
 

@@ -1,34 +1,28 @@
-//! The nine windowed views' `--help`, end to end through the real binary:
-//! each capture pins the help bytes, so the consolidated windowed flag surface
+//! Every windowed view's `--help`, end to end through the real binary: each
+//! capture pins the help bytes, so the consolidated windowed flag surface
 //! (`cli/window.rs`, one declared args group flattened into every view) cannot
 //! change a wording, drop a conflict, or reorder the option list without
-//! failing here. The diff against the pre-consolidation capture is the PBI's
-//! byte-identity criterion; this pin keeps it mechanical after the fact.
+//! failing here. The set of views is not listed here either — it is derived
+//! from clap's subcommand tree, so a view added to `Command` cannot ship
+//! without its capture. The diff against the pre-consolidation capture is the
+//! PBI's byte-identity criterion; this pin keeps it mechanical after the fact.
 
-/// The nine views the windowed flag surface serves, in capture order.
-const VIEWS: [&str; 9] = [
-    "usage",
-    "trend",
-    "inventory",
-    "waste",
-    "overhead",
-    "prompts",
-    "failures",
-    "stuck",
-    "doctor",
-];
+use clap::CommandFactory;
 
-/// Each view's captured `--help`, in the same order as `VIEWS`.
-const HELP: [&str; 9] = [
-    USAGE_HELP,
-    TREND_HELP,
-    INVENTORY_HELP,
-    WASTE_HELP,
-    OVERHEAD_HELP,
-    PROMPTS_HELP,
-    FAILURES_HELP,
-    STUCK_HELP,
-    DOCTOR_HELP,
+/// One row per windowed view: its name and its captured `--help` bytes. One
+/// row is one item, so a name cannot be added without its capture (the old
+/// two arrays let exactly that through: `zip` stopped at the shorter side
+/// without a word).
+const PINNED: [(&str, &str); 9] = [
+    ("usage", USAGE_HELP),
+    ("trend", TREND_HELP),
+    ("inventory", INVENTORY_HELP),
+    ("waste", WASTE_HELP),
+    ("overhead", OVERHEAD_HELP),
+    ("prompts", PROMPTS_HELP),
+    ("failures", FAILURES_HELP),
+    ("stuck", STUCK_HELP),
+    ("doctor", DOCTOR_HELP),
 ];
 
 /// The captured `usage --help` bytes: the PBI 40 baseline (2026-11-01).
@@ -189,9 +183,140 @@ Options:
   -h, --help               Print help
 "#;
 
+/// The windowed views, derived from the subcommand tree: a subcommand is a
+/// windowed view iff it carries `--last` (the period group's discriminator;
+/// trend's pair declares its own). The tree is the single source of truth — a
+/// view added to `Command` appears here without a list to update.
+/// `Cli::command()` is deliberately not `build()`t: build pushes the `help`
+/// subcommand in, which would land in the partition check below. Keep in sync
+/// with `cli::window::windowed_views()` in `src/cli/window.rs` (the same
+/// derivation, for the conflict and period pins).
+fn windowed_views() -> Vec<String> {
+    saniwalens::cli::Cli::command()
+        .get_subcommands()
+        .filter(|command| {
+            command
+                .get_arguments()
+                .any(|arg| arg.get_long() == Some("last"))
+        })
+        .map(|command| command.get_name().to_string())
+        .collect()
+}
+
+/// The commands `docs/specs/cli.md` (the Period section) declares
+/// whole-history: they take no period flag. Fixed by that contract, so the
+/// partition below can tell a command that is not a view from a view that
+/// carries the shared group.
+const WHOLE_HISTORY: [&str; 3] = ["analyze", "sql", "optimize"];
+
+/// The count the discriminator resolves to today. Beside the set comparison,
+/// this pins the set's size: deleting a view and its capture row together
+/// agrees with itself, but not with the CLI contract the spec states, so the
+/// count forces that change to be deliberate.
+const WINDOWED_VIEW_COUNT: usize = 9;
+
+/// The remedy half of the view-set tripwire's failure message, pinned here so
+/// its wording cannot drift away from what it prescribes.
+const VIEW_SET_REMEDY: &str = "Add one row to `PINNED` in this file for each \
+     missing view, and delete the row of each stale one. See \
+     `.claude/rules/cli-view-addition.md`.";
+
+/// The two ways the capture table and the CLI can disagree: a windowed view
+/// with no capture (`missing`), or a capture for a view the CLI no longer has
+/// (`stale`). `None` when the sets agree, so the message itself is testable
+/// without tripping the tripwire.
+fn view_set_mismatch(derived: &[String], pinned: &[String]) -> Option<String> {
+    let missing: Vec<&str> = derived
+        .iter()
+        .filter(|name| !pinned.contains(name))
+        .map(String::as_str)
+        .collect();
+    let stale: Vec<&str> = pinned
+        .iter()
+        .filter(|name| !derived.contains(name))
+        .map(String::as_str)
+        .collect();
+    (!missing.is_empty() || !stale.is_empty()).then(|| {
+        format!(
+            "the --help captures and the CLI disagree: missing from the hand list: \
+             {missing:?}; stale in the hand list: {stale:?}. {VIEW_SET_REMEDY}"
+        )
+    })
+}
+
 #[test]
-fn the_nine_windowed_views_help_is_pinned_byte_for_byte() {
-    for (view, expected) in VIEWS.iter().zip(HELP.iter()) {
+fn every_windowed_view_has_a_capture_and_the_capture_set_is_complete() {
+    let derived = windowed_views();
+    let pinned: Vec<String> = PINNED.iter().map(|(name, _)| (*name).to_string()).collect();
+    if let Some(message) = view_set_mismatch(&derived, &pinned) {
+        panic!("{message}");
+    }
+    assert_eq!(
+        derived.len(),
+        WINDOWED_VIEW_COUNT,
+        "the windowed view set resolved to {derived:?}, not {WINDOWED_VIEW_COUNT}: adding or \
+         removing a view is a contract change, so update this count and `docs/specs/cli.md` \
+         together, or give the view the shared `--last`. {VIEW_SET_REMEDY}"
+    );
+}
+
+#[test]
+fn the_view_set_mismatch_message_names_missing_stale_and_the_rule() {
+    let derived = vec!["usage".to_string(), "cleanup".to_string()];
+    let pinned = vec!["usage".to_string(), "retired".to_string()];
+    let message = view_set_mismatch(&derived, &pinned).expect("a mismatch reports a message");
+    assert!(
+        message.contains("missing from the hand list"),
+        "the message must name the missing side: {message}"
+    );
+    assert!(
+        message.contains("stale in the hand list"),
+        "the message must name the stale side: {message}"
+    );
+    assert!(
+        message.contains("`.claude/rules/cli-view-addition.md`"),
+        "the message must point at the view-addition rule: {message}"
+    );
+    assert_eq!(
+        view_set_mismatch(&derived, &derived),
+        None,
+        "agreeing sets report nothing"
+    );
+}
+
+#[test]
+fn every_subcommand_is_either_windowed_or_whole_history() {
+    let mut all: Vec<String> = saniwalens::cli::Cli::command()
+        .get_subcommands()
+        .map(|command| command.get_name().to_string())
+        .collect();
+    let mut covered = windowed_views();
+    for command in WHOLE_HISTORY {
+        assert!(
+            !covered.iter().any(|view| view == command),
+            "{command} carries `--last` and is also declared whole-history"
+        );
+        covered.push(command.to_string());
+    }
+    all.sort();
+    covered.sort();
+    // Name the two ways the partition can fail, so the failure itself says
+    // which side to fix: a subcommand no set claims (uncovered), or a name
+    // `WHOLE_HISTORY` lists that the CLI no longer has (stale).
+    let uncovered: Vec<&String> = all.iter().filter(|name| !covered.contains(name)).collect();
+    let stale: Vec<&String> = covered.iter().filter(|name| !all.contains(name)).collect();
+    assert_eq!(
+        covered, all,
+        "the subcommand partition is incomplete: {uncovered:?} is neither windowed (it carries \
+         no `--last`) nor whole-history; {stale:?} is listed but is no longer a subcommand. \
+         Give the command the shared period group, or add it to `WHOLE_HISTORY` in this file. \
+         See `.claude/rules/cli-view-addition.md`."
+    );
+}
+
+#[test]
+fn every_windowed_views_help_is_pinned_byte_for_byte() {
+    for (view, expected) in PINNED {
         let out = std::process::Command::new(env!("CARGO_BIN_EXE_saniwalens"))
             .args([view, "--help"])
             .output()
@@ -203,7 +328,7 @@ fn the_nine_windowed_views_help_is_pinned_byte_for_byte() {
         );
         let actual = String::from_utf8(out.stdout).unwrap();
         assert_eq!(
-            actual, *expected,
+            actual, expected,
             "{view} --help drifted from its capture — actual:\n{actual}"
         );
     }

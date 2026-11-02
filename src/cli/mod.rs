@@ -9,7 +9,6 @@ use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 
 use crate::adapter::harness::{Harness, RunLineRenderer, home_dir};
-use crate::adapter::opencode::RunEvent;
 use crate::core::bucket::{Bucket, JST_OFFSET_SECS, bucket_label};
 use crate::core::findings;
 use crate::core::friction::ErrorCategory;
@@ -28,6 +27,7 @@ use crate::session::{
 };
 use crate::store::{OpenMode, Store};
 
+pub(crate) mod headless;
 pub mod heartbeat;
 pub(crate) mod report;
 pub(crate) mod trend;
@@ -260,10 +260,9 @@ pub fn run() -> Result<()> {
     let resolved = resolve_cli(cli.harness.as_deref(), cli.profile.as_deref(), &env)?;
     let harness = resolved.harness;
     let config_db = resolved.config_db;
-    // The windowed report arms resolve their flags through one dispatch —
-    // scope, format, period, then the store, the order pinned in
-    // `cli/window.rs`, so an invalid flag fails on its own before any store
-    // work (PBI 01's byte-identical error ordering included).
+    // The windowed report arms resolve their flags through `cli/window.rs` —
+    // `open` (no scope) or `open_scoped` (scope, format, period) — so an
+    // invalid flag fails on its own before any store work (PBI 01's order).
     let dispatch = WindowedDispatch {
         harness: &harness,
         config_db: config_db.as_deref(),
@@ -285,7 +284,7 @@ pub fn run() -> Result<()> {
             format,
             read,
         } => {
-            let opened = dispatch.open(None, format.as_deref(), &period, &read, run_analyze)?;
+            let opened = dispatch.open(format.as_deref(), &period, &read, run_analyze)?;
             usage(&opened.sess, by.as_deref(), opened.window, opened.format)
         }
         Command::Trend { pair, format, read } => {
@@ -298,14 +297,15 @@ pub fn run() -> Result<()> {
             format,
             read,
         } => {
-            let opened = dispatch.open(
+            let opened = dispatch.open_scoped(
                 scope.as_deref(),
                 format.as_deref(),
                 &period,
                 &read,
                 run_analyze,
             )?;
-            inventory(&opened.sess, &opened.filter, opened.window, opened.format)
+            let (windowed, filter) = opened.into_parts();
+            inventory(&windowed.sess, &filter, windowed.window, windowed.format)
         }
         Command::Waste {
             scope,
@@ -313,21 +313,22 @@ pub fn run() -> Result<()> {
             format,
             read,
         } => {
-            let opened = dispatch.open(
+            let opened = dispatch.open_scoped(
                 scope.as_deref(),
                 format.as_deref(),
                 &period,
                 &read,
                 run_analyze,
             )?;
-            waste(&opened.sess, &opened.filter, opened.window, opened.format)
+            let (windowed, filter) = opened.into_parts();
+            waste(&windowed.sess, &filter, windowed.window, windowed.format)
         }
         Command::Overhead {
             format,
             period,
             read,
         } => {
-            let opened = dispatch.open(None, format.as_deref(), &period, &read, run_analyze)?;
+            let opened = dispatch.open(format.as_deref(), &period, &read, run_analyze)?;
             overhead(&opened.sess, opened.window, opened.format)
         }
         Command::Prompts {
@@ -335,7 +336,7 @@ pub fn run() -> Result<()> {
             period,
             read,
         } => {
-            let opened = dispatch.open(None, format.as_deref(), &period, &read, run_analyze)?;
+            let opened = dispatch.open(format.as_deref(), &period, &read, run_analyze)?;
             prompts(&opened.sess, opened.window, opened.format)
         }
         Command::Failures {
@@ -344,21 +345,22 @@ pub fn run() -> Result<()> {
             format,
             read,
         } => {
-            let opened = dispatch.open(
+            let opened = dispatch.open_scoped(
                 scope.as_deref(),
                 format.as_deref(),
                 &period,
                 &read,
                 run_analyze,
             )?;
-            failures(&opened.sess, &opened.filter, opened.window, opened.format)
+            let (windowed, filter) = opened.into_parts();
+            failures(&windowed.sess, &filter, windowed.window, windowed.format)
         }
         Command::Stuck {
             format,
             period,
             read,
         } => {
-            let opened = dispatch.open(None, format.as_deref(), &period, &read, run_analyze)?;
+            let opened = dispatch.open(format.as_deref(), &period, &read, run_analyze)?;
             stuck(&opened.sess, opened.window, opened.format)
         }
         Command::Doctor {
@@ -367,14 +369,15 @@ pub fn run() -> Result<()> {
             format,
             read,
         } => {
-            let opened = dispatch.open(
+            let opened = dispatch.open_scoped_table_json(
                 scope.as_deref(),
                 format.as_deref(),
                 &period,
                 &read,
                 run_analyze,
             )?;
-            doctor(&opened.sess, &opened.filter, opened.window, opened.format)
+            let (windowed, filter) = opened.into_parts();
+            doctor(&windowed.sess, &filter, windowed.window, windowed.format)
         }
         Command::Sql { query, format, db } => {
             let fmt = parse_format(format.as_deref())?;
@@ -545,7 +548,7 @@ impl AdvisorLaunch for ProcessAdvisor {
         prompt: &str,
         render: Option<RunLineRenderer>,
     ) -> Result<(std::process::ExitStatus, PathBuf)> {
-        run_headless(binary, leading, prompt, render)
+        headless::run_headless(binary, leading, prompt, render, headless::Beat::default())
     }
 }
 
@@ -576,17 +579,12 @@ pub fn deliver(plan: DeliveryPlan<'_>, advisor: &mut impl AdvisorLaunch) -> Resu
         }
     };
 
-    let launch_note = || {
-        format!(
-            "launch `{} {}` — is {} installed and on PATH?",
-            binary,
-            leading.join(" ").trim_end(),
-            harness_name
-        )
-    };
+    let launch_note = format!(
+        "launch `{binary} {}` — is {harness_name} installed and on PATH?",
+        leading.join(" ").trim_end()
+    );
     // Headless harnesses run piped unless --verbose: the raw stream is logged
-    // to a private file and only the agent's text streams on stdout; verbose
-    // keeps the raw streaming by handing the terminal over.
+    // to a private file; text streams on stdout, verbose keeps the raw stream.
     let (result, run_log) = if mode == DeliveryMode::Headless && !verbose {
         match advisor.headless(binary, leading, &prompt, render) {
             Ok((status, log)) => (Ok(status), Some(log)),
@@ -597,7 +595,12 @@ pub fn deliver(plan: DeliveryPlan<'_>, advisor: &mut impl AdvisorLaunch) -> Resu
     };
     let _ = fs::remove_file(&path);
 
-    let status = result.with_context(launch_note)?;
+    // Headless errors already name the raw log and, for a spawn failure, the
+    // launch hint; the interactive path keeps the launch hint as its context.
+    let status = match (mode, verbose) {
+        (DeliveryMode::Headless, false) => result?,
+        _ => result.with_context(move || launch_note)?,
+    };
     if !status.success() {
         match run_log {
             Some(log) => anyhow::bail!(
@@ -684,98 +687,8 @@ fn optimize(
     Ok(())
 }
 
-/// Run the headless advisor with its raw output logged: spawn with stdout
-/// piped, write every raw line (and the child's stderr) to a private log, and
-/// surface only what the agent says — text parts on stdout (so a pipe like
-/// `| pbcopy` receives the narration and the plan), one-line progress markers
-/// on stderr. The `render_line` is the harness seam's choice
-/// (`Harness::run_line_renderer`), so this loop names no harness. A heartbeat
-/// covers quiet stretches (a long tool call, model thinking) so the run never
-/// looks hung. Returns the log path so the caller can point at the full
-/// detail. The raw event shapes are unversioned upstream, so rendering is
-/// lenient: a line with no recognizable text stays in the log, and a run that
-/// renders nothing readable says so instead of leaving silence.
-fn run_headless(
-    binary: &str,
-    leading: &[&str],
-    prompt: &str,
-    render_line: Option<RunLineRenderer>,
-) -> Result<(std::process::ExitStatus, PathBuf)> {
-    use std::io::{BufRead, Write};
-    use std::sync::Arc;
-    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-
-    let log_path = private_temp_path("saniwalens-run", "log");
-    write_private_file(&log_path, "").context("create run log")?;
-    let mut log = fs::OpenOptions::new()
-        .append(true)
-        .open(&log_path)
-        .context("open run log")?;
-    let child_err = fs::OpenOptions::new()
-        .append(true)
-        .open(&log_path)
-        .context("open run log for the advisor")?;
-
-    eprintln!(
-        "{}",
-        Style::stderr().dim(&format!(
-            "advisor running headlessly — raw progress: {}",
-            log_path.display()
-        ))
-    );
-
-    // A dim beat every 30s while the advisor works, so silence reads as
-    // waiting, not a hang — the quiet-stretch logic lives in `heartbeat`.
-    let events = Arc::new(AtomicUsize::new(0));
-    let stop = Arc::new(AtomicBool::new(false));
-    let (heartbeat, _beats) = heartbeat::spawn(
-        Arc::clone(&stop),
-        Arc::clone(&events),
-        heartbeat::CADENCE,
-        heartbeat::POLL,
-    );
-
-    let mut launch = std::process::Command::new(binary);
-    launch.args(leading).arg(prompt);
-    launch
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::from(child_err));
-    let mut child = launch.spawn()?;
-    let stdout = child.stdout.take().context("pipe the advisor's stdout")?;
-
-    let mut readable = false;
-    for line in std::io::BufReader::new(stdout).lines() {
-        let line = line.context("read the advisor's output")?;
-        events.fetch_add(1, Ordering::Relaxed);
-        writeln!(log, "{line}").context("write the run log")?;
-        match render_line.map_or(RunEvent::Silent, |render| render(&line)) {
-            RunEvent::Text(text) => {
-                readable = true;
-                println!("{text}");
-            }
-            RunEvent::Progress(tool) => {
-                eprintln!("{}", Style::stderr().dim(&format!("  → {tool}")));
-            }
-            RunEvent::Silent => {}
-        }
-    }
-    let status = child.wait()?;
-    stop.store(true, Ordering::Relaxed);
-    heartbeat.join().ok();
-    if status.success() && !readable {
-        eprintln!(
-            "{}",
-            Style::stderr().dim(&format!(
-                "the advisor produced no readable text — full output: {}",
-                log_path.display()
-            ))
-        );
-    }
-    Ok((status, log_path))
-}
-
 /// A fresh private temp path for `prefix`, unique per process and call.
-fn private_temp_path(prefix: &str, ext: &str) -> PathBuf {
+pub(crate) fn private_temp_path(prefix: &str, ext: &str) -> PathBuf {
     // The clock is here to avoid a collision with a leftover file, not to be
     // unguessable — exclusive creation is what makes guessing the name useless.
     let nanos = std::time::SystemTime::now()
@@ -806,7 +719,7 @@ fn write_private_tempfile(contents: &str) -> Result<PathBuf> {
 /// users out, so the guarantee there rests on the directory rather than the
 /// file. Setting an explicit ACL would mean a new dependency for a second lock
 /// on a door that is already locked.
-fn write_private_file(path: &Path, contents: &str) -> Result<()> {
+pub(crate) fn write_private_file(path: &Path, contents: &str) -> Result<()> {
     use std::io::Write;
 
     let mut opts = fs::OpenOptions::new();
@@ -927,9 +840,6 @@ fn sql(sess: &Session, query: Option<&str>, format: Format) -> Result<()> {
 /// then each project's own findings ("optimize my global setup" and "optimize
 /// this project" are different tasks). `--scope` narrows to one layer.
 fn doctor(sess: &Session, filter: &ScopeFilter, window: TimeRange, format: Format) -> Result<()> {
-    if format == Format::Markdown {
-        anyhow::bail!("summary has no markdown form — use the default text or --format json");
-    }
     let store = &sess.store;
     eprint_window(window);
     let f = collect_findings(store, window)?;
@@ -2998,21 +2908,10 @@ mod tests {
 
     #[test]
     fn the_period_flags_parse_on_every_report_view() {
-        // The flags exist on all nine views and nothing else.
-        let views = [
-            vec!["usage"],
-            vec!["trend"],
-            vec!["inventory"],
-            vec!["waste"],
-            vec!["overhead"],
-            vec!["prompts"],
-            vec!["failures"],
-            vec!["stuck"],
-            vec!["doctor"],
-        ];
-        for view in views {
-            let mut argv = vec!["saniwalens"];
-            argv.extend(view.iter().copied());
+        // The flags exist on every windowed view (derived from clap's
+        // subcommand tree, not listed here) and nothing else.
+        for view in windowed_views() {
+            let mut argv = vec!["saniwalens", view.as_str()];
             argv.extend(["--since", "2026-10-01", "--until", "2026-10-07"]);
             Cli::try_parse_from(argv).expect("the view takes the period flags");
         }
