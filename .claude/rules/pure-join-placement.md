@@ -31,23 +31,24 @@ The house style is the opposite: `core/findings.rs` takes a store-free
   query→join window split
   (`two_window_aggregation_splits_events_between_the_windows`): which window a
   boundary event lands in is storage behavior, not join logic.
-- **The 2nd SQLite-free function that appears in `src/store.rs` is the
-  trigger**: the PBI that lands it also moves the accumulated joins to core in
-  the same PR. The move also rides the next trend metric/view landing PR ―
-  whichever fires first (the deferral note in
-  `pbi/2026-10-30-00-backlog.md`). Landing the move without the contract
-  updates below, or parking the move behind a separate cleanup, both lose the
-  trigger; the tripwire exists so neither can happen quietly.
-- When the move lands, the same PR carries four points: this rule's
-  enumeration below, the core row of the layer table
-  (`docs/specs/architecture.md`), the ledger's deferral note
-  (`pbi/2026-10-30-00-backlog.md`), and `tests/pure_join_placement.rs` itself,
-  whose move-side test flips from "the definitions sit in `src/store.rs`" to
-  "they sit in core and no longer in the store". Emptying the constant,
-  dropping an entry, or satisfying it with a tombstone comment is not a
-  landing: an empty array makes both sides of the tripwire pass vacuously, and
-  `contains` reads comments as text. Retiring the file instead is allowed only
-  by rewriting the two prose anchors that name it (this rule and the
+- **Two triggers arm a move**: trigger 1 is a trend metric/view landing; it
+  fired at PBI 46 (`1ecda2a` / `3b4349f`) and is spent. Trigger 2 is the next
+  SQLite-free function that appears in `src/store.rs`; the PBI that lands it
+  also moves it (and anything else that slipped in) to core in the same PR.
+  PBI 61 (2026-11-02) landed after trigger 1 was missed: it is a follow-up
+  remediation, not a co-landing, and no accumulation remains. Landing a join
+  without the contract updates below, or parking the move behind a separate
+  cleanup, both lose the trigger; the tripwire exists so neither can happen
+  quietly.
+- The four points that accompany a move: this rule's enumeration below, the
+  core row of the layer table (`docs/specs/architecture.md`), the ledger's
+  deferral note (`pbi/2026-10-30-00-backlog.md`), and
+  `tests/pure_join_placement.rs` itself, whose move-side test now asserts that
+  the definitions sit in core and no longer in the store. Emptying the
+  constant, dropping an entry, or satisfying it with a tombstone comment is not
+  a landing: an empty array makes both sides of the tripwire pass vacuously,
+  and `contains` reads comments as text. Retiring the file instead is allowed
+  only by rewriting the two prose anchors that name it (this rule and the
   architecture paragraph) in the same PR.
 
 ## The trigger, judged: a grep-able contract, not a parser
@@ -55,14 +56,15 @@ The house style is the opposite: `core/findings.rs` takes a store-free
 The trigger must be findable by grep, so the contract enumerates its symbols:
 
 - The 1st pattern, named: `skill_deltas`, `TwoWindow`, `SkillDelta`,
-  `TrendWindowAggregates` ― all in `src/store.rs` today, reached from
-  `cli/trend.rs`.
-- `grep -n "skill_deltas\|TrendWindowAggregates" src/store.rs` finds the 1st
-  pattern, and this rule's `paths:` frontmatter loads the file when `store.rs`
-  or core is edited, so the write side sees the demand too.
+  `TrendWindowAggregates`, `kind_pairs` ― all in `src/core/trend.rs` now,
+  reached from `cli/trend.rs`; `kind_pairs` was the fifth join, left in the
+  view until the move enumerated it.
+- `grep -n "skill_deltas\|TrendWindowAggregates" src/core/trend.rs` finds the
+  1st pattern, and this rule's `paths:` frontmatter loads the file when
+  `store.rs` or core is edited, so the write side sees the demand too.
 - `tests/pure_join_placement.rs` is the light tripwire: it fails when this
-  rule stops naming the symbols, or when the symbols' definitions leave
-  `src/store.rs` before the move lands with its contract updates.
+  rule stops naming the symbols, or when the symbols' definitions leave core
+  or re-enter `src/store.rs` without the contract updates.
 
 Judged over the alternative: a tripwire that classifies a function as
 "SQLite-free" by parsing `store.rs` needs a Rust AST to be sound, and a

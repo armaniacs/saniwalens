@@ -9,8 +9,8 @@ use anyhow::Result;
 
 use crate::core::bucket::JST_OFFSET_SECS;
 use crate::core::period::{self, WindowPair};
+use crate::core::trend::{TrendWindowAggregates, TwoWindow, kind_pairs, skill_deltas};
 use crate::session::{Session, Style};
-use crate::store::{KindRollup, TrendWindowAggregates, TwoWindow, skill_deltas};
 
 use super::{Align, Format, emit_json, framed, note, preamble, render};
 
@@ -412,29 +412,6 @@ pub(crate) fn trend_payload(
             int_judge,
         ),
     }
-}
-
-/// The two windows' per-kind rollups paired by kind — a kind present in only
-/// one window keeps None on the other side. The pair's presence is what the
-/// payload's judgment reads: a kind present in the previous window is a
-/// baseline (its events, output tokens and duration are measurements, zero
-/// included), and only an absent kind is 比較不能. Sorted by kind, the
-/// aggregation's own order.
-fn kind_pairs(
-    agg: &TwoWindow<TrendWindowAggregates>,
-) -> Vec<(String, Option<KindRollup>, Option<KindRollup>)> {
-    let mut pairs: std::collections::BTreeMap<String, (Option<KindRollup>, Option<KindRollup>)> =
-        std::collections::BTreeMap::new();
-    for rollup in &agg.current.by_kind {
-        pairs.entry(rollup.kind.clone()).or_default().0 = Some(rollup.clone());
-    }
-    for rollup in &agg.previous.by_kind {
-        pairs.entry(rollup.kind.clone()).or_default().1 = Some(rollup.clone());
-    }
-    pairs
-        .into_iter()
-        .map(|(kind, (current, previous))| (kind, current, previous))
-        .collect()
 }
 
 /// A float rounded to the display's precision — the same rounding the

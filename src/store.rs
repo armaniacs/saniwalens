@@ -16,6 +16,7 @@ use crate::core::span::{SessionStart, Source, Span};
 use crate::core::subagent::SubagentRun;
 use crate::core::surface::Surface;
 use crate::core::thrash::FileEdit;
+use crate::core::trend::{KindRollup, SkillUsage, TrendWindowAggregates, TwoWindow};
 use crate::core::usage::UsageEvent;
 
 const SCHEMA: &str = "
@@ -311,88 +312,6 @@ pub struct SessionMeta {
     /// `session_start` event so `overhead` can distinguish "no observation" from
     /// a fabricated zero.
     pub start: Option<SessionStart>,
-}
-
-/// One row of the per-skill usage rollup. Subagent cost is deliberately not
-/// rolled up per skill: under the flat-span model a skill's window can absorb
-/// subagents spawned by later same-window work, so a per-skill figure
-/// over-counts for skills that do not themselves spawn agents. The exact figure
-/// is the session-level total (`subagent_totals`). See `docs/specs/events.md`.
-#[derive(Debug, PartialEq, serde::Serialize)]
-pub struct SkillUsage {
-    pub skill: String,
-    pub invocations: i64,
-    pub out_tokens: i64,
-    pub ctx_growth: i64,
-    pub duration_sec: f64,
-}
-
-/// One row of the trend view's per-kind event rollup: how many events of the
-/// kind ran in a window, and the output tokens / wall-clock they cost.
-#[derive(Debug, Clone, PartialEq, serde::Serialize)]
-pub struct KindRollup {
-    pub kind: String,
-    pub events: i64,
-    pub out_tokens: i64,
-    pub duration_sec: f64,
-}
-
-/// One aggregate computed for both windows of a comparison.
-#[derive(Debug, Clone, PartialEq)]
-pub struct TwoWindow<T> {
-    pub current: T,
-    pub previous: T,
-}
-
-/// The trend view's aggregates for one window: the per-kind event rollup, the
-/// per-skill usage, the session count, and the subagent runs/tokens total.
-#[derive(Debug, PartialEq)]
-pub struct TrendWindowAggregates {
-    pub by_kind: Vec<KindRollup>,
-    pub skills: Vec<SkillUsage>,
-    pub sessions: i64,
-    pub sub_tokens: i64,
-    pub subagent_runs: i64,
-}
-
-/// One skill's two-window row: the invocations in each window and the delta
-/// between them — the row the trend view orders by |delta|.
-#[derive(Debug, Clone, PartialEq)]
-pub struct SkillDelta {
-    pub skill: String,
-    pub current: i64,
-    pub previous: i64,
-    /// `current - previous`.
-    pub delta: i64,
-}
-
-/// Pair the two windows' per-skill usage into delta rows, largest absolute
-/// delta first (ties by skill id) — the order the trend view lists skills in.
-/// A skill used in only one window keeps a 0 on the other side.
-pub fn skill_deltas(current: &[SkillUsage], previous: &[SkillUsage]) -> Vec<SkillDelta> {
-    let mut invocations: BTreeMap<&str, [i64; 2]> = BTreeMap::new();
-    for usage in current {
-        invocations.entry(usage.skill.as_str()).or_default()[0] += usage.invocations;
-    }
-    for usage in previous {
-        invocations.entry(usage.skill.as_str()).or_default()[1] += usage.invocations;
-    }
-    let mut rows: Vec<SkillDelta> = invocations
-        .into_iter()
-        .map(|(skill, sides)| SkillDelta {
-            skill: skill.to_string(),
-            current: sides[0],
-            previous: sides[1],
-            delta: sides[0] - sides[1],
-        })
-        .collect();
-    rows.sort_by(|a, b| {
-        b.delta
-            .abs()
-            .cmp(&a.delta.abs())
-            .then_with(|| a.skill.cmp(&b.skill))
-    });
-    rows
 }
 
 /// One catalogued surface row with its **effective** usage: the invocations
@@ -1839,6 +1758,7 @@ mod tests {
     use crate::core::period::TimeRange;
     use crate::core::subagent::SplitCoverage;
     use crate::core::surface::{LoadMode, Scope};
+    use crate::core::trend::skill_deltas;
 
     /// The store is agnostic to which analysis-semantics pair a harness
     /// stamps, so the tests use their own — nothing here depends on a real
@@ -3632,47 +3552,10 @@ mod tests {
     }
 
     // ---- PBI 2026-10-30-02: the trend view's two windows ----
-
-    fn skill_row(skill: &str, invocations: i64) -> SkillUsage {
-        SkillUsage {
-            skill: skill.to_string(),
-            invocations,
-            out_tokens: 0,
-            ctx_growth: 0,
-            duration_sec: 0.0,
-        }
-    }
-
-    #[test]
-    fn skill_deltas_order_by_the_largest_absolute_delta() {
-        let current = [
-            skill_row("commit", 1),
-            skill_row("review", 5),
-            skill_row("deploy", 2),
-            skill_row("fresh", 1),
-        ];
-        let previous = [
-            skill_row("commit", 4),
-            skill_row("review", 3),
-            skill_row("retired", 7),
-        ];
-        let deltas = skill_deltas(&current, &previous);
-        // |delta| first, ties by skill: retired was used only in the previous
-        // window, deploy only in the current one, and deploy/review tie.
-        assert_eq!(
-            deltas
-                .iter()
-                .map(|d| (d.skill.as_str(), d.current, d.previous, d.delta))
-                .collect::<Vec<_>>(),
-            [
-                ("retired", 0, 7, -7),
-                ("commit", 1, 4, -3),
-                ("deploy", 2, 0, 2),
-                ("review", 5, 3, 2),
-                ("fresh", 1, 0, 1),
-            ]
-        );
-    }
+    //
+    // The pure joins (`skill_deltas`, `kind_pairs`) and their unit tests moved
+    // to `core::trend` (PBI 61). What stays here is the one test that is
+    // storage behavior: which window a boundary event lands in.
 
     #[test]
     fn two_window_aggregation_splits_events_between_the_windows() {
