@@ -311,7 +311,7 @@ Expected: FAIL — `ask_choice`, `Choice`, `run_guide` do not exist
 use std::io::{BufRead, Write};
 
 use super::super::{run_analyze, window::{PeriodArgs, ReadArgs, WindowedDispatch}};
-use super::report::{doctor, failures, waste};
+use super::super::report::{doctor, failures, waste};
 use crate::session::{SessionEnv, resolve_cli};
 
 /// One answered prompt: a 0-based pick, or quit (`q`, EOF, Ctrl-C surfaces as
@@ -576,14 +576,14 @@ mod common;
 use common::ScratchDir;
 
 fn run_piped(name: &str, args: &[&str]) -> std::process::Output {
-    // Synthetic only: an empty `.claude/projects` tree and a scratch db, the
-    // same isolation `tests/period_errors.rs` uses.
+    // Synthetic only: an empty `.claude/projects` tree for HOME isolation,
+    // the same shape `tests/period_errors.rs` uses. No `--db` flag: `tui`
+    // takes no flags (clap would reject it before the arm runs) and the
+    // no-args case must reach the missing-subcommand error exactly as today.
     let dir = ScratchDir::new("saniwalens-guide-entry", name);
     std::fs::create_dir_all(dir.join(".claude").join("projects")).unwrap();
     std::process::Command::new(env!("CARGO_BIN_EXE_saniwalens"))
         .args(args)
-        .arg("--db")
-        .arg(dir.join("store.db"))
         .env("HOME", &*dir)
         .env("CLAUDE_CONFIG_DIR", dir.join(".claude"))
         .env("XDG_STATE_HOME", dir.join("state"))
