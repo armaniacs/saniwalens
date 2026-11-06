@@ -10,19 +10,22 @@
 //! tripwire does not grow the very file it guards.
 
 /// The measured size of `src/cli/mod.rs` at the latest budget change (the
-/// PBI 58 measurement of 2026-11-02: 3,016 lines, for the `--timeout` flag and
-/// its delivery plumbing; the PBI 52 measurement was 2,999, the PBI 49
-/// measurement 3,089, the PBI 42 measurement 3,100, the PBI 40 measurement
-/// 3,110, the PBI 38 measurement 3,322 and the PBI 34 landing measured
-/// 3,383), with no slack — raising this constant is a review point, done in
-/// the same PR as the spec update it forces (`docs/specs/architecture.md`).
-const MOD_RS_LINE_BUDGET: usize = 3016;
+/// guided-entry measurement of 2026-11-06: 3,034 lines, for the `Tui` dispatch
+/// arm and the no-args TTY branch, with view logic kept out under the
+/// view-landing rule; the PBI 58 measurement of 2026-11-02 was 3,016 lines,
+/// for the `--timeout` flag and its delivery plumbing; the PBI 52 measurement
+/// was 2,999, the PBI 49 measurement 3,089, the PBI 42 measurement 3,100, the
+/// PBI 40 measurement 3,110, the PBI 38 measurement 3,322 and the PBI 34
+/// landing measured 3,383), with no slack — raising this constant is a review
+/// point, done in the same PR as the spec update it forces
+/// (`docs/specs/architecture.md`).
+const MOD_RS_LINE_BUDGET: usize = 3034;
 
 /// The remedy half of the tripwire's failure message, pinned here so its
 /// wording cannot drift away from what it prescribes.
 const OVER_BUDGET_REMEDY: &str = "Do not grow the shell: add the view as one \
      file under `src/cli/views/` (docs/specs/architecture.md, the view-landing \
-     rule; move `cli/trend.rs` with it in the same commit).";
+     rule).";
 
 /// The full failure message, assembled in one place so the pin below can
 /// assert it without tripping the tripwire itself.
@@ -69,7 +72,7 @@ fn the_over_budget_message_points_at_cli_views() {
         "the message must point at src/cli/views/ as the remedy: {message}"
     );
     assert!(
-        message.contains("`cli/trend.rs`"),
-        "the message must name the same-commit trend move: {message}"
+        message.contains("view-landing"),
+        "the message must name the rule that owns the remedy: {message}"
     );
 }

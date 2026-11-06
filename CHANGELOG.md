@@ -7,6 +7,15 @@
 形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に従い、
 バージョンは [Semantic Versioning](https://semver.org/lang/ja/) に従う。
 
+## [Unreleased]
+
+### Added
+
+- 対話ガイド: サブコマンドなし起動（TTY のとき）・`tui`
+  サブコマンドで、harness → やりたいこと（doctor / waste / failures）→
+  範囲の順に選ぶだけでレポートを表示。実行前後に相当コマンド文を出す。
+  実行後は config.toml への保存（default_harness / profile）も選べる。
+
 ## [0.5.3] - 2026-11-06
 
 ### Added
