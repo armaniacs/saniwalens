@@ -13,7 +13,7 @@ pairing, an ordering, or a delta over in-memory values, with no SQLite in it ―
 is analysis logic, not storage. It belongs in **core** (`src/core/`), wherever
 it is called from today and however few its callers are. This clause was
 missing when the 1st pattern formed: the trend view's two-window joins landed
-in `src/store.rs`, their tests were absorbed there, and `cli/trend.rs` ended
+in `src/store.rs`, their tests were absorbed there, and the trend view ended
 up importing analysis types from the store's namespace ― because nothing in
 `docs/specs/architecture.md` or the spec-sync map decided the attribution.
 The house style is the opposite: `core/findings.rs` takes a store-free
@@ -57,7 +57,7 @@ The trigger must be findable by grep, so the contract enumerates its symbols:
 
 - The 1st pattern, named: `skill_deltas`, `TwoWindow`, `SkillDelta`,
   `TrendWindowAggregates`, `kind_pairs` ― all in `src/core/trend.rs` now,
-  reached from `cli/trend.rs`; `kind_pairs` was the fifth join, left in the
+  reached from `cli/views/trend.rs`; `kind_pairs` was the fifth join, left in the
   view until the move enumerated it.
 - `grep -n "skill_deltas\|TrendWindowAggregates" src/core/trend.rs` finds the
   1st pattern, and this rule's `paths:` frontmatter loads the file when

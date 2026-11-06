@@ -180,7 +180,7 @@ Every command has both a human form and a machine form, strictly separated:
   (`Store::query_json`), `doctor` emits the routed findings structure
   (`core::optimize::Findings`, `projects` filtered by `--scope`), and each view
   emits its rows as named objects. `trend`'s rows and its JSON are two forms
-  of one typed payload (`trend_payload` in `cli/trend.rs`): both derive from
+  of one typed payload (`trend_payload` in `cli/views/trend.rs`): both derive from
   it, so a metric's delta, direction, and reason are judged once ― float
   metrics at the display's 0.1 precision, so a drift smaller than the shown
   0.1 (an ms-derived duration's addition error) reads as `same` in both

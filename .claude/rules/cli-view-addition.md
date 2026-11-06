@@ -22,9 +22,8 @@ criteria:
 - **`src/cli/views/` is created in the same PR** (or the view file is added
   under it, once the directory exists) ― the view never lands inside
   `cli/mod.rs`, and it lands as one file there.
-- **`src/cli/trend.rs` moves into `src/cli/views/` in the same commit** as the
-  first view landing there. Its move cost does not depend on the timing, so
-  the move is not a second, forgettable step.
+- **The trend view has moved into `src/cli/views/`** (landed as groundwork
+  ahead of the first view, so the move did not wait for it).
 - **No view functions are appended to `cli/mod.rs`**: a helper a view needs is
   born in the view's file; the shell keeps dispatch. Growing `cli/mod.rs` past
   its budget fails the tripwire, and raising that budget is a review point in

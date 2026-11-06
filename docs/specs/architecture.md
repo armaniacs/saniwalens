@@ -98,7 +98,7 @@ flowchart TD
 | **adapter** | The raw shapes of *both* inputs: transcript JSONL (record types, field names, `subagents/` layout) and config files (skill/rule frontmatter, `settings.json`, MCP schemas, `CLAUDE.md`). Maps them into the internal domain model. | The SQLite schema; how costs are computed. |
 | **core** | Event extraction, static-cost weighing inputs, the catalog×usage join, the trend view's two-window joins (`core::trend`), the briefing's findings assembly (`core::findings`), and aggregation ― all **pure functions** over the domain model; a function that only shapes rows already fetched from the store is core's wherever it is called from today (the placement rule below). No I/O, no clock, no DB. | Claude Code field names or config path conventions; SQL. |
 | **store** | Persisting and querying `sessions` / `surfaces` / `events` in SQLite. | Raw input shapes. |
-| **report** | Turning query results into tables / Markdown and ranking wedges. In `src/`: `cli/mod.rs` (the shell, every view except trend, and the public CLI API), `cli/trend.rs` (the trend view and the one typed payload both its table and its JSON derive from), `cli/window.rs` (the windowed flag surface every view shares: the period flags declared once as clap args groups, the `--format` values each view accepts, and the windowed session-open dispatch the report arms resolve through ― `open` for the views without `--scope`, `open_scoped` for the scoped ones, `open_scoped_table_json` for doctor's narrower `--format`, `open_pair` for trend), `cli/headless.rs` (the headless advisor run: the logged pipe and the one guard owning the child and the heartbeat for the run's lifetime), `cli/report.rs` (format, renderer, framing). A new view becomes one file under `cli/views/`, created when the next view lands; views never re-grow a shared file. The view-landing rule below makes that a per-PR obligation, not a remembered intention. | Raw input shapes; SQL beyond the store's API. |
+| **report** | Turning query results into tables / Markdown and ranking wedges. In `src/`: `cli/mod.rs` (the shell, every view except trend, and the public CLI API), `cli/views/trend.rs` (the trend view and the one typed payload both its table and its JSON derive from), `cli/window.rs` (the windowed flag surface every view shares: the period flags declared once as clap args groups, the `--format` values each view accepts, and the windowed session-open dispatch the report arms resolve through ― `open` for the views without `--scope`, `open_scoped` for the scoped ones, `open_scoped_table_json` for doctor's narrower `--format`, `open_pair` for trend), `cli/headless.rs` (the headless advisor run: the logged pipe and the one guard owning the child and the heartbeat for the run's lifetime), `cli/report.rs` (format, renderer, framing). A new view becomes one file under `cli/views/`, created when the next view lands; views never re-grow a shared file. The view-landing rule below makes that a per-PR obligation, not a remembered intention. | Raw input shapes; SQL beyond the store's API. |
 
 ### The view-landing rule (per PR)
 
@@ -108,9 +108,8 @@ The "next view" above is not left to memory. A PR that adds a `Command` variant
 - **`src/cli/views/` is created in that same PR**, and the view lands as one
   file there. View helpers are born in the view's file, never appended to
   `cli/mod.rs`: the shell keeps dispatch, and nothing else.
-- **`cli/trend.rs` moves into `src/cli/views/` in the same commit** as the
-  first view landing there. Its move cost does not depend on the timing, so
-  the move rides along instead of staying a second, forgettable step.
+- **The trend view moved into `src/cli/views/` when the directory landed**
+  (groundwork ahead of the first view, so the move did not wait for it).
 - **The line-budget tripwire** (`tests/cli_mod_line_budget.rs`) makes the
   "never re-grow a shared file" half structural: growing `cli/mod.rs` past its
   measured budget fails `cargo test` with a message pointing at `cli/views/`.
@@ -142,7 +141,7 @@ values, no SQLite ― is core's wherever it is called from today
   trigger (`1ecda2a` / `3b4349f`) but the move did not ride that landing;
   PBI 61 (2026-11-02) is the follow-up remediation that moved them to
   `src/core/trend.rs`. The store keeps the windowed queries that hand them
-  rows; `kind_pairs` was the fifth join, found in `cli/trend.rs` only because
+  rows; `kind_pairs` was the fifth join, found in the trend view only because
   the move enumerated them. Trigger 2 (the next SQLite-free function) remains
   armed for the next accumulation.
 - The trigger is grep-able, not a parser: the rule enumerates the symbols, and

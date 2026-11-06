@@ -30,11 +30,11 @@ use crate::store::{OpenMode, Store};
 pub(crate) mod headless;
 pub mod heartbeat;
 pub(crate) mod report;
-pub(crate) mod trend;
+pub(crate) mod views;
 pub(crate) mod window;
 
 pub(crate) use report::*;
-pub(crate) use trend::*;
+pub(crate) use views::trend::*;
 pub(crate) use window::*;
 
 #[derive(Parser)]
