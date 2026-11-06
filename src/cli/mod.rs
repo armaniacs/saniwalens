@@ -3,6 +3,7 @@
 //! `docs/specs/cli.md`.
 
 use std::fs;
+use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
@@ -237,9 +238,20 @@ enum Command {
         #[arg(long, value_name = "DURATION")]
         timeout: Option<String>,
     },
+    /// Step-by-step guide to the typical patterns (doctor / waste / failures).
+    /// Needs an interactive terminal; without one it refuses instead of hanging.
+    Tui,
 }
 
 pub fn run() -> Result<()> {
+    let argv: Vec<String> = std::env::args().collect();
+    if let views::guide::Entry::Guide { harness, profile } = views::guide::guide_entry(&argv) {
+        if std::io::stdin().is_terminal() && std::io::stdout().is_terminal() {
+            return views::guide::run_guide_entry(harness.as_deref(), profile.as_deref());
+        }
+        // Non-TTY without a subcommand: fall through to `Cli::parse`, whose
+        // missing-subcommand error is what scripts see today (behavior unchanged).
+    }
     let cli = Cli::parse();
     // One call resolves flags, the config file, and the builtins into the
     // harness plus an optional configured store; see `session.rs`.
@@ -394,6 +406,12 @@ pub fn run() -> Result<()> {
             let sess = Session::open_resolved(&harness, path)?;
             let timeout = headless::parse_timeout(timeout.as_deref())?;
             optimize(&sess, projects, &filter, frozen, print, verbose, timeout)
+        }
+        Command::Tui => {
+            if !(std::io::stdin().is_terminal() && std::io::stdout().is_terminal()) {
+                anyhow::bail!("`tui` needs an interactive terminal (stdin and stdout must both be TTYs)");
+            }
+            views::guide::run_guide_entry(cli.harness.as_deref(), cli.profile.as_deref())
         }
     }
 }

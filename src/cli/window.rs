@@ -641,7 +641,7 @@ mod tests {
                 read.frozen,
                 read.db,
             ),
-            Command::Analyze { .. } | Command::Sql { .. } | Command::Optimize { .. } => {
+            Command::Analyze { .. } | Command::Sql { .. } | Command::Optimize { .. } | Command::Tui => {
                 unreachable!("the whole-history commands take no period flags")
             }
         }
