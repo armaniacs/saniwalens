@@ -252,9 +252,11 @@ invocation without both TTYs falls through to clap, whose
 missing-subcommand error is what scripts see today.
 
 v0.5.4 scope is `doctor` / `waste` / `failures` plus the config save above.
-The remaining reports, period flags, `sql`, and an `optimize` handoff stay
-out; the candidates and their order are declared in the design doc's
-post-v0.5.5 expansion note
+`optimize` itself stays out of the guide, but after each report the guide
+prints a next-step line pointing at it with the matching scope
+(e.g. `saniwalens optimize --scope global`); the remaining reports, period
+flags, and `sql` stay out. The candidates and their order are declared in
+the design doc's post-v0.5.5 expansion note
 (`docs/exploration/2026-11-06-guided-tui-design.md`).
 
 ### Period ― narrow a report to a window of the history

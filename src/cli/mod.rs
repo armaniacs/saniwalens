@@ -412,7 +412,7 @@ pub fn run() -> Result<()> {
             if !(std::io::stdin().is_terminal() && std::io::stdout().is_terminal()) {
                 anyhow::bail!(
                     "`tui` needs an interactive terminal (stdin and stdout must both be TTYs)"
-                );
+                ); // No-TTY-only arm: TTY input returns via the pre-parse branch above.
             }
             views::guide::run_guide_entry(cli.harness.as_deref(), cli.profile.as_deref())
         }
