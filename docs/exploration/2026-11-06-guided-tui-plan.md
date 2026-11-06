@@ -12,15 +12,15 @@
 
 ## File map
 
-- Create: `src/cli/views/guide.rs` — `Entry`, `guide_entry()`, `Purpose`, `ScopeChoice`, `equivalent_command()`, `Choice`, `ask_choice()`, `run_guide()`, `run_guide_entry()` + unit tests.
-- Create: `src/cli/views/mod.rs` — `pub(crate) mod guide; pub(crate) mod trend;` plus re-exports.
+- Create: `src/cli/views/guide.rs` ― `Entry`, `guide_entry()`, `Purpose`, `ScopeChoice`, `equivalent_command()`, `Choice`, `ask_choice()`, `run_guide()`, `run_guide_entry()` + unit tests.
+- Create: `src/cli/views/mod.rs` ― `pub(crate) mod guide; pub(crate) mod trend;` plus re-exports.
 - Move: `src/cli/trend.rs` → `src/cli/views/trend.rs` (`git mv`, same commit as the views dir creation).
-- Modify: `src/cli/mod.rs` — replace `mod trend` / `use trend::*` with `mod views` / `use views::trend::*`, add `Command::Tui` + arm + no-args branch (`use std::io::IsTerminal;`). Nothing else: no view logic here.
-- Modify: `src/cli/window.rs` — tests-only: add `Command::Tui` to the `Analyze | Sql | Optimize` fallthrough arm of `windowed_flags()` (line ~644).
-- Modify: `tests/cli_help_golden.rs` — `WHOLE_HISTORY: [&str; 3]` → `[&str; 4]` adding `"tui"` (`tui` carries no `--last`, so it is whole-history, not `PINNED`; `WINDOWED_VIEW_COUNT` stays 9).
-- Modify: `tests/cli_mod_line_budget.rs` — raise `MOD_RS_LINE_BUDGET` to the new measured `wc -l` count (exact number set at implementation time; raising is a flagged review point, done here with the spec update).
-- Create: `tests/guide_entry.rs` — piped-stdin refusal tests (non-TTY `tui` refuses; non-TTY no-args keeps clap's missing-subcommand error).
-- Modify: `docs/specs/cli.md` — guide section under Views; `docs/specs/architecture.md` — layer table row (line ~101) + view-landing rule status (lines ~103–122: "created when the next view lands" is now done); `CHANGELOG.md` — new `## [Unreleased]` Added entry.
+- Modify: `src/cli/mod.rs` ― replace `mod trend` / `use trend::*` with `mod views` / `use views::trend::*`, add `Command::Tui` + arm + no-args branch (`use std::io::IsTerminal;`). Nothing else: no view logic here.
+- Modify: `src/cli/window.rs` ― tests-only: add `Command::Tui` to the `Analyze | Sql | Optimize` fallthrough arm of `windowed_flags()` (line ~644).
+- Modify: `tests/cli_help_golden.rs` ― `WHOLE_HISTORY: [&str; 3]` → `[&str; 4]` adding `"tui"` (`tui` carries no `--last`, so it is whole-history, not `PINNED`; `WINDOWED_VIEW_COUNT` stays 9).
+- Modify: `tests/cli_mod_line_budget.rs` ― raise `MOD_RS_LINE_BUDGET` to the new measured `wc -l` count (exact number set at implementation time; raising is a flagged review point, done here with the spec update).
+- Create: `tests/guide_entry.rs` ― piped-stdin refusal tests (non-TTY `tui` refuses; non-TTY no-args keeps clap's missing-subcommand error).
+- Modify: `docs/specs/cli.md` ― guide section under Views; `docs/specs/architecture.md` ― layer table row (line ~101) + view-landing rule status (lines ~103-122: "created when the next view lands" is now done); `CHANGELOG.md` ― new `## [Unreleased]` Added entry.
 
 ---
 
@@ -63,7 +63,7 @@ pub(crate) use views::trend::*;
 - [ ] **Step 3: Run the full suite to prove the move is behavior-free**
 
 Run: `cargo test`
-Expected: all green (same counts as before the move; `trend_json_golden`, `cli_help_golden`, `cli_mod_line_budget` all pass — the budget still holds because `mod.rs` line count is unchanged)
+Expected: all green (same counts as before the move; `trend_json_golden`, `cli_help_golden`, `cli_mod_line_budget` all pass ― the budget still holds because `mod.rs` line count is unchanged)
 
 - [ ] **Step 4: Commit**
 
@@ -73,11 +73,11 @@ git add src/cli/views src/cli/mod.rs && git commit -m "refactor(cli): land src/c
 
 ---
 
-### Task 2: Pure core — entry classifier, purpose/scope, equivalent command
+### Task 2: Pure core ― entry classifier, purpose/scope, equivalent command
 
 **Files:**
 - Modify: `src/cli/views/guide.rs` (new; start with this task's items + `#[cfg(test)] mod tests`)
-- Modify: `src/cli/mod.rs` — nothing in this task (guide.rs is not wired yet, so add `pub(crate) mod guide;` to `views/mod.rs` only — already done in Task 1 — and keep `guide` `#[allow(dead_code)]`-free by testing it directly: unit tests in the same file count as use)
+- Modify: `src/cli/mod.rs` ― nothing in this task (guide.rs is not wired yet, so add `pub(crate) mod guide;` to `views/mod.rs` only ― already done in Task 1 ― and keep `guide` `#[allow(dead_code)]`-free by testing it directly: unit tests in the same file count as use)
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -138,7 +138,7 @@ fn equivalent_command_covers_every_combination() {
 - [ ] **Step 2: Run to verify they fail**
 
 Run: `cargo test views::guide`
-Expected: FAIL — `could not find guide in views` / unresolved items (file does not exist yet)
+Expected: FAIL ― `could not find guide in views` / unresolved items (file does not exist yet)
 
 - [ ] **Step 3: Write the minimal implementation**
 
@@ -296,14 +296,14 @@ fn quitting_at_the_first_prompt_runs_no_report() {
 }
 ```
 
-Note: `fake_dispatch()` cannot exist without a real `Session` — a `WindowedDispatch` borrows `&Harness`, `Option<&Path>`, `&SessionEnv`, all constructible without touching disk:
+Note: `fake_dispatch()` cannot exist without a real `Session` ― a `WindowedDispatch` borrows `&Harness`, `Option<&Path>`, `&SessionEnv`, all constructible without touching disk:
 `SessionEnv { state_home: None, home: Path::new("/nonexistent"), config_home: None }`.
-Check `SessionEnv`'s exact fields in `src/session.rs` at implementation time and mirror them. (If `SessionEnv` gains a lifetime or private fields, construct it the same way `run()` does — the fields are read in `src/cli/mod.rs` lines 246–252.)
+Check `SessionEnv`'s exact fields in `src/session.rs` at implementation time and mirror them. (If `SessionEnv` gains a lifetime or private fields, construct it the same way `run()` does ― the fields are read in `src/cli/mod.rs` lines 246~252.)
 
 - [ ] **Step 2: Run to verify they fail**
 
 Run: `cargo test views::guide`
-Expected: FAIL — `ask_choice`, `Choice`, `run_guide` do not exist
+Expected: FAIL ― `ask_choice`, `Choice`, `run_guide` do not exist
 
 - [ ] **Step 3: Write the minimal implementation**
 
@@ -372,7 +372,7 @@ pub(crate) fn run_guide<R: BufRead, W: Write>(
         Harness::Opencode => 1,
         Harness::Kilocode => 2,
     };
-    // Step 1 (design §2): confirm, not re-ask — Enter keeps the resolved value.
+    // Step 1 (design §2): confirm, not re-ask ― Enter keeps the resolved value.
     writeln!(output, "使っているエージェント: {}", harness_names[current])?;
 
     let period = PeriodArgs { since: None, until: None, last: None };
@@ -443,7 +443,7 @@ pub(crate) fn run_guide<R: BufRead, W: Write>(
 }
 ```
 
-Stdio entry (same file; mirrors `run()` lines 246–263 for env + resolve):
+Stdio entry (same file; mirrors `run()` lines 246~263 for env + resolve):
 
 ```rust
 pub(crate) fn run_guide_entry(harness: Option<&str>, profile: Option<&str>) -> anyhow::Result<()> {
@@ -472,7 +472,7 @@ pub(crate) fn run_guide_entry(harness: Option<&str>, profile: Option<&str>) -> a
 }
 ```
 
-(If `resolved`'s field names differ — `harness`, `config_db` per `run()` lines 253–255 — mirror `run()` exactly; the compiler points at any drift.)
+(If `resolved`'s field names differ ― `harness`, `config_db` per `run()` lines 253~255 ― mirror `run()` exactly; the compiler points at any drift.)
 
 - [ ] **Step 4: Run to verify they pass**
 
@@ -487,12 +487,12 @@ git add src/cli/views/guide.rs && git commit -m "feat(cli): guided prompt loop r
 
 ---
 
-### Task 4: Wire `run()` — no-args branch + `Tui` variant
+### Task 4: Wire `run()` ― no-args branch + `Tui` variant
 
 **Files:**
 - Modify: `src/cli/mod.rs` (variant + arm + branch + `IsTerminal` import only)
 - Modify: `src/cli/window.rs` (tests-only fallthrough arm)
-- Test: `cargo test` (tripwire + partition tests will fail first — that's Task 5's input)
+- Test: `cargo test` (tripwire + partition tests will fail first ― that's Task 5's input)
 
 - [ ] **Step 1: Add the variant, the arm, and the pre-parse branch**
 
@@ -617,7 +617,7 @@ fn no_subcommand_without_a_terminal_keeps_todays_clap_error() {
 - [ ] **Step 3: Run to verify they pass (red first if the Task 4 arm is missing)**
 
 Run: `cargo test --test guide_entry --test cli_help_golden`
-Expected: PASS. (If run against a tree without Task 4, both fail — that is the red proof; with Task 4, green.)
+Expected: PASS. (If run against a tree without Task 4, both fail ― that is the red proof; with Task 4, green.)
 
 - [ ] **Step 4: Commit**
 
@@ -630,18 +630,18 @@ git add tests/guide_entry.rs tests/cli_help_golden.rs && git commit -m "test(cli
 ### Task 6: Specs, budget, changelog, full green
 
 **Files:**
-- Modify: `docs/specs/cli.md` (guide section under Views), `docs/specs/architecture.md` (layer-table report row ~line 101 + view-landing rule ~lines 103–122), `CHANGELOG.md` (Unreleased), `tests/cli_mod_line_budget.rs` (exact count)
+- Modify: `docs/specs/cli.md` (guide section under Views), `docs/specs/architecture.md` (layer-table report row ~line 101 + view-landing rule ~lines 103~122), `CHANGELOG.md` (Unreleased), `tests/cli_mod_line_budget.rs` (exact count)
 - Test: `make check` + `make test`
 
-- [ ] **Step 1: cli.md — guide contract (new subsection under `## Views`)**
+- [ ] **Step 1: cli.md ― guide contract (new subsection under `## Views`)**
 
 Content (English, matching the file): entry conditions (no subcommand + both TTYs; explicit `tui`; `--harness` preset skips step 1), the 4-step flow with defaults, table-only output, command echo before/after as the reproducible artifact, non-TTY behavior (clap error / refusal), v0.5.4 scope (doctor/waste/failures) with pointer to the design doc's post-v0.5.5 expansion note. Reference `views/guide.rs`, not pasted code.
 
-- [ ] **Step 2: architecture.md — the landed split**
+- [ ] **Step 2: architecture.md ― the landed split**
 
-Update the report row (~line 101): `cli/views/` now exists, holding `guide.rs` (the interactive entry) and `trend.rs` (moved). Update the view-landing rule (~lines 103–122): the "created when the next view lands" deferral is discharged — this PR created it and moved `trend.rs` in the same commit; future views add one file under `cli/views/`.
+Update the report row (~line 101): `cli/views/` now exists, holding `guide.rs` (the interactive entry) and `trend.rs` (moved). Update the view-landing rule (~lines 103~122): the "created when the next view lands" deferral is discharged ― this PR created it and moved `trend.rs` in the same commit; future views add one file under `cli/views/`.
 
-- [ ] **Step 3: CHANGELOG — Unreleased entry**
+- [ ] **Step 3: CHANGELOG ― Unreleased entry**
 
 ```md
 ## [Unreleased]
@@ -662,7 +662,7 @@ Run: `wc -l src/cli/mod.rs` → set `MOD_RS_LINE_BUDGET` to that exact number (n
 Run: `make check` (rustfmt + clippy, the CI gate)
 Expected: clean
 Run: `make test`
-Expected: all suites ok, 0 failed — including `cli_mod_rs_stays_within_its_line_budget`, `every_subcommand_is_either_windowed_or_whole_history`, and the new `guide_entry` tests
+Expected: all suites ok, 0 failed ― including `cli_mod_rs_stays_within_its_line_budget`, `every_subcommand_is_either_windowed_or_whole_history`, and the new `guide_entry` tests
 
 - [ ] **Step 6: Commit**
 
@@ -676,8 +676,8 @@ git add docs/specs/cli.md docs/specs/architecture.md CHANGELOG.md tests/cli_mod_
 
 - **Spec coverage:** design §1 (entry) → Tasks 2 (classifier) + 4 (branch/arm); §2 (flow) → Task 3 (`run_guide`); §3 (execution/echo) → Tasks 3 (`equivalent_command` use, echo lines) + 2 (pin table); §4 (tests/non-goals) → Tasks 2/3/5 + Task 6 specs; expansion declaration → Task 6 (pointer in cli.md). No orphan requirements.
 - **Placeholder scan:** every step names exact files, exact code, exact commands with expected output. Two intentional runtime measurements (budget count in Task 4→6, `SessionEnv` field mirror in Task 3) are procedures with fallbacks, not TBDs.
-- **Type consistency:** `Entry::Guide { harness: Option<String>, profile: Option<String> }`, `Purpose::{Doctor,Waste,Failures}`, `ScopeChoice::{All,Global,Project}`, `equivalent_command(&Harness, Purpose, ScopeChoice) -> String`, `Choice::{Pick(usize),Quit}`, `ask_choice<R: BufRead, W: Write>(...) -> anyhow::Result<Choice>`, `run_guide(&Harness, &WindowedDispatch, &mut R, &mut W)`, `run_guide_entry(Option<&str>, Option<&str>)` — used identically in Tasks 2–5.
-- **Deviations from `cli-view-addition.md`, stated:** (1) no JSON golden — the guide has no machine output; the `equivalent_command` table test (Task 2) is the machine contract; (2) budget raised, not avoided — dispatch arms cannot live anywhere but `mod.rs`; view logic stays out.
+- **Type consistency:** `Entry::Guide { harness: Option<String>, profile: Option<String> }`, `Purpose::{Doctor,Waste,Failures}`, `ScopeChoice::{All,Global,Project}`, `equivalent_command(&Harness, Purpose, ScopeChoice) -> String`, `Choice::{Pick(usize),Quit}`, `ask_choice<R: BufRead, W: Write>(...) -> anyhow::Result<Choice>`, `run_guide(&Harness, &WindowedDispatch, &mut R, &mut W)`, `run_guide_entry(Option<&str>, Option<&str>)` ― used identically in Tasks 2~5.
+- **Deviations from `cli-view-addition.md`, stated:** (1) no JSON golden ― the guide has no machine output; the `equivalent_command` table test (Task 2) is the machine contract; (2) budget raised, not avoided ― dispatch arms cannot live anywhere but `mod.rs`; view logic stays out.
 
 ## Execution handoff
 
@@ -685,8 +685,8 @@ git add docs/specs/cli.md docs/specs/architecture.md CHANGELOG.md tests/cli_mod_
 
 **Two execution options:**
 
-**1. Subagent-Driven (recommended)** — I dispatch a fresh subagent per task, review between tasks, fast iteration (repo AGENTS.md mandates this for implementation).
+**1. Subagent-Driven (recommended)** ― I dispatch a fresh subagent per task, review between tasks, fast iteration (repo AGENTS.md mandates this for implementation).
 
-**2. Inline execution** — execute tasks here in this session, batch with checkpoints.
+**2. Inline execution** ― execute tasks here in this session, batch with checkpoints.
 
 **Which approach?**

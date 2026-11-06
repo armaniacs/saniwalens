@@ -1,4 +1,4 @@
-# Guided TUI（対話ガイド）設計 — v0.5.4 の目玉
+# Guided TUI（対話ガイド）設計 ― v0.5.4 の目玉
 
 - 日付: 2026-11-06
 - ブランチ: `feature/guided-tui`
@@ -89,7 +89,7 @@ v0.5.5 以後の版で、利用状況を見ながら以下の候補を順次取�
 
 ```text
 $ saniwalens
-saniwalens — やりたいことを選んでください（q で終了）
+saniwalens ― やりたいことを選んでください（q で終了）
 
 [1] 使っているエージェント: claude
 [2] やりたいこと: 健康診断 (doctor)
