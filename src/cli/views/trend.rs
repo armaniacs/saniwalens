@@ -12,7 +12,7 @@ use crate::core::period::{self, WindowPair};
 use crate::core::trend::{TrendWindowAggregates, TwoWindow, kind_pairs, skill_deltas};
 use crate::session::{Session, Style};
 
-use super::{Align, Format, emit_json, framed, note, preamble, render};
+use super::super::{Align, Format, emit_json, framed, note, preamble, render};
 
 /// One direction of a two-window comparison. `Unavailable` is 比較不能: no
 /// comparison was made — that row's previous side has no baseline, or the

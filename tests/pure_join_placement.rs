@@ -25,7 +25,7 @@ const CORE_TREND: &str = "src/core/trend.rs";
 /// The file the placement rule keeps free of row shaping.
 const STORE: &str = "src/store.rs";
 /// The view that used to import its analysis types from the store.
-const CLI_TREND: &str = "src/cli/trend.rs";
+const CLI_TREND: &str = "src/cli/views/trend.rs";
 
 /// The 1st pattern the rule enumerates: the trend view's two-window joins, as
 /// (symbol, definition marker) pairs. It is five entries, not four: moving the

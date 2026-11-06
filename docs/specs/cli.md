@@ -180,7 +180,7 @@ Every command has both a human form and a machine form, strictly separated:
   (`Store::query_json`), `doctor` emits the routed findings structure
   (`core::optimize::Findings`, `projects` filtered by `--scope`), and each view
   emits its rows as named objects. `trend`'s rows and its JSON are two forms
-  of one typed payload (`trend_payload` in `cli/trend.rs`): both derive from
+  of one typed payload (`trend_payload` in `cli/views/trend.rs`): both derive from
   it, so a metric's delta, direction, and reason are judged once ― float
   metrics at the display's 0.1 precision, so a drift smaller than the shown
   0.1 (an ms-derived duration's addition error) reads as `same` in both
@@ -209,6 +209,53 @@ windowed views (`trend` included) take all three values.
 Slices not covered here ― the Bash command mix, the most-edited files, an error
 category broken down any way ― are a `sql` one-liner; those once had thin
 `commands`/`hotspots` views, dropped once `sql` existed.
+
+### Guided entry ― pick instead of typing
+
+Running `saniwalens` with no subcommand on an interactive terminal, or with
+the explicit `tui` subcommand, opens the guided entry instead of a report:
+it asks which agent harness is in use, what to look at, and which scope, then
+runs the equivalent report command. The implementation lives in
+`cli/views/guide.rs`; this section states the contract, not the code.
+
+Entry conditions: no subcommand *and* stdin and stdout both TTYs, or the
+explicit `tui` subcommand. A `--harness` (or `--profile`) flag given with
+either entry is a preset: step 1 is skipped and the named value is used. Any
+other token ― a real subcommand, `--help`, `--version` ― belongs to clap,
+and the guide never intercepts it.
+
+The four steps, each defaulting to its first choice (empty input keeps it,
+`q` quits the guide): (1) confirm the harness (the resolved default is
+shown); (2) pick the purpose ― `doctor` (health check), `waste` (prune
+candidates), or `failures` (recurring friction); (3) pick the scope ― all
+history (no `--scope` flag), `global`, or `project`; (4) after the report,
+answer the config save question below. After each report the guide asks
+whether to look at one more (default no) and loops on `y`.
+
+Output is always the table form: the guide takes no `--format` and no period
+flags. Before running, it echoes the equivalent command line (e.g.
+`saniwalens --harness kilocode waste --scope global`); after the report it
+echoes the executed command again. The reproducible artifact is that command
+line, not the session ― the report itself is the same table the command
+would print.
+
+After the report, the guide asks whether to save the used harness to
+`config.toml`: skip, set it as `default_harness`, or store it under a named
+`[profiles.<name>]` profile. The edit is line-preserving ― only the one line
+(or section) changes, comments and everything else stay untouched ― and the
+guide shows the path plus the changed excerpt and asks for confirmation
+before writing.
+
+Non-TTY behavior: the explicit `tui` subcommand without both TTYs is refused
+with an error instead of blocking on unreadable prompts; a bare no-args
+invocation without both TTYs falls through to clap, whose
+missing-subcommand error is what scripts see today.
+
+v0.5.4 scope is `doctor` / `waste` / `failures` plus the config save above.
+The remaining reports, period flags, `sql`, and an `optimize` handoff stay
+out; the candidates and their order are declared in the design doc's
+post-v0.5.5 expansion note
+(`docs/exploration/2026-11-06-guided-tui-design.md`).
 
 ### Period ― narrow a report to a window of the history
 
