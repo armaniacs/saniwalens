@@ -691,6 +691,285 @@ git add tests/guide_entry.rs tests/cli_help_golden.rs && git commit -m "test(cli
 
 ---
 
+### Task 7: config.toml creation from the guide (runs after Task 5, before Task 6)
+
+**Files:**
+- Modify: `src/cli/views/guide.rs` (append save items + tests; `run_guide` gains a `config_path: Option<&Path>` parameter ― update the Task 3 call sites in the same file)
+- Test: `cargo test views::guide`
+
+**Why after Task 5:** the save prompt lives inside the `run_guide` loop, so the loop (Task 3) and the entry wiring (Task 4) come first. Task 6's spec/changelog writing covers this task too.
+
+- [ ] **Step 1: Write the failing tests**
+
+```rust
+#[test]
+fn default_harness_save_builds_a_new_file_from_nothing() {
+    assert_eq!(
+        render_default_harness(None, "kilocode"),
+        "# saniwalens defaults (written by the guided TUI).\ndefault_harness = \"kilocode\"\n",
+    );
+}
+
+#[test]
+fn default_harness_save_replaces_only_its_own_line() {
+    let existing = "# keep me\ndefault_harness = \"claude\"\n[profiles.work]\nharness = \"opencode\"\n";
+    let out = render_default_harness(Some(existing), "kilocode");
+    assert!(out.contains("# keep me\n"), "comments survive: {out}");
+    assert!(out.contains("default_harness = \"kilocode\"\n"), "value replaced: {out}");
+    assert!(out.contains("[profiles.work]\nharness = \"opencode\"\n"), "other sections untouched: {out}");
+    assert_eq!(out.matches("default_harness").count(), 1, "no duplication: {out}");
+}
+
+#[test]
+fn default_harness_save_inserts_before_the_first_table() {
+    let existing = "[profiles.work]\nharness = \"opencode\"\n";
+    let out = render_default_harness(Some(existing), "claude");
+    assert!(out.starts_with("default_harness = \"claude\"\n"), "top-level, before [profiles]: {out}");
+}
+
+#[test]
+fn profile_save_appends_a_new_section() {
+    let out = render_profile(None, "work", "kilocode");
+    assert!(out.contains("[profiles.work]\nharness = \"kilocode\"\n"), "{out}");
+}
+
+#[test]
+fn profile_save_updates_the_harness_line_inside_its_section() {
+    let existing = "default_harness = \"claude\"\n[profiles.work]\nharness = \"opencode\"\n[profiles.home]\nharness = \"claude\"\n";
+    let out = render_profile(Some(existing), "work", "kilocode");
+    assert!(out.contains("[profiles.work]\nharness = \"kilocode\"\n"), "{out}");
+    assert!(out.contains("[profiles.home]\nharness = \"claude\"\n"), "other profiles untouched: {out}");
+}
+
+#[test]
+fn profile_names_allow_only_ascii_word_chars_and_dashes() {
+    assert!(profile_name_is_valid("work"));
+    assert!(profile_name_is_valid("my-profile_2"));
+    assert!(!profile_name_is_valid(""));
+    assert!(!profile_name_is_valid("my profile"));
+    assert!(!profile_name_is_valid("../../etc"));
+}
+```
+
+- [ ] **Step 2: Run to verify they fail**
+
+Run: `cargo test views::guide`
+Expected: FAIL ― `render_default_harness`, `render_profile`, `profile_name_is_valid` do not exist
+
+- [ ] **Step 3: Write the minimal implementation**
+
+```rust
+/// Profile names are TOML bare keys and path-safe segments: ASCII
+/// alphanumerics plus `-` and `_` only.
+pub(crate) fn profile_name_is_valid(name: &str) -> bool {
+    !name.is_empty()
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+}
+
+/// Canonical harness spelling for the config file. Also used by
+/// `equivalent_command` (replace its inline match with this).
+pub(crate) fn harness_name(harness: &Harness) -> &'static str {
+    match harness {
+        Harness::Claude => "claude",
+        Harness::Opencode => "opencode",
+        Harness::Kilocode => "kilocode",
+    }
+}
+
+/// New file text with `default_harness` set. Line-based edit: everything else
+/// (comments, profiles, blank lines) is preserved verbatim. No Serialize
+/// round-trip ― `FileConfig` is Deserialize-only, and a rewrite would eat
+/// the user's comments.
+pub(crate) fn render_default_harness(existing: Option<&str>, harness: &str) -> String {
+    const HEADER: &str = "# saniwalens defaults (written by the guided TUI).";
+    let line = format!("default_harness = \"{harness}\"");
+    let Some(text) = existing else {
+        return format!("{HEADER}\n{line}\n");
+    };
+    let mut out: Vec<String> = Vec::new();
+    let mut done = false;
+    let mut in_table = false;
+    for raw in text.lines() {
+        let trimmed = raw.trim_start();
+        if trimmed.starts_with('[') {
+            in_table = true;
+        }
+        let is_target = !done
+            && !in_table
+            && trimmed.starts_with("default_harness")
+            && trimmed["default_harness".len()..].trim_start().starts_with('=');
+        out.push(if is_target { line.clone() } else { raw.to_string() });
+        done = done || is_target;
+    }
+    if !done {
+        let pos = out.iter().position(|l| l.trim_start().starts_with('[')).unwrap_or(out.len());
+        out.insert(pos, line);
+    }
+    let mut rendered = out.join("\n");
+    rendered.push('\n');
+    rendered
+}
+
+/// New file text with `[profiles.<name>]` carrying `harness`. Same
+/// line-preserving contract as `render_default_harness`.
+pub(crate) fn render_profile(existing: Option<&str>, name: &str, harness: &str) -> String {
+    const HEADER: &str = "# saniwalens defaults (written by the guided TUI).";
+    let header = format!("[profiles.{name}]");
+    let line = format!("harness = \"{harness}\"");
+    let Some(text) = existing else {
+        return format!("{HEADER}\n{header}\n{line}\n");
+    };
+    let mut out: Vec<String> = Vec::new();
+    let mut in_section = false;
+    let mut done = false;
+    for raw in text.lines() {
+        let trimmed = raw.trim_start();
+        if trimmed.starts_with('[') {
+            // Close the section at the next header; insert the harness line
+            // if the section had none.
+            if in_section && !done {
+                out.push(line.clone());
+                done = true;
+            }
+            in_section = trimmed == header;
+        }
+        let is_target = in_section
+            && !done
+            && trimmed.starts_with("harness")
+            && trimmed["harness".len()..].trim_start().starts_with('=');
+        out.push(if is_target { line.clone() } else { raw.to_string() });
+        done = done || is_target;
+    }
+    if in_section && !done {
+        out.push(line.clone());
+        done = true;
+    }
+    if !done {
+        if !out.is_empty() {
+            out.push(String::new());
+        }
+        out.push(header);
+        out.push(line);
+    }
+    let mut rendered = out.join("\n");
+    rendered.push('\n');
+    rendered
+}
+```
+
+Interaction (same file). `ask_save` does the whole save conversation against
+injected I/O and returns the new file text (or `None`); `run_guide` reads the
+file, calls it, and persists through the 3-line `persist_config` wrapper:
+
+```rust
+/// The post-run save conversation: 3-choice (skip / default / profile),
+/// profile-name prompt with validation retry, path + rendered text shown,
+/// y/N confirm. Returns the text to write, or `None` for "don't save".
+/// No filesystem access here ― the caller reads before and writes after ―
+/// so `Cursor`-driven tests cover every branch without touching disk.
+pub(crate) fn ask_save<R: BufRead, W: Write>(
+    input: &mut R,
+    output: &mut W,
+    existing: Option<&str>,
+    harness: &str,
+    path: &Path,
+) -> anyhow::Result<Option<String>> {
+    writeln!(output, "この設定を保存しますか? (config: {})", path.display())?;
+    let pick = ask_choice(
+        input,
+        output,
+        "保存先を選んでください",
+        &["保存しない", "既定のharnessにする (default_harness)", "profileに保存する"],
+        0,
+    )?;
+    let rendered = match pick {
+        Choice::Quit | Choice::Pick(0) => return Ok(None),
+        Choice::Pick(1) => render_default_harness(existing, harness),
+        _ => {
+            let name = ask_profile_name(input, output)?;
+            let Some(name) = name else {
+                return Ok(None);
+            };
+            render_profile(existing, &name, harness)
+        }
+    };
+    writeln!(output, "書き込む内容:\n{rendered}")?;
+    writeln!(output, "保存しますか? [y/N]")?;
+    let mut line = String::new();
+    if input.read_line(&mut line)? == 0 {
+        return Ok(None);
+    }
+    if line.trim().eq_ignore_ascii_case("y") {
+        Ok(Some(rendered))
+    } else {
+        Ok(None)
+    }
+}
+
+/// Free-text profile-name prompt with validation retry; `q`/EOF quits the
+/// save (not the guide).
+fn ask_profile_name<R: BufRead, W: Write>(
+    input: &mut R,
+    output: &mut W,
+) -> anyhow::Result<Option<String>> {
+    loop {
+        write!(output, "profile名 (英数・-・_)? [qでやめる] ")?;
+        output.flush()?;
+        let mut line = String::new();
+        if input.read_line(&mut line)? == 0 {
+            return Ok(None);
+        }
+        let name = line.trim();
+        if name.eq_ignore_ascii_case("q") {
+            return Ok(None);
+        }
+        if profile_name_is_valid(name) {
+            return Ok(name.to_string());
+        }
+        writeln!(output, "使えるのは英数・-・_だけです")?;
+    }
+}
+
+/// Thin filesystem wrapper: create parents, write atomically-by-rename is
+/// overkill for a small config ― a direct write is what the tests pin.
+fn persist_config(path: &Path, text: &str) -> anyhow::Result<()> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(path, text)?;
+    Ok(())
+}
+```
+
+`run_guide` change: add a `config_path: Option<&Path>` parameter. After the
+`実行したコマンド` reprint, when `Some(path)`: read the file
+(`std::fs::read_to_string(path).ok()` ― absent is fine), call `ask_save`,
+persist `Some(text)`. `None` skips the whole save question (keeps the Task 3
+quit-first test meaningful ― update its call site with `None`). `run_guide_entry`
+passes `config_file_path(env.config_home, env.home).as_deref()` ― reuse the
+existing session resolution (`use crate::session::config_file_path;`), so the
+guide writes exactly where the app reads.
+
+Tests for `ask_save` (scripted `Cursor`, no disk): skip→None; default+y→new
+text containing `default_harness`; profile path with name retry (invalid then
+valid); `q` at choice → None; `n` at confirm → None. Plus one `persist_config`
+round-trip through `std::env::temp_dir` with a pid-unique subdir.
+
+- [ ] **Step 4: Run to verify they pass**
+
+Run: `cargo test views::guide`
+Expected: PASS (all new tests; updated Task 3 call sites compile)
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add src/cli/views/guide.rs && git commit -m "feat(cli): save guided choices to config.toml"
+```
+
+---
+
 ### Task 6: Specs, budget, changelog, full green
 
 **Files:**
@@ -699,7 +978,7 @@ git add tests/guide_entry.rs tests/cli_help_golden.rs && git commit -m "test(cli
 
 - [ ] **Step 1: cli.md ― guide contract (new subsection under `## Views`)**
 
-Content (English, matching the file): entry conditions (no subcommand + both TTYs; explicit `tui`; `--harness` preset skips step 1), the 4-step flow with defaults, table-only output, command echo before/after as the reproducible artifact, non-TTY behavior (clap error / refusal), v0.5.4 scope (doctor/waste/failures) with pointer to the design doc's post-v0.5.5 expansion note. Reference `views/guide.rs`, not pasted code.
+Content (English, matching the file): entry conditions (no subcommand + both TTYs; explicit `tui`; `--harness` preset skips step 1), the 4-step flow with defaults, table-only output, command echo before/after as the reproducible artifact, the post-run config save question (skip / default_harness / profile; line-preserving edit; confirm-before-write), non-TTY behavior (clap error / refusal), v0.5.4 scope (doctor/waste/failures + config save) with pointer to the design doc's post-v0.5.5 expansion note. Reference `views/guide.rs`, not pasted code.
 
 - [ ] **Step 2: architecture.md ― the landed split**
 
@@ -715,6 +994,7 @@ Update the report row (~line 101): `cli/views/` now exists, holding `guide.rs` (
 - 対話ガイド: サブコマンドなし起動（TTY のとき）・`tui`
   サブコマンドで、harness → やりたいこと（doctor / waste / failures）→
   範囲の順に選ぶだけでレポートを表示。実行前後に相当コマンド文を出す。
+  実行後は config.toml への保存（default_harness / profile）も選べる。
 ```
 
 - [ ] **Step 4: Set the exact line budget**

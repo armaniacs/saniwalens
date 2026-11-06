@@ -74,9 +74,24 @@ README の Quick start（doctor → scope → optimize）を知らない新規�
   再現物は相当コマンド文であるため、`equivalent_command()` の全組合せ表テストで
   pin する。これを機械契約とする。
 
+## config.toml の保存（v0.5.4）
+
+- ガイド実行後、相当コマンドの再掲に続けて保存を聞く（3択: 保存しない /
+  default_harness にする / profile にする）。
+- default_harness: 使った harness を既定にする。既存ファイルがあれば
+  `default_harness` 行だけ更新し、なければ新規作成する。他行・コメントは
+  保持する（TOML パースは既存値の確認のみ。書き換えは行単位の編集とし、
+  Serialize による全文書き換えはしない）。
+- profile: 名前を入力させ `[profiles.<名前>]` に `harness` を保存する。
+  既存セクションがあれば `harness` 行を更新し、なければセクションを追加する。
+  名前は英数・`-`・`_`のみ。db / scope は保存しない。
+- 書き込み前にパスと変更後の抜粋を表示して y/N で確認する。保存先の解決は
+  既存 `session::config_file_path` と同じにする。親ディレクトリは作成する。
+- テスト: 本文生成は純粋関数として表テストし、実書き込みは薄いラッパーに留める。
+
 ## 将来の拡張（v0.5.5 以後）
 
-v0.5.4 のガイド範囲は doctor／waste／failures の3本に絞ることを宣言する。
+v0.5.4 のガイド範囲は doctor／waste／failures の3本＋config 保存に絞ることを宣言する。
 v0.5.5 以後の版で、利用状況を見ながら以下の候補を順次取り込む（順序未定）。
 
 - 残りのレポート系: usage／trend／inventory／overhead／prompts／stuck
