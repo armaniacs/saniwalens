@@ -13,7 +13,8 @@
 ## File map
 
 - Create: `src/cli/views/guide.rs` ― `Entry`, `guide_entry()`, `Purpose`, `ScopeChoice`, `equivalent_command()`, `Choice`, `ask_choice()`, `run_guide()`, `run_guide_entry()` + unit tests.
-- Create: `src/cli/views/mod.rs` ― `pub(crate) mod guide; pub(crate) mod trend;` plus re-exports.
+- Create: `src/cli/views/mod.rs` ― `pub(crate) mod trend;` (the `mod guide;`
+  line lands in Task 2 together with `guide.rs`, so the tree builds at every commit)
 - Move: `src/cli/trend.rs` → `src/cli/views/trend.rs` (`git mv`, same commit as the views dir creation).
 - Modify: `src/cli/mod.rs` ― replace `mod trend` / `use trend::*` with `mod views` / `use views::trend::*`, add `Command::Tui` + arm + no-args branch (`use std::io::IsTerminal;`). Nothing else: no view logic here.
 - Modify: `src/cli/window.rs` ― tests-only: add `Command::Tui` to the `Analyze | Sql | Optimize` fallthrough arm of `windowed_flags()` (line ~644).
@@ -39,8 +40,7 @@ git mv src/cli/trend.rs src/cli/views/trend.rs
 ```
 
 ```rust
-// src/cli/views/mod.rs (new file, complete content)
-pub(crate) mod guide;
+// src/cli/views/mod.rs (new file, complete content for this task)
 pub(crate) mod trend;
 ```
 
@@ -77,9 +77,15 @@ git add src/cli/views src/cli/mod.rs && git commit -m "refactor(cli): land src/c
 
 **Files:**
 - Modify: `src/cli/views/guide.rs` (new; start with this task's items + `#[cfg(test)] mod tests`)
-- Modify: `src/cli/mod.rs` ― nothing in this task (guide.rs is not wired yet, so add `pub(crate) mod guide;` to `views/mod.rs` only ― already done in Task 1 ― and keep `guide` `#[allow(dead_code)]`-free by testing it directly: unit tests in the same file count as use)
+- Modify: `src/cli/views/mod.rs` ― add the `pub(crate) mod guide;` line when `guide.rs` lands
+- `src/cli/mod.rs` is untouched in this task (wiring is Task 4; unit tests in the same file exercise the new code)
 
 - [ ] **Step 1: Write the failing tests**
+
+Create `src/cli/views/guide.rs` containing ONLY the `#[cfg(test)] mod tests`
+block from the code below (no items yet), and add `pub(crate) mod guide;`
+to `src/cli/views/mod.rs`. The test module's `use super::*;` then resolves
+against an empty parent ― that is the red state.
 
 ```rust
 // appended inside `#[cfg(test)] mod tests` in src/cli/views/guide.rs
@@ -138,12 +144,15 @@ fn equivalent_command_covers_every_combination() {
 - [ ] **Step 2: Run to verify they fail**
 
 Run: `cargo test views::guide`
-Expected: FAIL ― `could not find guide in views` / unresolved items (file does not exist yet)
+Expected: FAIL ― unresolved `Entry`, `guide_entry`, `Purpose`, `equivalent_command` (tests exist, items do not); the rest of the crate still builds
 
 - [ ] **Step 3: Write the minimal implementation**
 
+Add the items below to `src/cli/views/guide.rs`, keeping the Step 1 tests.
+The test module stays at the end of the file.
+
 ```rust
-// src/cli/views/guide.rs (complete content for this task)
+// src/cli/views/guide.rs: the items (tests from Step 1 stay at the end)
 use crate::adapter::harness::Harness;
 
 /// What `run()` should do with this invocation, decided before clap parses.
@@ -229,7 +238,7 @@ Expected: PASS (5 tests)
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/cli/views/guide.rs && git commit -m "feat(cli): pure guide core (entry classifier and equivalent command)"
+git add src/cli/views/guide.rs src/cli/views/mod.rs && git commit -m "feat(cli): pure guide core (entry classifier and equivalent command)"
 ```
 
 ---
