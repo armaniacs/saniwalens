@@ -249,6 +249,61 @@ git add src/cli/views/guide.rs src/cli/views/mod.rs && git commit -m "feat(cli):
 - Modify: `src/cli/views/guide.rs` (append `Choice`, `ask_choice`, `run_guide`, `run_guide_entry` + tests)
 - Test: `cargo test views::guide`
 
+**Review follow-ups from Task 2 (do in this task, same file):**
+- (a) Expand the `equivalent_command` table test to the full 3x3x2 matrix
+  (replaces the 4-case test; loop-built expectations with independently
+  written literals):
+```rust
+#[test]
+fn equivalent_command_covers_the_full_matrix() {
+    let harnesses = [
+        (Harness::Claude, ""),
+        (Harness::Opencode, " --harness opencode"),
+        (Harness::Kilocode, " --harness kilocode"),
+    ];
+    let purposes = [
+        ("doctor", Purpose::Doctor),
+        ("waste", Purpose::Waste),
+        ("failures", Purpose::Failures),
+    ];
+    let scopes = [
+        ("", ScopeChoice::All),
+        (" --scope global", ScopeChoice::Global),
+        (" --scope project", ScopeChoice::Project),
+    ];
+    for (harness, h) in &harnesses {
+        for (command, purpose) in &purposes {
+            for (s, scope) in &scopes {
+                assert_eq!(
+                    equivalent_command(harness, *purpose, *scope),
+                    format!("saniwalens{h} {command}{s}"),
+                );
+            }
+        }
+    }
+}
+```
+- (b) A trailing `--harness` / `--profile` with no value is `Normal`
+  (today clap errors; the guide must not silently swallow it):
+```rust
+if arg == "--harness" {
+    match args.next() {
+        Some(value) => harness = Some(value.clone()),
+        None => return Entry::Normal,
+    }
+} else if arg == "--profile" {
+    match args.next() {
+        Some(value) => profile = Some(value.clone()),
+        None => return Entry::Normal,
+    }
+} else if arg == "tui" {
+```
+  plus tests: `["saniwalens", "--harness"]` → `Normal`,
+  `["saniwalens", "--profile"]` → `Normal`
+  (the existing preset tests stay green unchanged).
+- (c) Drop the stale Step-1 scaffolding comment in the test module
+  (`// appended inside ...`), now that the file is complete.
+
 - [ ] **Step 1: Write the failing tests**
 
 ```rust
