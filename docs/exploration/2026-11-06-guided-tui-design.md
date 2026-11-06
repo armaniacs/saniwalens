@@ -29,7 +29,7 @@ README の Quick start（doctor → scope → optimize）を知らない新規�
   指定値を初期値にする。
 - `saniwalens tui` → `Command` enum に追加する明示入口（TTY 必須は同じ）。
 - 非 TTY（パイプ・CI・リダイレクト）ではガイドを起動せず従来の挙動を維持。
-- 終了（`q`／Ctrl-C／メニューの「終了」）→ 何も実行せず終了コード 0。
+- 終了（`q`／メニューの「終了」）→ 何も実行せず終了コード 0（Ctrl-C は中断）。
 
 ## §2 会話フロー（全4手以内・既定値付きで Enter 連打可）
 

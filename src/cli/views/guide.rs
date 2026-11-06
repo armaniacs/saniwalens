@@ -2,8 +2,11 @@ use std::io::{BufRead, Write};
 use std::path::Path;
 
 use crate::adapter::harness::{Harness, home_dir};
-use crate::session::{SessionEnv, config_file_path, resolve_cli};
+use crate::core::period::TimeRange;
+use crate::core::scope::ScopeFilter;
+use crate::session::{Session, SessionEnv, config_file_path, resolve_cli};
 
+use super::super::report::Format;
 use super::super::window::{PeriodArgs, ReadArgs, WindowedDispatch};
 use super::super::{doctor, failures, run_analyze, waste};
 
@@ -20,10 +23,12 @@ pub(crate) enum Entry {
 }
 
 /// Pure argv classifier: `--harness` / `--profile` values are presets, `tui`
-/// is the explicit entry, a `-` flag or any other token is a real command.
+/// is the explicit entry (flags after it still count as presets), a `-` flag
+/// or any other token is a real command.
 pub(crate) fn guide_entry(argv: &[String]) -> Entry {
     let mut harness: Option<String> = None;
     let mut profile: Option<String> = None;
+    let mut saw_tui = false;
     let mut args = argv.iter().skip(1);
     while let Some(arg) = args.next() {
         if arg == "--harness" {
@@ -37,13 +42,18 @@ pub(crate) fn guide_entry(argv: &[String]) -> Entry {
                 None => return Entry::Normal,
             }
         } else if arg == "tui" {
-            return Entry::Guide { harness, profile };
+            saw_tui = true;
         } else {
             // A `-` flag (--help, --version, …) or a real subcommand:
             // clap owns this invocation, not the guide.
             return Entry::Normal;
         }
     }
+    // End of argv with no subcommand or `-` flag: guide entry — a bare
+    // invocation, presets, `tui`, or any mix of those. `saw_tui` records
+    // the explicit form (kept for readers and future arms); the outcome is
+    // the same either way.
+    let _ = saw_tui;
     Entry::Guide { harness, profile }
 }
 
@@ -108,8 +118,19 @@ pub(crate) fn equivalent_command(
     format!("saniwalens{harness_part} {command}{scope_part}")
 }
 
-/// One answered prompt: a 0-based pick, or quit (`q`, EOF, Ctrl-C surfaces as
-/// an Err from read_line and aborts the guide with the OS error).
+/// The post-run next step: `optimize` is out of the guide's scope, but every
+/// guided run points at it with the matching `--scope` so the cause can be
+/// dug into by hand. The table test below pins all three scopes.
+pub(crate) fn next_step_line(scope: ScopeChoice) -> String {
+    match scope {
+        ScopeChoice::All => "saniwalens optimize".to_string(),
+        ScopeChoice::Global => "saniwalens optimize --scope global".to_string(),
+        ScopeChoice::Project => "saniwalens optimize --scope project".to_string(),
+    }
+}
+
+/// One answered prompt: a 0-based pick, or quit (`q`, EOF). SIGINT (Ctrl-C)
+/// terminates the process; only `q`/EOF return `Quit` (exit 0).
 pub(crate) enum Choice {
     Pick(usize),
     Quit,
@@ -335,6 +356,20 @@ fn persist_config(path: &Path, text: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Shared open + report call for the scoped table views (waste, failures).
+/// Doctor keeps its own open: its `--format` set is narrower (table|json).
+fn run_scoped(
+    dispatch: &WindowedDispatch,
+    scope_flag: Option<&str>,
+    period: &PeriodArgs,
+    read: &ReadArgs,
+    report: fn(&Session, &ScopeFilter, TimeRange, Format) -> anyhow::Result<()>,
+) -> anyhow::Result<()> {
+    let opened = dispatch.open_scoped(scope_flag, None, period, read, run_analyze)?;
+    let (windowed, filter) = opened.into_parts();
+    report(&windowed.sess, &filter, windowed.window, windowed.format)
+}
+
 pub(crate) fn run_guide<R: BufRead, W: Write>(
     harness: &Harness,
     dispatch: &WindowedDispatch,
@@ -342,14 +377,8 @@ pub(crate) fn run_guide<R: BufRead, W: Write>(
     output: &mut W,
     config_path: Option<&Path>,
 ) -> anyhow::Result<()> {
-    let harness_names = ["claude", "opencode", "kilocode"];
-    let current = match harness {
-        Harness::Claude => 0,
-        Harness::Opencode => 1,
-        Harness::Kilocode => 2,
-    };
     // Step 1 (design §2): confirm, not re-ask ― Enter keeps the resolved value.
-    writeln!(output, "使っているエージェント: {}", harness_names[current])?;
+    writeln!(output, "使っているエージェント: {}", harness_name(harness))?;
 
     let period = PeriodArgs {
         since: None,
@@ -412,19 +441,24 @@ pub(crate) fn run_guide<R: BufRead, W: Write>(
                 doctor(&windowed.sess, &filter, windowed.window, windowed.format)?;
             }
             Purpose::Waste => {
-                let opened = dispatch.open_scoped(scope_flag, None, &period, &read, run_analyze)?;
-                let (windowed, filter) = opened.into_parts();
-                waste(&windowed.sess, &filter, windowed.window, windowed.format)?;
+                run_scoped(dispatch, scope_flag, &period, &read, waste)?;
             }
             Purpose::Failures => {
-                let opened = dispatch.open_scoped(scope_flag, None, &period, &read, run_analyze)?;
-                let (windowed, filter) = opened.into_parts();
-                failures(&windowed.sess, &filter, windowed.window, windowed.format)?;
+                run_scoped(dispatch, scope_flag, &period, &read, failures)?;
             }
         }
         writeln!(output, "実行したコマンド: {command}")?;
+        writeln!(
+            output,
+            "次の一手: {} で原因の深掘りと対策提案",
+            next_step_line(scope)
+        )?;
         if let Some(path) = config_path {
-            let existing = std::fs::read_to_string(path).ok();
+            let existing = match std::fs::read_to_string(path) {
+                Ok(text) => Some(text),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+                Err(e) => return Err(e.into()),
+            };
             if let Some(text) = ask_save(
                 input,
                 output,
@@ -508,6 +542,57 @@ mod tests {
     }
 
     #[test]
+    fn flags_after_tui_still_count_as_presets() {
+        let argv = vec![
+            "saniwalens".to_string(),
+            "tui".to_string(),
+            "--harness".to_string(),
+            "kilocode".to_string(),
+        ];
+        assert!(matches!(
+            guide_entry(&argv),
+            Entry::Guide { harness: Some(h), profile: None } if h == "kilocode"
+        ));
+    }
+
+    #[test]
+    fn flags_around_tui_combine_into_both_presets() {
+        let argv = vec![
+            "saniwalens".to_string(),
+            "--harness".to_string(),
+            "claude".to_string(),
+            "tui".to_string(),
+            "--profile".to_string(),
+            "w".to_string(),
+        ];
+        assert!(matches!(
+            guide_entry(&argv),
+            Entry::Guide { harness: Some(h), profile: Some(p) } if h == "claude" && p == "w"
+        ));
+    }
+
+    #[test]
+    fn a_subcommand_after_tui_is_not_a_guide() {
+        let argv = vec![
+            "saniwalens".to_string(),
+            "tui".to_string(),
+            "doctor".to_string(),
+        ];
+        assert!(matches!(guide_entry(&argv), Entry::Normal));
+    }
+
+    #[test]
+    fn an_unknown_flag_after_tui_is_not_a_guide() {
+        let argv = vec![
+            "saniwalens".to_string(),
+            "tui".to_string(),
+            "--db".to_string(),
+            "x".to_string(),
+        ];
+        assert!(matches!(guide_entry(&argv), Entry::Normal));
+    }
+
+    #[test]
     fn a_real_subcommand_is_not_a_guide() {
         for argv in [
             vec!["saniwalens", "doctor"],
@@ -561,6 +646,19 @@ mod tests {
             }
         }
         assert_eq!(n, 27, "3 harnesses x 3 purposes x 3 scopes");
+    }
+
+    #[test]
+    fn next_step_line_points_at_optimize_with_the_matching_scope() {
+        assert_eq!(next_step_line(ScopeChoice::All), "saniwalens optimize");
+        assert_eq!(
+            next_step_line(ScopeChoice::Global),
+            "saniwalens optimize --scope global"
+        );
+        assert_eq!(
+            next_step_line(ScopeChoice::Project),
+            "saniwalens optimize --scope project"
+        );
     }
 
     #[test]
@@ -749,6 +847,32 @@ mod tests {
         let path = std::path::Path::new("/tmp/saniwalens-test-config.toml");
         let out = ask_save(&mut input, &mut output, None, "kilocode", path).unwrap();
         assert!(out.is_none());
+    }
+
+    #[test]
+    fn ask_save_profile_choice_then_q_at_name_returns_none() {
+        // Picks "profile", then quits at the name prompt: no write text and
+        // no confirm shown.
+        let mut input = std::io::Cursor::new("3\nq\n");
+        let mut output = Vec::new();
+        let path = std::path::Path::new("/tmp/saniwalens-test-config.toml");
+        let out = ask_save(&mut input, &mut output, None, "kilocode", path).unwrap();
+        assert!(out.is_none());
+        let shown = String::from_utf8(output).unwrap();
+        assert!(!shown.contains("保存しますか? [y/N]"), "{shown}");
+    }
+
+    #[test]
+    fn ask_save_profile_choice_then_eof_at_confirm_returns_none() {
+        // Picks "profile", gives a valid name, then EOF at the y/N confirm:
+        // nothing is written.
+        let mut input = std::io::Cursor::new("3\nwork\n");
+        let mut output = Vec::new();
+        let path = std::path::Path::new("/tmp/saniwalens-test-config.toml");
+        let out = ask_save(&mut input, &mut output, None, "kilocode", path).unwrap();
+        assert!(out.is_none());
+        let shown = String::from_utf8(output).unwrap();
+        assert!(shown.contains("保存しますか? [y/N]"), "{shown}");
     }
 
     #[test]
