@@ -207,7 +207,7 @@ fn windowed_views() -> Vec<String> {
 /// whole-history: they take no period flag. Fixed by that contract, so the
 /// partition below can tell a command that is not a view from a view that
 /// carries the shared group.
-const WHOLE_HISTORY: [&str; 3] = ["analyze", "sql", "optimize"];
+const WHOLE_HISTORY: [&str; 4] = ["analyze", "sql", "optimize", "tui"];
 
 /// The count the discriminator resolves to today. Beside the set comparison,
 /// this pins the set's size: deleting a view and its capture row together
