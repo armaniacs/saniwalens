@@ -11,7 +11,10 @@ use super::super::{doctor, failures, run_analyze, waste};
 pub(crate) enum Entry {
     /// No subcommand (or the explicit `tui`): run the guide. Presets come
     /// from the global flags seen before the decision point.
-    Guide { harness: Option<String>, profile: Option<String> },
+    Guide {
+        harness: Option<String>,
+        profile: Option<String>,
+    },
     /// Anything else: normal clap parsing (today's behavior, unchanged).
     Normal,
 }
@@ -174,12 +177,21 @@ pub(crate) fn render_default_harness(existing: Option<&str>, harness: &str) -> S
         let is_target = !done
             && !in_table
             && trimmed.starts_with("default_harness")
-            && trimmed["default_harness".len()..].trim_start().starts_with('=');
-        out.push(if is_target { line.clone() } else { raw.to_string() });
+            && trimmed["default_harness".len()..]
+                .trim_start()
+                .starts_with('=');
+        out.push(if is_target {
+            line.clone()
+        } else {
+            raw.to_string()
+        });
         done = done || is_target;
     }
     if !done {
-        let pos = out.iter().position(|l| l.trim_start().starts_with('[')).unwrap_or(out.len());
+        let pos = out
+            .iter()
+            .position(|l| l.trim_start().starts_with('['))
+            .unwrap_or(out.len());
         out.insert(pos, line);
     }
     let mut rendered = out.join("\n");
@@ -214,7 +226,11 @@ pub(crate) fn render_profile(existing: Option<&str>, name: &str, harness: &str) 
             && !done
             && trimmed.starts_with("harness")
             && trimmed["harness".len()..].trim_start().starts_with('=');
-        out.push(if is_target { line.clone() } else { raw.to_string() });
+        out.push(if is_target {
+            line.clone()
+        } else {
+            raw.to_string()
+        });
         done = done || is_target;
     }
     if in_section && !done {
@@ -245,12 +261,20 @@ pub(crate) fn ask_save<R: BufRead, W: Write>(
     harness: &str,
     path: &Path,
 ) -> anyhow::Result<Option<String>> {
-    writeln!(output, "この設定を保存しますか? (config: {})", path.display())?;
+    writeln!(
+        output,
+        "この設定を保存しますか? (config: {})",
+        path.display()
+    )?;
     let pick = ask_choice(
         input,
         output,
         "保存先を選んでください",
-        &["保存しない", "既定のharnessにする (default_harness)", "profileに保存する"],
+        &[
+            "保存しない",
+            "既定のharnessにする (default_harness)",
+            "profileに保存する",
+        ],
         0,
     )?;
     let rendered = match pick {
@@ -401,7 +425,13 @@ pub(crate) fn run_guide<R: BufRead, W: Write>(
         writeln!(output, "実行したコマンド: {command}")?;
         if let Some(path) = config_path {
             let existing = std::fs::read_to_string(path).ok();
-            if let Some(text) = ask_save(input, output, existing.as_deref(), harness_name(harness), path)? {
+            if let Some(text) = ask_save(
+                input,
+                output,
+                existing.as_deref(),
+                harness_name(harness),
+                path,
+            )? {
                 persist_config(path, &text)?;
             }
         }
@@ -451,13 +481,20 @@ mod tests {
         let argv = vec!["saniwalens".to_string()];
         assert!(matches!(
             guide_entry(&argv),
-            Entry::Guide { harness: None, profile: None }
+            Entry::Guide {
+                harness: None,
+                profile: None
+            }
         ));
     }
 
     #[test]
     fn harness_flag_becomes_the_preset_not_a_subcommand() {
-        let argv = vec!["saniwalens".to_string(), "--harness".to_string(), "kilocode".to_string()];
+        let argv = vec![
+            "saniwalens".to_string(),
+            "--harness".to_string(),
+            "kilocode".to_string(),
+        ];
         assert!(matches!(
             guide_entry(&argv),
             Entry::Guide { harness: Some(h), profile: None } if h == "kilocode"
@@ -599,33 +636,56 @@ mod tests {
 
     #[test]
     fn default_harness_save_replaces_only_its_own_line() {
-        let existing = "# keep me\ndefault_harness = \"claude\"\n[profiles.work]\nharness = \"opencode\"\n";
+        let existing =
+            "# keep me\ndefault_harness = \"claude\"\n[profiles.work]\nharness = \"opencode\"\n";
         let out = render_default_harness(Some(existing), "kilocode");
         assert!(out.contains("# keep me\n"), "comments survive: {out}");
-        assert!(out.contains("default_harness = \"kilocode\"\n"), "value replaced: {out}");
-        assert!(out.contains("[profiles.work]\nharness = \"opencode\"\n"), "other sections untouched: {out}");
-        assert_eq!(out.matches("default_harness").count(), 1, "no duplication: {out}");
+        assert!(
+            out.contains("default_harness = \"kilocode\"\n"),
+            "value replaced: {out}"
+        );
+        assert!(
+            out.contains("[profiles.work]\nharness = \"opencode\"\n"),
+            "other sections untouched: {out}"
+        );
+        assert_eq!(
+            out.matches("default_harness").count(),
+            1,
+            "no duplication: {out}"
+        );
     }
 
     #[test]
     fn default_harness_save_inserts_before_the_first_table() {
         let existing = "[profiles.work]\nharness = \"opencode\"\n";
         let out = render_default_harness(Some(existing), "claude");
-        assert!(out.starts_with("default_harness = \"claude\"\n"), "top-level, before [profiles]: {out}");
+        assert!(
+            out.starts_with("default_harness = \"claude\"\n"),
+            "top-level, before [profiles]: {out}"
+        );
     }
 
     #[test]
     fn profile_save_appends_a_new_section() {
         let out = render_profile(None, "work", "kilocode");
-        assert!(out.contains("[profiles.work]\nharness = \"kilocode\"\n"), "{out}");
+        assert!(
+            out.contains("[profiles.work]\nharness = \"kilocode\"\n"),
+            "{out}"
+        );
     }
 
     #[test]
     fn profile_save_updates_the_harness_line_inside_its_section() {
         let existing = "default_harness = \"claude\"\n[profiles.work]\nharness = \"opencode\"\n[profiles.home]\nharness = \"claude\"\n";
         let out = render_profile(Some(existing), "work", "kilocode");
-        assert!(out.contains("[profiles.work]\nharness = \"kilocode\"\n"), "{out}");
-        assert!(out.contains("[profiles.home]\nharness = \"claude\"\n"), "other profiles untouched: {out}");
+        assert!(
+            out.contains("[profiles.work]\nharness = \"kilocode\"\n"),
+            "{out}"
+        );
+        assert!(
+            out.contains("[profiles.home]\nharness = \"claude\"\n"),
+            "other profiles untouched: {out}"
+        );
     }
 
     #[test]
@@ -665,7 +725,10 @@ mod tests {
         let out = ask_save(&mut input, &mut output, None, "kilocode", path)
             .unwrap()
             .expect("y confirms the save");
-        assert!(out.contains("[profiles.work]\nharness = \"kilocode\"\n"), "{out}");
+        assert!(
+            out.contains("[profiles.work]\nharness = \"kilocode\"\n"),
+            "{out}"
+        );
         let shown = String::from_utf8(output).unwrap();
         assert!(shown.contains("使えるのは英数"), "{shown}");
     }
@@ -690,7 +753,8 @@ mod tests {
 
     #[test]
     fn persist_config_round_trip_through_a_pid_unique_dir() {
-        let dir = std::env::temp_dir().join(format!("saniwalens-guide-test-{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("saniwalens-guide-test-{}", std::process::id()));
         let path = dir.join("config.toml");
         let _ = std::fs::remove_dir_all(&dir);
         persist_config(&path, "default_harness = \"kilocode\"\n").unwrap();

@@ -245,13 +245,14 @@ enum Command {
 
 pub fn run() -> Result<()> {
     let argv: Vec<String> = std::env::args().collect();
-    if let views::guide::Entry::Guide { harness, profile } = views::guide::guide_entry(&argv) {
-        if std::io::stdin().is_terminal() && std::io::stdout().is_terminal() {
-            return views::guide::run_guide_entry(harness.as_deref(), profile.as_deref());
-        }
-        // Non-TTY without a subcommand: fall through to `Cli::parse`, whose
-        // missing-subcommand error is what scripts see today (behavior unchanged).
+    if let views::guide::Entry::Guide { harness, profile } = views::guide::guide_entry(&argv)
+        && std::io::stdin().is_terminal()
+        && std::io::stdout().is_terminal()
+    {
+        return views::guide::run_guide_entry(harness.as_deref(), profile.as_deref());
     }
+    // Non-TTY without a subcommand: fall through to `Cli::parse`, whose
+    // missing-subcommand error is what scripts see today (behavior unchanged).
     let cli = Cli::parse();
     // One call resolves flags, the config file, and the builtins into the
     // harness plus an optional configured store; see `session.rs`.
@@ -409,7 +410,9 @@ pub fn run() -> Result<()> {
         }
         Command::Tui => {
             if !(std::io::stdin().is_terminal() && std::io::stdout().is_terminal()) {
-                anyhow::bail!("`tui` needs an interactive terminal (stdin and stdout must both be TTYs)");
+                anyhow::bail!(
+                    "`tui` needs an interactive terminal (stdin and stdout must both be TTYs)"
+                );
             }
             views::guide::run_guide_entry(cli.harness.as_deref(), cli.profile.as_deref())
         }

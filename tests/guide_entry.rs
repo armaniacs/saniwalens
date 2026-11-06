@@ -25,7 +25,10 @@ fn run_piped(name: &str, args: &[&str]) -> std::process::Output {
 #[test]
 fn tui_without_a_terminal_refuses_instead_of_hanging() {
     let out = run_piped("tui-piped", &["tui"]);
-    assert!(!out.status.success(), "piped `tui` must fail, not wait on stdin");
+    assert!(
+        !out.status.success(),
+        "piped `tui` must fail, not wait on stdin"
+    );
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
         stderr.contains("interactive terminal"),
