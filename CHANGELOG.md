@@ -7,6 +7,21 @@
 形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に従い、
 バージョンは [Semantic Versioning](https://semver.org/lang/ja/) に従う。
 
+## [0.5.3] - 2026-11-06
+
+### Added
+
+- 素の Cargo だけで回せる `Makefile` を追加（`make build` / `make test` /
+  `make install` ほか、`make check` / `make fmt` / `make clean` /
+  `make uninstall`）。Nix や `just` が無い環境でもおなじみの綴りで
+  ビルド・テスト・インストールできる。`make install` の既定の置き先は
+  `~/.local/bin`（`PREFIX` / `DESTDIR` で変更可）。
+
+### Changed
+
+- 配布クレートの対象外（`justfile` と同等）に `Makefile` を加えた。
+  公開物・出力に変更はない。
+
 ## [0.5.2] - 2026-11-03
 
 ### Added

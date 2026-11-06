@@ -39,6 +39,16 @@ just test            # cargo test
 just build           # target/release/saniwalensにリリースバイナリ
 ```
 
+nix/justなしで同じタスクを回す `make` もある:
+
+```sh
+make                 # ターゲット一覧
+make check           # rustfmt --check + clippy(CIの関門)
+make test            # cargo test
+make build           # target/release/saniwalensにリリースバイナリ
+make install         # ~/.local/binにインストール(PREFIX=/usr/localで変更可)
+```
+
 Plain Cargo works too (`cargo build --release`). CI runs
 `nix develop -c just check` and `just test`.
 

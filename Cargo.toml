@@ -25,6 +25,7 @@ exclude = [
   "flake.lock",
   "flake.nix",
   "justfile",
+  "Makefile",
   "rust-toolchain.toml",
 ]
 

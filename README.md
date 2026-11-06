@@ -33,7 +33,8 @@ nix profile install github:armaniacs/saniwalens  # install `saniwalens` onto PAT
 nix profile install github:armaniacs/saniwalens/vX.Y.Z  # a specific release
 ```
 
-From source ― dev tools are pinned by the Nix flake, tasks run via `just`:
+From source ― dev tools are pinned by the Nix flake, tasks run via `just`
+(or plain `make`, which needs nothing but Cargo):
 
 ```sh
 nix develop          # enter the dev shell (pinned rust, just, sqlite, …)
@@ -41,6 +42,14 @@ just                 # list tasks
 just check           # rustfmt --check + clippy (the CI gate)
 just test            # cargo test
 just build           # release binary at target/release/saniwalens
+```
+
+```sh
+make                 # list targets (same tasks, no nix/just needed)
+make check           # rustfmt --check + clippy (the CI gate)
+make test            # cargo test
+make build           # release binary at target/release/saniwalens
+make install         # install it to ~/.local/bin (override with PREFIX=/usr/local)
 ```
 
 Plain Cargo also works (`cargo build --release`) if you have a recent stable
@@ -100,7 +109,7 @@ on stderr; pass `--frozen` to read the store exactly as it is. Running
 ## Supported harnesses
 
 `saniwalens` analyzes one agent harness per run, selected with `--harness`.
-`0.5.2` supports these three. The default stays `claude`, so every existing
+`0.5.3` supports these three. The default stays `claude`, so every existing
 invocation keeps working byte-identically.
 
 | `--harness` | Agent | Transcripts | Config catalog | Store | `optimize` launch |
@@ -124,7 +133,7 @@ holds the per-harness contract, including what each harness cannot report yet
 (for example no subagent split under opencode/kilocode, no `prompts` view
 under opencode).
 
-Not supported in `0.5.2`: DSH (DeepSeek harness app) and any other harness.
+Not supported in `0.5.3`: DSH (DeepSeek harness app) and any other harness.
 DSH support is the next candidate; see [`CONTRIBUTING.md`](CONTRIBUTING.md)
 for what a new-harness contribution needs (an OpenAI-compatible endpoint
 alone is not enough ― the transcript and config formats must be observable
