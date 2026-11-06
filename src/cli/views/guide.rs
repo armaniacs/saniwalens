@@ -1,7 +1,8 @@
 use std::io::{BufRead, Write};
+use std::path::Path;
 
 use crate::adapter::harness::{Harness, home_dir};
-use crate::session::{SessionEnv, resolve_cli};
+use crate::session::{SessionEnv, config_file_path, resolve_cli};
 
 use super::super::window::{PeriodArgs, ReadArgs, WindowedDispatch};
 use super::super::{doctor, failures, run_analyze, waste};
@@ -59,6 +60,25 @@ pub(crate) enum ScopeChoice {
     Project,
 }
 
+/// Profile names are TOML bare keys and path-safe segments: ASCII
+/// alphanumerics plus `-` and `_` only.
+pub(crate) fn profile_name_is_valid(name: &str) -> bool {
+    !name.is_empty()
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+}
+
+/// Canonical harness spelling for the config file. Also used by
+/// `equivalent_command` (replace its inline match with this).
+pub(crate) fn harness_name(harness: &Harness) -> &'static str {
+    match harness {
+        Harness::Claude => "claude",
+        Harness::Opencode => "opencode",
+        Harness::Kilocode => "kilocode",
+    }
+}
+
 /// The reproducible command line for a guided run: printed before the run
 /// and reprinted after it, so a guided run is always re-runnable by hand.
 /// This string is the guide's machine contract (no JSON golden: the guide
@@ -68,10 +88,9 @@ pub(crate) fn equivalent_command(
     purpose: Purpose,
     scope: ScopeChoice,
 ) -> String {
-    let harness_part = match harness {
-        Harness::Claude => String::new(),
-        Harness::Opencode => " --harness opencode".to_string(),
-        Harness::Kilocode => " --harness kilocode".to_string(),
+    let harness_part = match harness_name(harness) {
+        "claude" => String::new(),
+        other => format!(" --harness {other}"),
     };
     let command = match purpose {
         Purpose::Doctor => "doctor",
@@ -134,11 +153,170 @@ pub(crate) fn ask_choice<R: BufRead, W: Write>(
     }
 }
 
+/// New file text with `default_harness` set. Line-based edit: everything else
+/// (comments, profiles, blank lines) is preserved verbatim. No Serialize
+/// round-trip ― `FileConfig` is Deserialize-only, and a rewrite would eat
+/// the user's comments.
+pub(crate) fn render_default_harness(existing: Option<&str>, harness: &str) -> String {
+    const HEADER: &str = "# saniwalens defaults (written by the guided TUI).";
+    let line = format!("default_harness = \"{harness}\"");
+    let Some(text) = existing else {
+        return format!("{HEADER}\n{line}\n");
+    };
+    let mut out: Vec<String> = Vec::new();
+    let mut done = false;
+    let mut in_table = false;
+    for raw in text.lines() {
+        let trimmed = raw.trim_start();
+        if trimmed.starts_with('[') {
+            in_table = true;
+        }
+        let is_target = !done
+            && !in_table
+            && trimmed.starts_with("default_harness")
+            && trimmed["default_harness".len()..].trim_start().starts_with('=');
+        out.push(if is_target { line.clone() } else { raw.to_string() });
+        done = done || is_target;
+    }
+    if !done {
+        let pos = out.iter().position(|l| l.trim_start().starts_with('[')).unwrap_or(out.len());
+        out.insert(pos, line);
+    }
+    let mut rendered = out.join("\n");
+    rendered.push('\n');
+    rendered
+}
+
+/// New file text with `[profiles.<name>]` carrying `harness`. Same
+/// line-preserving contract as `render_default_harness`.
+pub(crate) fn render_profile(existing: Option<&str>, name: &str, harness: &str) -> String {
+    const HEADER: &str = "# saniwalens defaults (written by the guided TUI).";
+    let header = format!("[profiles.{name}]");
+    let line = format!("harness = \"{harness}\"");
+    let Some(text) = existing else {
+        return format!("{HEADER}\n{header}\n{line}\n");
+    };
+    let mut out: Vec<String> = Vec::new();
+    let mut in_section = false;
+    let mut done = false;
+    for raw in text.lines() {
+        let trimmed = raw.trim_start();
+        if trimmed.starts_with('[') {
+            // Close the section at the next header; insert the harness line
+            // if the section had none.
+            if in_section && !done {
+                out.push(line.clone());
+                done = true;
+            }
+            in_section = trimmed == header;
+        }
+        let is_target = in_section
+            && !done
+            && trimmed.starts_with("harness")
+            && trimmed["harness".len()..].trim_start().starts_with('=');
+        out.push(if is_target { line.clone() } else { raw.to_string() });
+        done = done || is_target;
+    }
+    if in_section && !done {
+        out.push(line.clone());
+        done = true;
+    }
+    if !done {
+        if !out.is_empty() {
+            out.push(String::new());
+        }
+        out.push(header);
+        out.push(line);
+    }
+    let mut rendered = out.join("\n");
+    rendered.push('\n');
+    rendered
+}
+
+/// The post-run save conversation: 3-choice (skip / default / profile),
+/// profile-name prompt with validation retry, path + rendered text shown,
+/// y/N confirm. Returns the text to write, or `None` for "don't save".
+/// No filesystem access here ― the caller reads before and writes after ―
+/// so `Cursor`-driven tests cover every branch without touching disk.
+pub(crate) fn ask_save<R: BufRead, W: Write>(
+    input: &mut R,
+    output: &mut W,
+    existing: Option<&str>,
+    harness: &str,
+    path: &Path,
+) -> anyhow::Result<Option<String>> {
+    writeln!(output, "この設定を保存しますか? (config: {})", path.display())?;
+    let pick = ask_choice(
+        input,
+        output,
+        "保存先を選んでください",
+        &["保存しない", "既定のharnessにする (default_harness)", "profileに保存する"],
+        0,
+    )?;
+    let rendered = match pick {
+        Choice::Quit | Choice::Pick(0) => return Ok(None),
+        Choice::Pick(1) => render_default_harness(existing, harness),
+        _ => {
+            let name = ask_profile_name(input, output)?;
+            let Some(name) = name else {
+                return Ok(None);
+            };
+            render_profile(existing, &name, harness)
+        }
+    };
+    writeln!(output, "書き込む内容:\n{rendered}")?;
+    writeln!(output, "保存しますか? [y/N]")?;
+    let mut line = String::new();
+    if input.read_line(&mut line)? == 0 {
+        return Ok(None);
+    }
+    if line.trim().eq_ignore_ascii_case("y") {
+        Ok(Some(rendered))
+    } else {
+        Ok(None)
+    }
+}
+
+/// Free-text profile-name prompt with validation retry; `q`/EOF quits the
+/// save (not the guide).
+fn ask_profile_name<R: BufRead, W: Write>(
+    input: &mut R,
+    output: &mut W,
+) -> anyhow::Result<Option<String>> {
+    loop {
+        write!(output, "profile名 (英数・-・_)? [qでやめる] ")?;
+        output.flush()?;
+        let mut line = String::new();
+        if input.read_line(&mut line)? == 0 {
+            return Ok(None);
+        }
+        let name = line.trim();
+        if name.eq_ignore_ascii_case("q") {
+            return Ok(None);
+        }
+        if profile_name_is_valid(name) {
+            return Ok(Some(name.to_string()));
+        }
+        writeln!(output, "使えるのは英数・-・_だけです")?;
+    }
+}
+
+/// Thin filesystem wrapper: create parents, write atomically-by-rename is
+/// overkill for a small config ― a direct write is what the tests pin.
+fn persist_config(path: &Path, text: &str) -> anyhow::Result<()> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(path, text)?;
+    Ok(())
+}
+
 pub(crate) fn run_guide<R: BufRead, W: Write>(
     harness: &Harness,
     dispatch: &WindowedDispatch,
     input: &mut R,
     output: &mut W,
+    config_path: Option<&Path>,
 ) -> anyhow::Result<()> {
     let harness_names = ["claude", "opencode", "kilocode"];
     let current = match harness {
@@ -221,6 +399,12 @@ pub(crate) fn run_guide<R: BufRead, W: Write>(
             }
         }
         writeln!(output, "実行したコマンド: {command}")?;
+        if let Some(path) = config_path {
+            let existing = std::fs::read_to_string(path).ok();
+            if let Some(text) = ask_save(input, output, existing.as_deref(), harness_name(harness), path)? {
+                persist_config(path, &text)?;
+            }
+        }
         writeln!(output, "もう1件見る? [y/N]")?;
         let mut line = String::new();
         if input.read_line(&mut line)? == 0 {
@@ -248,11 +432,13 @@ pub(crate) fn run_guide_entry(harness: Option<&str>, profile: Option<&str>) -> a
     };
     let stdin = std::io::stdin();
     let stdout = std::io::stdout();
+    let config_path = config_file_path(config_home.as_deref(), home_dir());
     run_guide(
         &resolved.harness,
         &dispatch,
         &mut stdin.lock(),
         &mut stdout.lock(),
+        config_path.as_deref(),
     )
 }
 
@@ -397,9 +583,121 @@ mod tests {
         };
         let mut input = std::io::Cursor::new("q\n");
         let mut output = Vec::new();
-        run_guide(&harness, &dispatch, &mut input, &mut output).unwrap();
+        run_guide(&harness, &dispatch, &mut input, &mut output, None).unwrap();
         let shown = String::from_utf8(output).unwrap();
         assert!(shown.contains("健康診断"));
         assert!(!shown.contains("実行:"));
+    }
+
+    #[test]
+    fn default_harness_save_builds_a_new_file_from_nothing() {
+        assert_eq!(
+            render_default_harness(None, "kilocode"),
+            "# saniwalens defaults (written by the guided TUI).\ndefault_harness = \"kilocode\"\n",
+        );
+    }
+
+    #[test]
+    fn default_harness_save_replaces_only_its_own_line() {
+        let existing = "# keep me\ndefault_harness = \"claude\"\n[profiles.work]\nharness = \"opencode\"\n";
+        let out = render_default_harness(Some(existing), "kilocode");
+        assert!(out.contains("# keep me\n"), "comments survive: {out}");
+        assert!(out.contains("default_harness = \"kilocode\"\n"), "value replaced: {out}");
+        assert!(out.contains("[profiles.work]\nharness = \"opencode\"\n"), "other sections untouched: {out}");
+        assert_eq!(out.matches("default_harness").count(), 1, "no duplication: {out}");
+    }
+
+    #[test]
+    fn default_harness_save_inserts_before_the_first_table() {
+        let existing = "[profiles.work]\nharness = \"opencode\"\n";
+        let out = render_default_harness(Some(existing), "claude");
+        assert!(out.starts_with("default_harness = \"claude\"\n"), "top-level, before [profiles]: {out}");
+    }
+
+    #[test]
+    fn profile_save_appends_a_new_section() {
+        let out = render_profile(None, "work", "kilocode");
+        assert!(out.contains("[profiles.work]\nharness = \"kilocode\"\n"), "{out}");
+    }
+
+    #[test]
+    fn profile_save_updates_the_harness_line_inside_its_section() {
+        let existing = "default_harness = \"claude\"\n[profiles.work]\nharness = \"opencode\"\n[profiles.home]\nharness = \"claude\"\n";
+        let out = render_profile(Some(existing), "work", "kilocode");
+        assert!(out.contains("[profiles.work]\nharness = \"kilocode\"\n"), "{out}");
+        assert!(out.contains("[profiles.home]\nharness = \"claude\"\n"), "other profiles untouched: {out}");
+    }
+
+    #[test]
+    fn profile_names_allow_only_ascii_word_chars_and_dashes() {
+        assert!(profile_name_is_valid("work"));
+        assert!(profile_name_is_valid("my-profile_2"));
+        assert!(!profile_name_is_valid(""));
+        assert!(!profile_name_is_valid("my profile"));
+        assert!(!profile_name_is_valid("../../etc"));
+    }
+
+    #[test]
+    fn ask_save_skip_returns_none() {
+        let mut input = std::io::Cursor::new("1\n");
+        let mut output = Vec::new();
+        let path = std::path::Path::new("/tmp/saniwalens-test-config.toml");
+        let out = ask_save(&mut input, &mut output, None, "kilocode", path).unwrap();
+        assert!(out.is_none());
+    }
+
+    #[test]
+    fn ask_save_default_choice_with_y_writes_default_harness() {
+        let mut input = std::io::Cursor::new("2\ny\n");
+        let mut output = Vec::new();
+        let path = std::path::Path::new("/tmp/saniwalens-test-config.toml");
+        let out = ask_save(&mut input, &mut output, None, "kilocode", path)
+            .unwrap()
+            .expect("y confirms the save");
+        assert!(out.contains("default_harness = \"kilocode\"\n"), "{out}");
+    }
+
+    #[test]
+    fn ask_save_profile_choice_retries_an_invalid_name() {
+        let mut input = std::io::Cursor::new("3\nbad name\nwork\ny\n");
+        let mut output = Vec::new();
+        let path = std::path::Path::new("/tmp/saniwalens-test-config.toml");
+        let out = ask_save(&mut input, &mut output, None, "kilocode", path)
+            .unwrap()
+            .expect("y confirms the save");
+        assert!(out.contains("[profiles.work]\nharness = \"kilocode\"\n"), "{out}");
+        let shown = String::from_utf8(output).unwrap();
+        assert!(shown.contains("使えるのは英数"), "{shown}");
+    }
+
+    #[test]
+    fn ask_save_q_at_choice_returns_none() {
+        let mut input = std::io::Cursor::new("q\n");
+        let mut output = Vec::new();
+        let path = std::path::Path::new("/tmp/saniwalens-test-config.toml");
+        let out = ask_save(&mut input, &mut output, None, "kilocode", path).unwrap();
+        assert!(out.is_none());
+    }
+
+    #[test]
+    fn ask_save_n_at_confirm_returns_none() {
+        let mut input = std::io::Cursor::new("2\nn\n");
+        let mut output = Vec::new();
+        let path = std::path::Path::new("/tmp/saniwalens-test-config.toml");
+        let out = ask_save(&mut input, &mut output, None, "kilocode", path).unwrap();
+        assert!(out.is_none());
+    }
+
+    #[test]
+    fn persist_config_round_trip_through_a_pid_unique_dir() {
+        let dir = std::env::temp_dir().join(format!("saniwalens-guide-test-{}", std::process::id()));
+        let path = dir.join("config.toml");
+        let _ = std::fs::remove_dir_all(&dir);
+        persist_config(&path, "default_harness = \"kilocode\"\n").unwrap();
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "default_harness = \"kilocode\"\n"
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }
