@@ -103,6 +103,12 @@ pub(crate) fn ask_choice<R: BufRead, W: Write>(
     options: &[&str],
     default: usize,
 ) -> anyhow::Result<Choice> {
+    // Callers guarantee a non-empty menu with a default inside it.
+    debug_assert!(!options.is_empty(), "ask_choice needs at least one option");
+    debug_assert!(
+        default < options.len(),
+        "ask_choice default must name an option"
+    );
     writeln!(output, "{prompt}")?;
     for (i, option) in options.iter().enumerate() {
         writeln!(output, "[{}] {option}", i + 1)?;
@@ -319,9 +325,11 @@ mod tests {
             (" --scope global", ScopeChoice::Global),
             (" --scope project", ScopeChoice::Project),
         ];
+        let mut n = 0;
         for (harness, h) in &harnesses {
             for (command, purpose) in &purposes {
                 for (s, scope) in &scopes {
+                    n += 1;
                     assert_eq!(
                         equivalent_command(harness, *purpose, *scope),
                         format!("saniwalens{h} {command}{s}"),
@@ -329,6 +337,7 @@ mod tests {
                 }
             }
         }
+        assert_eq!(n, 27, "3 harnesses x 3 purposes x 3 scopes");
     }
 
     #[test]
@@ -389,6 +398,8 @@ mod tests {
         let mut input = std::io::Cursor::new("q\n");
         let mut output = Vec::new();
         run_guide(&harness, &dispatch, &mut input, &mut output).unwrap();
-        assert!(String::from_utf8(output).unwrap().contains("健康診断"));
+        let shown = String::from_utf8(output).unwrap();
+        assert!(shown.contains("健康診断"));
+        assert!(!shown.contains("実行:"));
     }
 }
