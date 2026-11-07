@@ -109,7 +109,7 @@ on stderr; pass `--frozen` to read the store exactly as it is. Running
 ## Supported harnesses
 
 `saniwalens` analyzes one agent harness per run, selected with `--harness`.
-`0.5.3` supports these three. The default stays `claude`, so every existing
+`0.5.4` supports these three. The default stays `claude`, so every existing
 invocation keeps working byte-identically.
 
 | `--harness` | Agent | Transcripts | Config catalog | Store | `optimize` launch |
@@ -133,7 +133,7 @@ holds the per-harness contract, including what each harness cannot report yet
 (for example no subagent split under opencode/kilocode, no `prompts` view
 under opencode).
 
-Not supported in `0.5.3`: DSH (DeepSeek harness app) and any other harness.
+Not supported in `0.5.4`: DSH (DeepSeek harness app) and any other harness.
 DSH support is the next candidate; see [`CONTRIBUTING.md`](CONTRIBUTING.md)
 for what a new-harness contribution needs (an OpenAI-compatible endpoint
 alone is not enough ― the transcript and config formats must be observable
