@@ -4,7 +4,7 @@ use std::path::Path;
 use crate::adapter::harness::{Harness, home_dir};
 use crate::core::period::TimeRange;
 use crate::core::scope::ScopeFilter;
-use crate::session::{Session, SessionEnv, config_file_path, resolve_cli};
+use crate::session::{Session, SessionEnv, config_file_path, env_roots, resolve_cli};
 
 use super::super::report::Format;
 use super::super::window::{PeriodArgs, ReadArgs, WindowedDispatch};
@@ -22,16 +22,26 @@ pub(crate) enum Entry {
     Normal,
 }
 
-/// Pure argv classifier: `--harness` / `--profile` values are presets, `tui`
+/// Pure argv classifier: `--harness` / `--profile` values are presets (both
+/// `--flag value` and `--flag=value` forms), `tui`
 /// is the explicit entry (flags after it still count as presets), a `-` flag
 /// or any other token is a real command.
 pub(crate) fn guide_entry(argv: &[String]) -> Entry {
     let mut harness: Option<String> = None;
     let mut profile: Option<String> = None;
-    let mut saw_tui = false;
     let mut args = argv.iter().skip(1);
     while let Some(arg) = args.next() {
-        if arg == "--harness" {
+        if let Some(value) = arg.strip_prefix("--harness=") {
+            if value.is_empty() {
+                return Entry::Normal;
+            }
+            harness = Some(value.to_string());
+        } else if let Some(value) = arg.strip_prefix("--profile=") {
+            if value.is_empty() {
+                return Entry::Normal;
+            }
+            profile = Some(value.to_string());
+        } else if arg == "--harness" {
             match args.next() {
                 Some(value) => harness = Some(value.clone()),
                 None => return Entry::Normal,
@@ -41,19 +51,14 @@ pub(crate) fn guide_entry(argv: &[String]) -> Entry {
                 Some(value) => profile = Some(value.clone()),
                 None => return Entry::Normal,
             }
-        } else if arg == "tui" {
-            saw_tui = true;
-        } else {
+        } else if arg != "tui" {
             // A `-` flag (--help, --version, …) or a real subcommand:
             // clap owns this invocation, not the guide.
             return Entry::Normal;
         }
     }
-    // End of argv with no subcommand or `-` flag: guide entry — a bare
-    // invocation, presets, `tui`, or any mix of those. `saw_tui` records
-    // the explicit form (kept for readers and future arms); the outcome is
-    // the same either way.
-    let _ = saw_tui;
+    // End of argv with no subcommand or flag: guide entry. An explicit `tui`
+    // needs no separate handling — reaching here means clap has nothing to parse.
     Entry::Guide { harness, profile }
 }
 
@@ -101,9 +106,9 @@ pub(crate) fn equivalent_command(
     purpose: Purpose,
     scope: ScopeChoice,
 ) -> String {
-    let harness_part = match harness_name(harness) {
-        "claude" => String::new(),
-        other => format!(" --harness {other}"),
+    let harness_part = match harness {
+        Harness::Claude => String::new(),
+        _ => format!(" --harness {}", harness_name(harness)),
     };
     let command = match purpose {
         Purpose::Doctor => "doctor",
@@ -220,11 +225,23 @@ pub(crate) fn render_default_harness(existing: Option<&str>, harness: &str) -> S
     rendered
 }
 
+/// A `[table]` header's dotted path, tolerant of inner whitespace
+/// (`[ profiles.work ]`). Array-of-tables (`[[x]]`) and malformed lines
+/// are not headers: they still close an open section but never match one.
+fn table_header(line: &str) -> Option<&str> {
+    let inner = line.trim_start().strip_prefix('[')?.strip_suffix(']')?;
+    if inner.starts_with('[') || inner.trim().is_empty() {
+        return None;
+    }
+    Some(inner.trim())
+}
+
 /// New file text with `[profiles.<name>]` carrying `harness`. Same
 /// line-preserving contract as `render_default_harness`.
 pub(crate) fn render_profile(existing: Option<&str>, name: &str, harness: &str) -> String {
     const HEADER: &str = "# saniwalens defaults (written by the guided TUI).";
     let header = format!("[profiles.{name}]");
+    let target = format!("profiles.{name}");
     let line = format!("harness = \"{harness}\"");
     let Some(text) = existing else {
         return format!("{HEADER}\n{header}\n{line}\n");
@@ -241,7 +258,7 @@ pub(crate) fn render_profile(existing: Option<&str>, name: &str, harness: &str) 
                 out.push(line.clone());
                 done = true;
             }
-            in_section = trimmed == header;
+            in_section = table_header(raw).is_some_and(|path| path == target);
         }
         let is_target = in_section
             && !done
@@ -346,13 +363,18 @@ fn ask_profile_name<R: BufRead, W: Write>(
     }
 }
 
-/// Thin filesystem wrapper: create parents, write atomically-by-rename is
-/// overkill for a small config ― a direct write is what the tests pin.
+/// Thin filesystem wrapper: create parents, write to a sibling temp file,
+/// then rename into place so a mid-write kill never truncates the user's
+/// config. A crash leaves the `.toml.tmp` sibling behind (deliberate,
+/// self-evident on next run).
 fn persist_config(path: &Path, text: &str) -> anyhow::Result<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    std::fs::write(path, text)?;
+    let tmp = path.with_extension("toml.tmp");
+    std::fs::write(&tmp, text)?;
+    let _ = std::fs::remove_file(path);
+    std::fs::rename(&tmp, path)?;
     Ok(())
 }
 
@@ -481,12 +503,11 @@ pub(crate) fn run_guide<R: BufRead, W: Write>(
 }
 
 pub(crate) fn run_guide_entry(harness: Option<&str>, profile: Option<&str>) -> anyhow::Result<()> {
-    let state_home = std::env::var_os("XDG_STATE_HOME").map(std::path::PathBuf::from);
-    let config_home = std::env::var_os("XDG_CONFIG_HOME").map(std::path::PathBuf::from);
+    let roots = env_roots();
     let env = SessionEnv {
-        state_home: state_home.as_deref(),
+        state_home: roots.state_home.as_deref(),
         home: home_dir(),
-        config_home: config_home.as_deref(),
+        config_home: roots.config_home.as_deref(),
     };
     let resolved = resolve_cli(harness, profile, &env)?;
     let dispatch = WindowedDispatch {
@@ -496,7 +517,7 @@ pub(crate) fn run_guide_entry(harness: Option<&str>, profile: Option<&str>) -> a
     };
     let stdin = std::io::stdin();
     let stdout = std::io::stdout();
-    let config_path = config_file_path(config_home.as_deref(), home_dir());
+    let config_path = config_file_path(roots.config_home.as_deref(), home_dir());
     run_guide(
         &resolved.harness,
         &dispatch,
@@ -613,6 +634,34 @@ mod tests {
     #[test]
     fn trailing_profile_without_a_value_is_normal() {
         let argv = vec!["saniwalens".to_string(), "--profile".to_string()];
+        assert!(matches!(guide_entry(&argv), Entry::Normal));
+    }
+
+    #[test]
+    fn harness_equals_form_becomes_the_preset() {
+        let argv = vec!["saniwalens".to_string(), "--harness=kilocode".to_string()];
+        assert!(matches!(
+            guide_entry(&argv),
+            Entry::Guide { harness: Some(h), profile: None } if h == "kilocode"
+        ));
+    }
+
+    #[test]
+    fn profile_equals_form_after_tui_becomes_the_preset() {
+        let argv = vec![
+            "saniwalens".to_string(),
+            "tui".to_string(),
+            "--profile=w".to_string(),
+        ];
+        assert!(matches!(
+            guide_entry(&argv),
+            Entry::Guide { harness: None, profile: Some(p) } if p == "w"
+        ));
+    }
+
+    #[test]
+    fn empty_harness_equals_value_is_normal() {
+        let argv = vec!["saniwalens".to_string(), "--harness=".to_string()];
         assert!(matches!(guide_entry(&argv), Entry::Normal));
     }
 
@@ -787,6 +836,21 @@ mod tests {
     }
 
     #[test]
+    fn profile_save_updates_a_whitespace_padded_header_in_place() {
+        let existing = "[ profiles.work ]\nharness = \"opencode\"\n";
+        let out = render_profile(Some(existing), "work", "kilocode");
+        assert!(
+            out.contains("harness = \"kilocode\"\n"),
+            "harness line updated: {out}"
+        );
+        assert_eq!(
+            out.matches("[profiles.work]").count() + out.matches("[ profiles.work ]").count(),
+            1,
+            "no duplicate table: {out}"
+        );
+    }
+
+    #[test]
     fn profile_names_allow_only_ascii_word_chars_and_dashes() {
         assert!(profile_name_is_valid("work"));
         assert!(profile_name_is_valid("my-profile_2"));
@@ -885,6 +949,15 @@ mod tests {
         assert_eq!(
             std::fs::read_to_string(&path).unwrap(),
             "default_harness = \"kilocode\"\n"
+        );
+        persist_config(&path, "default_harness = \"opencode\"\n").unwrap();
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "default_harness = \"opencode\"\n"
+        );
+        assert!(
+            !path.with_extension("toml.tmp").exists(),
+            "no temp sibling left behind"
         );
         std::fs::remove_dir_all(&dir).unwrap();
     }

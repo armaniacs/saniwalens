@@ -24,6 +24,21 @@ pub struct SessionEnv<'a> {
     pub config_home: Option<&'a Path>,
 }
 
+/// The process environment roots every command resolves through: the XDG
+/// state/config overrides. Owned here so `run()` and the guide entry share
+/// one read site; borrow into `SessionEnv` at each use site.
+pub struct EnvRoots {
+    pub state_home: Option<PathBuf>,
+    pub config_home: Option<PathBuf>,
+}
+
+pub fn env_roots() -> EnvRoots {
+    EnvRoots {
+        state_home: std::env::var_os("XDG_STATE_HOME").map(PathBuf::from),
+        config_home: std::env::var_os("XDG_CONFIG_HOME").map(PathBuf::from),
+    }
+}
+
 /// What `--harness` / `--profile` plus the config file resolve to, before any
 /// store is opened.
 #[derive(Debug, PartialEq)]
