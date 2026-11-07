@@ -23,8 +23,8 @@ use crate::core::surface::{
 };
 use crate::core::thrash::detect_thrash;
 use crate::session::{
-    AnalyzeStats, Session, SessionEnv, Style, eprint_freshness, freshness_line, guard_harness,
-    resolve_cli,
+    AnalyzeStats, Session, SessionEnv, Style, env_roots, eprint_freshness, freshness_line,
+    guard_harness, resolve_cli,
 };
 use crate::store::{OpenMode, Store};
 
@@ -256,12 +256,11 @@ pub fn run() -> Result<()> {
     let cli = Cli::parse();
     // One call resolves flags, the config file, and the builtins into the
     // harness plus an optional configured store; see `session.rs`.
-    let state_home = std::env::var_os("XDG_STATE_HOME").map(PathBuf::from);
-    let config_home = std::env::var_os("XDG_CONFIG_HOME").map(PathBuf::from);
+    let roots = env_roots();
     let env = SessionEnv {
-        state_home: state_home.as_deref(),
+        state_home: roots.state_home.as_deref(),
         home: home_dir(),
-        config_home: config_home.as_deref(),
+        config_home: roots.config_home.as_deref(),
     };
     let resolved = resolve_cli(cli.harness.as_deref(), cli.profile.as_deref(), &env)?;
     let harness = resolved.harness;
