@@ -249,7 +249,10 @@ before writing.
 Non-TTY behavior: the explicit `tui` subcommand without both TTYs is refused
 with an error instead of blocking on unreadable prompts; a bare no-args
 invocation without both TTYs falls through to clap, whose
-missing-subcommand error is what scripts see today.
+missing-subcommand error is what scripts see today. The scripted E2E suite
+(`tests/guide_flow.rs`) drives the real binary through piped stdio by setting
+`SANIWALENS_TEST_FORCE_TTY=1`, which counts as a terminal for the check above;
+the variable is test-only and unsupported, and must never be set by users.
 
 v0.5.4 scope is `doctor` / `waste` / `failures` plus the config save above.
 `optimize` itself stays out of the guide, but after each report the guide

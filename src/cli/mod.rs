@@ -3,7 +3,6 @@
 //! `docs/specs/cli.md`.
 
 use std::fs;
-use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
@@ -246,8 +245,7 @@ enum Command {
 pub fn run() -> Result<()> {
     let argv: Vec<String> = std::env::args().collect();
     if let views::guide::Entry::Guide { harness, profile } = views::guide::guide_entry(&argv)
-        && std::io::stdin().is_terminal()
-        && std::io::stdout().is_terminal()
+        && views::guide::terminal_available()
     {
         return views::guide::run_guide_entry(harness.as_deref(), profile.as_deref());
     }
@@ -408,7 +406,7 @@ pub fn run() -> Result<()> {
             optimize(&sess, projects, &filter, frozen, print, verbose, timeout)
         }
         Command::Tui => {
-            if !(std::io::stdin().is_terminal() && std::io::stdout().is_terminal()) {
+            if !views::guide::terminal_available() {
                 anyhow::bail!(
                     "`tui` needs an interactive terminal (stdin and stdout must both be TTYs)"
                 ); // No-TTY-only arm: TTY input returns via the pre-parse branch above.

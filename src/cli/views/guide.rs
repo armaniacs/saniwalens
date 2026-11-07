@@ -1,4 +1,4 @@
-use std::io::{BufRead, Write};
+use std::io::{BufRead, IsTerminal, Write};
 use std::path::Path;
 
 use crate::adapter::harness::{Harness, home_dir};
@@ -500,6 +500,15 @@ pub(crate) fn run_guide<R: BufRead, W: Write>(
             return Ok(());
         }
     }
+}
+
+/// Whether the guide UI may start: both stdio streams are TTYs, or the
+/// test-only override is set. `SANIWALENS_TEST_FORCE_TTY` exists so the
+/// scripted E2E suite (`tests/guide_flow.rs`) can drive the real binary
+/// without a pty; it is unsupported and must never be set by users.
+pub(crate) fn terminal_available() -> bool {
+    std::env::var_os("SANIWALENS_TEST_FORCE_TTY").is_some()
+        || (std::io::stdin().is_terminal() && std::io::stdout().is_terminal())
 }
 
 pub(crate) fn run_guide_entry(harness: Option<&str>, profile: Option<&str>) -> anyhow::Result<()> {
