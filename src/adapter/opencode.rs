@@ -12,8 +12,8 @@ use anyhow::{Context, Result};
 use serde_json::Value;
 
 use crate::adapter::harness::{
-    AnalyzeStats, Harness, Site, SiteCtx, catalog_surfaces, home_dir, load_claude_md,
-    load_skills_deduped, restat_matches,
+    AnalyzeStats, Harness, ParsedSession, Site, SiteCtx, home_dir, load_claude_md,
+    load_skills_deduped,
 };
 use crate::adapter::transcript::{ToolError, WorkEvent};
 use crate::core::friction::classify_error;
@@ -24,7 +24,7 @@ use crate::core::span::{
 use crate::core::subagent::SubagentRun;
 use crate::core::surface::{LoadMode, Scope, Surface};
 use crate::core::usage::{attribute_subagents, extract_usage_events, output_tokens};
-use crate::store::{IngestBatch, OpenMode, SessionMeta, Store};
+use crate::store::SessionMeta;
 
 /// The model label when a message names none — honest, never a guess.
 const UNKNOWN_MODEL: &str = "unknown";
@@ -774,13 +774,7 @@ pub fn analyze(input: Option<PathBuf>, db: &Path) -> Result<AnalyzeStats> {
             input.display()
         );
     }
-    let mut store = Store::open(db, OpenMode::ReadWrite).context("open store")?;
-    // The opencode version key lives apart from the shared analyzer version:
-    // an opencode-only extraction change must never force Claude Code users
-    // through a full re-analyze (`adapter::opencode::OPENCODE_ANALYZER_VERSION`).
-    let reuse_ingested =
-        store.is_analyzer_current(OPENCODE_ANALYZER_META_KEY, OPENCODE_ANALYZER_VERSION)?;
-
+    let config_dir = opencode_home()?;
     let snapshot = read_database(&input)?;
     let mut messages_by_session: std::collections::HashMap<&str, Vec<&SnapshotMessage>> =
         std::collections::HashMap::new();
@@ -799,9 +793,6 @@ pub fn analyze(input: Option<PathBuf>, db: &Path) -> Result<AnalyzeStats> {
             .push(part);
     }
 
-    let mut sessions = 0;
-    let mut skipped = 0;
-    let mut spans_total = 0;
     // Per-session output totals up front: a parent's runs cost what their
     // child sessions wrote, and children can come after parents in the
     // snapshot. Parsing is pure, so this pass changes nothing.
@@ -847,141 +838,115 @@ pub fn analyze(input: Option<PathBuf>, db: &Path) -> Result<AnalyzeStats> {
         );
     }
     let mut ordinal = 0usize;
-    for session in &snapshot.sessions {
-        let session_messages = messages_by_session
-            .get(session.id.as_str())
-            .cloned()
-            .unwrap_or_default();
-        // Per-session fingerprint: the whole-file stat would re-ingest every
-        // session on each run (opencode appends constantly).
-        let fingerprint_key = format!("opencode:{}", session.id);
-        let message_count = session_messages.len() as i64;
-        if reuse_ingested
-            && store.is_ingested(&fingerprint_key, session.time_updated_ms, message_count)?
-        {
-            skipped += 1;
-            continue;
-        }
-        let message_rows: Vec<MessageRow> = session_messages
-            .iter()
-            .map(|m| MessageRow {
-                id: m.id.as_str(),
-                session_id: m.session_id.as_str(),
-                time_created_ms: m.time_created_ms,
-                parent_id: m.data.get("parentID").and_then(|v| v.as_str()),
-                data: &m.data,
+    // The snapshot rows are cheap to hold; each parse maps one session, so a
+    // skipped session costs no parse. The template owns the skip, ingest,
+    // stamp, catalog, meta, and stats steps around those parses.
+    crate::adapter::harness::analyze_template(
+        Harness::Opencode,
+        db,
+        OPENCODE_ANALYZER_META_KEY,
+        OPENCODE_ANALYZER_VERSION,
+        &input,
+        &config_dir,
+        (0..snapshot.sessions.len()).collect(),
+        |index| {
+            let session = &snapshot.sessions[*index];
+            // Per-session fingerprint: the whole-file stat would re-ingest every
+            // session on each run (opencode appends constantly).
+            let message_count = messages_by_session
+                .get(session.id.as_str())
+                .map(Vec::len)
+                .unwrap_or(0) as i64;
+            (
+                format!("opencode:{}", session.id),
+                Some((session.time_updated_ms, message_count)),
+            )
+        },
+        |index: usize, pre| {
+            let session = &snapshot.sessions[index];
+            let session_messages = messages_by_session
+                .get(session.id.as_str())
+                .cloned()
+                .unwrap_or_default();
+            let fingerprint_key = format!("opencode:{}", session.id);
+            let message_rows: Vec<MessageRow> = session_messages
+                .iter()
+                .map(|m| MessageRow {
+                    id: m.id.as_str(),
+                    session_id: m.session_id.as_str(),
+                    time_created_ms: m.time_created_ms,
+                    parent_id: m.data.get("parentID").and_then(|v| v.as_str()),
+                    data: &m.data,
+                })
+                .collect();
+            let mut part_rows: Vec<PartRow> = session_messages
+                .iter()
+                .flat_map(|m| {
+                    parts_by_message
+                        .get(m.id.as_str())
+                        .cloned()
+                        .unwrap_or_default()
+                })
+                .map(|p| PartRow {
+                    id: p.id.as_str(),
+                    message_id: p.message_id.as_str(),
+                    session_id: p.session_id.as_str(),
+                    time_created_ms: p.time_created_ms,
+                    data: &p.data,
+                })
+                .collect();
+            part_rows.sort_by_key(|p| (p.time_created_ms, p.id));
+            let records = parse_session(&message_rows, &part_rows);
+            let mut spans = extract_spans(&records, DEFAULT_IDLE_GAP_MS);
+            let usage = extract_usage_events(&records);
+            // Per-run costs joined on callID: each `task` part naming a child
+            // session becomes one run carrying that session's own output tokens.
+            // Parts that name no session (or an unknown one) are skipped, and
+            // spans with no matching run keep their cost — attribution only ever
+            // moves tokens it can join, the same rule as the Claude Code path.
+            let runs = task_runs(
+                &part_rows,
+                &sessions_by_id,
+                &child_costs,
+                &session.id,
+                ordinal,
+            );
+            ordinal += runs.len();
+            attribute_subagents(&mut spans, &runs);
+            let meta = SessionMeta {
+                id: session.id.clone(),
+                project: session.directory.clone(),
+                slug: session.slug.clone(),
+                root: session.directory.clone(),
+                source_path: fingerprint_key.clone(),
+                sub_tokens: 0,
+                sub_agent_count: 0,
+                start: session_start(&records),
+            };
+            // The template borrows these into its rows.
+            let errors = extract_tool_errors(&part_rows);
+            let work = extract_work_events(&part_rows);
+            let input = input.clone();
+            let id = session.id.clone();
+            Ok(ParsedSession {
+                meta,
+                spans,
+                usage,
+                runs,
+                prompts: Vec::new(),
+                errors,
+                work,
+                denials: 0,
+                stamp: pre,
+                // The snapshot is read once up front: re-read this session's live
+                // fingerprint and stamp only when it still matches what was ingested.
+                // A session that grew mid-run keeps its previous stamp, so the next
+                // run re-ingests it instead of skipping on a stale stamp. An unreadable
+                // live row fails closed to no stamp, for the same reason.
+                restat: move || query_session_fingerprint(&input, &id).ok().flatten(),
             })
-            .collect();
-        let mut part_rows: Vec<PartRow> = session_messages
-            .iter()
-            .flat_map(|m| {
-                parts_by_message
-                    .get(m.id.as_str())
-                    .cloned()
-                    .unwrap_or_default()
-            })
-            .map(|p| PartRow {
-                id: p.id.as_str(),
-                message_id: p.message_id.as_str(),
-                session_id: p.session_id.as_str(),
-                time_created_ms: p.time_created_ms,
-                data: &p.data,
-            })
-            .collect();
-        part_rows.sort_by_key(|p| (p.time_created_ms, p.id));
-        let records = parse_session(&message_rows, &part_rows);
-        let mut spans = extract_spans(&records, DEFAULT_IDLE_GAP_MS);
-        let usage = extract_usage_events(&records);
-        // Per-run costs joined on callID: each `task` part naming a child
-        // session becomes one run carrying that session's own output tokens.
-        // Parts that name no session (or an unknown one) are skipped, and
-        // spans with no matching run keep their cost — attribution only ever
-        // moves tokens it can join, the same rule as the Claude Code path.
-        let runs = task_runs(
-            &part_rows,
-            &sessions_by_id,
-            &child_costs,
-            &session.id,
-            ordinal,
-        );
-        ordinal += runs.len();
-        attribute_subagents(&mut spans, &runs);
-        let meta = SessionMeta {
-            id: session.id.clone(),
-            project: session.directory.clone(),
-            slug: session.slug.clone(),
-            root: session.directory.clone(),
-            source_path: fingerprint_key.clone(),
-            sub_tokens: 0,
-            sub_agent_count: 0,
-            start: session_start(&records),
-        };
-        // `raw_errors` owns the strings; `error_rows` borrows them.
-        let raw_errors = extract_tool_errors(&part_rows);
-        let error_rows: Vec<(i64, &str, &str, &str, &str)> = raw_errors
-            .iter()
-            .map(|e| {
-                (
-                    e.epoch_ms,
-                    e.category.label(),
-                    e.excerpt.as_str(),
-                    e.tool.as_str(),
-                    e.target.as_str(),
-                )
-            })
-            .collect();
-        // `work` owns the strings; the rows borrow them.
-        let work = extract_work_events(&part_rows);
-        let work_rows: Vec<(i64, &str, &str, Option<&str>)> = work
-            .iter()
-            .map(|e| (e.epoch_ms, e.kind, e.id.as_str(), e.path.as_deref()))
-            .collect();
-        store.ingest(
-            IngestBatch::new(&meta, &spans, &usage)
-                .tool_errors(&error_rows)
-                .work_events(&work_rows)
-                .subagent_runs(&runs),
-        )?;
-        // The snapshot is read once up front: re-read this session's live
-        // fingerprint and stamp only when it still matches what was ingested.
-        // A session that grew mid-run keeps its previous stamp, so the next
-        // run re-ingests it instead of skipping on a stale stamp. An unreadable
-        // live row fails closed to no stamp, for the same reason.
-        let fresh = query_session_fingerprint(&input, &session.id)
-            .ok()
-            .flatten();
-        if restat_matches(Some((session.time_updated_ms, message_count)), fresh) {
-            store.record_ingested_file(&fingerprint_key, session.time_updated_ms, message_count)?;
-        }
-        sessions += 1;
-        spans_total += spans.len();
-    }
-
-    // Catalog the installed config — global scope plus every known project
-    // root that still exists on disk — so usage joins against what is
-    // installed. Skills join from the six documented sites (deduped by
-    // canonical path, since sites may be symlinks to one shared directory);
-    // MCP and permissions stay out of v1 (see
-    // `docs/specs/config-format-opencode.md`), so their live usage still
-    // shows as orphaned rows in `inventory`.
-    let config_dir = opencode_home()?;
-    let surfaces = catalog_surfaces(Harness::Opencode, &store.session_roots()?)?;
-    let surface_count = surfaces.len();
-    store.replace_surfaces(&surfaces)?;
-
-    store.record_analyzer_version(OPENCODE_ANALYZER_META_KEY, OPENCODE_ANALYZER_VERSION)?;
-    store.set_meta("analyzed_at", &chrono::Utc::now().to_rfc3339())?;
-    store.set_meta("projects_dir", &input.display().to_string())?;
-    store.set_meta("config_dir", &config_dir.display().to_string())?;
-    store.set_meta("harness", Harness::Opencode.label())?;
-
-    Ok(AnalyzeStats {
-        sessions,
-        skipped,
-        spans_total,
-        surface_count,
-        denials: 0,
-    })
+        },
+    )
 }
 #[cfg(test)]
 mod tests {
@@ -1860,6 +1825,7 @@ fn render_run_value(v: &Value) -> RunEvent {
 #[cfg(test)]
 mod run_event_tests {
     use super::*;
+    use crate::store::{OpenMode, Store};
 
     #[test]
     fn a_text_part_renders_its_text() {

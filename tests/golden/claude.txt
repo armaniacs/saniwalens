@@ -1,0 +1,9 @@
+id	project	slug	started_at
+aaaaaaaa-0000-0000-0000-000000000001	-tmp-example-proj	-tmp-example-proj	2026-01-01T00:00:00+00:00
+---
+session_id	kind	surface_kind	surface_id	model	target	out_tokens	started_epoch
+aaaaaaaa-0000-0000-0000-000000000001	skill_invocation	skill	git-commit	claude-opus-4-7		100	1767225600
+aaaaaaaa-0000-0000-0000-000000000001	session_start					0	1767225601
+aaaaaaaa-0000-0000-0000-000000000001	prompt					0	1767225605
+---
+session_id	tool	target	category	excerpt

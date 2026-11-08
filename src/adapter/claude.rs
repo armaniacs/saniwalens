@@ -14,8 +14,8 @@ use anyhow::{Context, Result};
 
 use crate::adapter::config::claude_home;
 use crate::adapter::harness::{
-    AnalyzeStats, Harness, Site, catalog_surfaces, file_fingerprint, load_agents, load_claude_md,
-    load_hooks, load_mcp, load_rules, load_skills, restat_matches,
+    AnalyzeStats, Harness, ParsedSession, Site, file_fingerprint, load_agents, load_claude_md,
+    load_hooks, load_mcp, load_rules, load_skills,
 };
 use crate::adapter::transcript::{
     CLAUDE_ANALYZER_META_KEY, CLAUDE_ANALYZER_VERSION, count_permission_denials,
@@ -26,7 +26,7 @@ use crate::adapter::transcript::{
 use crate::core::span::{DEFAULT_IDLE_GAP_MS, SessionStart, extract_spans, session_start};
 use crate::core::subagent::{SubagentRun, link_runs};
 use crate::core::usage::{attribute_subagents, extract_usage_events, output_tokens};
-use crate::store::{IngestBatch, OpenMode, SessionMeta, Store};
+use crate::store::SessionMeta;
 
 fn default_projects_dir() -> Result<PathBuf> {
     Ok(claude_home()?.join("projects"))
@@ -161,121 +161,69 @@ fn normalize_root(cwd: &str) -> String {
 
 pub fn analyze(projects: Option<PathBuf>, db: &Path) -> Result<AnalyzeStats> {
     let projects = projects.map(Ok).unwrap_or_else(default_projects_dir)?;
-    let mut store = Store::open(db, OpenMode::ReadWrite).context("open store")?;
-
-    // Rows produced by older analysis semantics are rebuilt once: the
-    // fingerprint skip below would otherwise pin them forever, because the
-    // transcripts they came from will never change again.
-    let reuse_ingested =
-        store.is_analyzer_current(CLAUDE_ANALYZER_META_KEY, CLAUDE_ANALYZER_VERSION)?;
-
-    let mut sessions = 0;
-    let mut skipped = 0;
-    let mut spans_total = 0;
-    let mut denials = 0;
-    for transcript in main_transcripts(&projects)? {
-        let path_str = transcript.display().to_string();
-        // Incremental skip: an unchanged (mtime, size) was already ingested.
-        // The stat is taken before the read so a file that grows concurrently
-        // is guaranteed a mismatch — and a re-ingest — next run
-        // (`docs/specs/storage.md`).
-        let fingerprint = file_fingerprint(&transcript);
-        if reuse_ingested
-            && let Some((mtime, size)) = fingerprint
-            && store.is_ingested(&path_str, mtime, size)?
-        {
-            skipped += 1;
-            continue;
-        }
-        let text = fs::read_to_string(&transcript)
-            .with_context(|| format!("read {}", transcript.display()))?;
-        denials += count_permission_denials(&text);
-        let records = parse_session(&text);
-        let mut spans = extract_spans(&records, DEFAULT_IDLE_GAP_MS);
-        let mut usage = extract_usage_events(&records);
-        // Hook firings join the catalog like any other usage: the same
-        // `hookName` the settings catalogues under.
-        usage.extend(extract_hook_usages(&text));
-        let runs = subagent_runs(&transcript);
-        attribute_subagents(&mut spans, &runs);
-        let sub_tokens: i64 = runs.iter().map(|run| run.out_tokens as i64).sum();
-        let root = session_cwd(&text).map(|cwd| normalize_root(&cwd));
-        let meta = session_meta(
-            &transcript,
-            root.unwrap_or_default(),
-            sub_tokens,
-            runs.len() as i64,
-            session_start(&records),
-        );
-        let prompts: Vec<(usize, i64, &str)> = extract_prompt_pointers(&text)
-            .into_iter()
-            .map(|(line, ts, behavior)| (line, ts, behavior.label()))
-            .collect();
-        // `raw_errors` owns the strings; `error_rows` borrows them.
-        let raw_errors = extract_tool_errors(&text);
-        let error_rows: Vec<(i64, &str, &str, &str, &str)> = raw_errors
-            .iter()
-            .map(|e| {
-                (
-                    e.epoch_ms,
-                    e.category.label(),
-                    e.excerpt.as_str(),
-                    e.tool.as_str(),
-                    e.target.as_str(),
-                )
-            })
-            .collect();
-        // `work` owns the strings; the rows borrow them.
-        let work = extract_work_events(&text);
-        let work_rows: Vec<(i64, &str, &str, Option<&str>)> = work
-            .iter()
-            .map(|e| (e.epoch_ms, e.kind, e.id.as_str(), e.path.as_deref()))
-            .collect();
-        // One transcript, one batch: the store applies its parts in its own
-        // order, so nothing here depends on the order these were extracted in.
-        store.ingest(
-            IngestBatch::new(&meta, &spans, &usage)
-                .subagent_runs(&runs)
-                .prompts(&prompts)
-                .tool_errors(&error_rows)
-                .work_events(&work_rows),
-        )?;
-        if let Some((mtime, _)) = fingerprint
-            && restat_matches(fingerprint, file_fingerprint(&transcript))
-        {
-            // Record the size actually consumed, so a tail appended after the
-            // read shows a mismatch next run instead of being skipped forever.
-            // The re-stat above refuses the stamp when the file moved while it
-            // was read: the previous stamp then stays, and the next run
-            // re-ingests instead of skipping on a stale stamp.
-            store.record_ingested_file(&path_str, mtime, text.len() as i64)?;
-        }
-        sessions += 1;
-        spans_total += spans.len();
-    }
-
-    // Catalog the installed config — global scope plus every known project root
-    // that still exists on disk — so usage joins against what is installed.
     let config_dir = claude_home()?;
-    // The traversal (scope building, dedup, root gating) lives in
-    // `catalog_surfaces`; this module supplies only the site rows.
-    let surfaces = catalog_surfaces(Harness::Claude, &store.session_roots()?)?;
-    let surface_count = surfaces.len();
-    store.replace_surfaces(&surfaces)?;
-
-    store.record_analyzer_version(CLAUDE_ANALYZER_META_KEY, CLAUDE_ANALYZER_VERSION)?;
-    store.set_meta("analyzed_at", &chrono::Utc::now().to_rfc3339())?;
-    store.set_meta("projects_dir", &projects.display().to_string())?;
-    store.set_meta("config_dir", &config_dir.display().to_string())?;
-    store.set_meta("harness", Harness::Claude.label())?;
-
-    Ok(AnalyzeStats {
-        sessions,
-        skipped,
-        spans_total,
-        surface_count,
-        denials,
-    })
+    // The transcripts are cheap to list; each parse does the read, so a
+    // skipped transcript is never read. The template owns the skip, ingest,
+    // stamp, catalog, meta, and stats steps around those parses.
+    crate::adapter::harness::analyze_template(
+        Harness::Claude,
+        db,
+        CLAUDE_ANALYZER_META_KEY,
+        CLAUDE_ANALYZER_VERSION,
+        &projects,
+        &config_dir,
+        main_transcripts(&projects)?,
+        |transcript| {
+            (
+                transcript.display().to_string(),
+                file_fingerprint(transcript),
+            )
+        },
+        |transcript: PathBuf, pre| {
+            let text = fs::read_to_string(&transcript)
+                .with_context(|| format!("read {}", transcript.display()))?;
+            let denials = count_permission_denials(&text);
+            let records = parse_session(&text);
+            let mut spans = extract_spans(&records, DEFAULT_IDLE_GAP_MS);
+            let mut usage = extract_usage_events(&records);
+            // Hook firings join the catalog like any other usage: the same
+            // `hookName` the settings catalogues under.
+            usage.extend(extract_hook_usages(&text));
+            let runs = subagent_runs(&transcript);
+            attribute_subagents(&mut spans, &runs);
+            let sub_tokens: i64 = runs.iter().map(|run| run.out_tokens as i64).sum();
+            let root = session_cwd(&text).map(|cwd| normalize_root(&cwd));
+            let meta = session_meta(
+                &transcript,
+                root.unwrap_or_default(),
+                sub_tokens,
+                runs.len() as i64,
+                session_start(&records),
+            );
+            let prompts: Vec<(usize, i64, &'static str)> = extract_prompt_pointers(&text)
+                .into_iter()
+                .map(|(line, ts, behavior)| (line, ts, behavior.label()))
+                .collect();
+            // The template borrows these into its rows.
+            let errors = extract_tool_errors(&text);
+            let work = extract_work_events(&text);
+            Ok(ParsedSession {
+                meta,
+                spans,
+                usage,
+                runs,
+                prompts,
+                errors,
+                work,
+                denials,
+                // Record the size actually consumed, so a tail appended after
+                // the read shows a mismatch next run instead of being skipped
+                // forever.
+                stamp: pre.map(|(mtime, _)| (mtime, text.len() as i64)),
+                restat: move || file_fingerprint(&transcript),
+            })
+        },
+    )
 }
 
 /// Every subagent run of a session, read from `<sessionId>/subagents/` beside
@@ -334,6 +282,7 @@ fn subagent_runs(transcript: &Path) -> Vec<SubagentRun> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::store::{OpenMode, Store};
     use std::path::Path;
 
     /// Serializes the tests that point `analyze` at a synthetic config root:

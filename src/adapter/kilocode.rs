@@ -16,8 +16,8 @@ use anyhow::{Context, Result};
 use serde_json::Value;
 
 use crate::adapter::harness::{
-    AnalyzeStats, Harness, Site, catalog_surfaces, file_fingerprint, home_dir, load_agents,
-    load_claude_md, load_commands, load_kilo_instructions, load_skills_deduped, restat_matches,
+    AnalyzeStats, Harness, ParsedSession, Site, file_fingerprint, home_dir, load_agents,
+    load_claude_md, load_commands, load_kilo_instructions, load_skills_deduped,
 };
 use crate::adapter::transcript::{ToolError, WorkEvent};
 use crate::core::friction::classify_error;
@@ -25,7 +25,7 @@ use crate::core::path::basename;
 use crate::core::span::{DEFAULT_IDLE_GAP_MS, Record, RecordKind, extract_spans, session_start};
 use crate::core::surface::{Scope, Surface};
 use crate::core::usage::extract_usage_events;
-use crate::store::{IngestBatch, OpenMode, SessionMeta, Store};
+use crate::store::SessionMeta;
 use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -727,161 +727,124 @@ pub fn analyze(input: Option<PathBuf>, db: &Path) -> Result<AnalyzeStats> {
             input.display()
         );
     }
-    let mut store = Store::open(db, OpenMode::ReadWrite).context("open store")?;
-    // The kilocode version key lives apart from the shared analyzer version:
-    // a kilocode-only extraction change must never force other harnesses
-    // through a full re-analyze (`adapter::kilocode::KILOCODE_ANALYZER_VERSION`).
-    let reuse_ingested =
-        store.is_analyzer_current(KILOCODE_ANALYZER_META_KEY, KILOCODE_ANALYZER_VERSION)?;
-
+    let config_dir = kilo_home()?;
     let mut task_dirs: Vec<PathBuf> = std::fs::read_dir(&input)
         .with_context(|| format!("read {}", input.display()))?
         .filter_map(|entry| entry.ok().map(|entry| entry.path()))
         .filter(|path| path.is_dir())
         .collect();
     task_dirs.sort();
-
-    let mut sessions = 0;
-    let mut skipped = 0;
-    let mut spans_total = 0;
-    for task_dir in &task_dirs {
-        let conversation_path = task_dir.join("api_conversation_history.json");
-        let ui_path = task_dir.join("ui_messages.json");
-        if !conversation_path.is_file() || !ui_path.is_file() {
-            continue; // a task directory without both files is not a session
-        }
-        let task_id = task_dir
-            .file_name()
-            .map(|name| name.to_string_lossy().into_owned())
-            .unwrap_or_default();
-        // Per-task fingerprint: the directory stat would re-ingest every task
-        // on each run (checkpoints move too); the task files are the record.
-        let metadata_path = task_dir.join("task_metadata.json");
-        let fingerprint_key = format!("kilocode:{}", task_id);
-        let Some((mtime, size)) =
-            task_fingerprint(&conversation_path, &ui_path, Some(&metadata_path))
-        else {
-            continue;
-        };
-        if reuse_ingested && store.is_ingested(&fingerprint_key, mtime, size)? {
-            skipped += 1;
-            continue;
-        }
-        let conversation = fs::read_to_string(&conversation_path)
-            .with_context(|| format!("read {}", conversation_path.display()))?;
-        let ui_messages =
-            fs::read_to_string(&ui_path).with_context(|| format!("read {}", ui_path.display()))?;
-        let records = parse_session(&conversation, &ui_messages);
-        let spans = extract_spans(&records, DEFAULT_IDLE_GAP_MS);
-        let usage = extract_usage_events(&records);
-        // The root is the stated heuristic (`adapter::kilocode::estimate_root`):
-        // kilocode stamps no cwd anywhere, so the common parent directory of
-        // the leading tool paths is the best answer — empty when none appears.
-        let root = estimate_root(&conversation).unwrap_or_default();
-        let meta = SessionMeta {
-            id: task_id.clone(),
-            project: root.clone(),
-            slug: task_id.clone(),
-            root,
-            source_path: fingerprint_key.clone(),
-            sub_tokens: 0,
-            sub_agent_count: 0,
-            start: session_start(&records),
-        };
-        // `raw_errors` owns the strings; `error_rows` borrows them.
-        let raw_errors = extract_tool_errors(&conversation);
-        let error_rows: Vec<(i64, &str, &str, &str, &str)> = raw_errors
-            .iter()
-            .map(|error| {
-                (
-                    error.epoch_ms,
-                    error.category.label(),
-                    error.excerpt.as_str(),
-                    error.tool.as_str(),
-                    error.target.as_str(),
-                )
-            })
-            .collect();
-        // `work` owns the strings; the rows borrow them.
-        let mut work = extract_work_events(&conversation);
-        // Files-in-context (PBI 23): the task's metadata names the files the
-        // task kept in context. They read as `file_read` events so the
-        // never-fires wedge can match them against rule globs — the same join
-        // the Claude Code `Read` tool calls feed. Stamped with the task's
-        // start: the metadata carries no timestamps, and the start is the one
-        // honest instant the task states. A missing or unreadable metadata
-        // file reads as no files, like every other optional input.
-        if let Ok(metadata) = fs::read_to_string(&metadata_path) {
-            let at = session_start(&records).map(|start| start.timestamp_ms);
-            let epoch_ms = at.unwrap_or(0);
-            for path in files_in_context(&metadata) {
-                let id = match path.rsplit(['/', '\\']).next() {
-                    Some(base) if !base.is_empty() => base.to_string(),
-                    _ => path.clone(),
-                };
-                work.push(WorkEvent {
-                    epoch_ms,
-                    kind: "file_read",
-                    id,
-                    path: Some(path),
-                });
+    // Candidates are the tasks whose files stat: a task directory without
+    // both files is not a session, and an unstattable one reads as nothing —
+    // both stay silent and uncounted, exactly as the inline loop did.
+    let candidates: Vec<(PathBuf, (i64, i64))> = task_dirs
+        .into_iter()
+        .filter_map(|task_dir| {
+            let conversation_path = task_dir.join("api_conversation_history.json");
+            let ui_path = task_dir.join("ui_messages.json");
+            if !conversation_path.is_file() || !ui_path.is_file() {
+                return None;
             }
-        }
-        let work_rows: Vec<(i64, &str, &str, Option<&str>)> = work
-            .iter()
-            .map(|event| {
-                (
-                    event.epoch_ms,
-                    event.kind,
-                    event.id.as_str(),
-                    event.path.as_deref(),
-                )
+            // Per-task fingerprint: the directory stat would re-ingest every task
+            // on each run (checkpoints move too); the task files are the record.
+            let metadata_path = task_dir.join("task_metadata.json");
+            task_fingerprint(&conversation_path, &ui_path, Some(&metadata_path))
+                .map(|pre| (task_dir, pre))
+        })
+        .collect();
+    // The task files are cheap to stat; each parse does the read, so a skipped
+    // task is never read. The template owns the skip, ingest, stamp, catalog,
+    // meta, and stats steps around those parses.
+    crate::adapter::harness::analyze_template(
+        Harness::Kilocode,
+        db,
+        KILOCODE_ANALYZER_META_KEY,
+        KILOCODE_ANALYZER_VERSION,
+        &input,
+        &config_dir,
+        candidates,
+        |(task_dir, pre)| {
+            let task_id = task_dir
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            (format!("kilocode:{task_id}"), Some(*pre))
+        },
+        |(task_dir, pre): (PathBuf, (i64, i64)), _| {
+            let conversation_path = task_dir.join("api_conversation_history.json");
+            let ui_path = task_dir.join("ui_messages.json");
+            let metadata_path = task_dir.join("task_metadata.json");
+            let task_id = task_dir
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            let fingerprint_key = format!("kilocode:{task_id}");
+            let conversation = fs::read_to_string(&conversation_path)
+                .with_context(|| format!("read {}", conversation_path.display()))?;
+            let ui_messages = fs::read_to_string(&ui_path)
+                .with_context(|| format!("read {}", ui_path.display()))?;
+            let records = parse_session(&conversation, &ui_messages);
+            let spans = extract_spans(&records, DEFAULT_IDLE_GAP_MS);
+            let usage = extract_usage_events(&records);
+            // The root is the stated heuristic (`adapter::kilocode::estimate_root`):
+            // kilocode stamps no cwd anywhere, so the common parent directory of
+            // the leading tool paths is the best answer — empty when none appears.
+            let root = estimate_root(&conversation).unwrap_or_default();
+            let meta = SessionMeta {
+                id: task_id.clone(),
+                project: root.clone(),
+                slug: task_id.clone(),
+                root,
+                source_path: fingerprint_key.clone(),
+                sub_tokens: 0,
+                sub_agent_count: 0,
+                start: session_start(&records),
+            };
+            // The template borrows these into its rows.
+            let errors = extract_tool_errors(&conversation);
+            let mut work = extract_work_events(&conversation);
+            // Files-in-context (PBI 23): the task's metadata names the files the
+            // task kept in context. They read as `file_read` events so the
+            // never-fires wedge can match them against rule globs — the same join
+            // the Claude Code `Read` tool calls feed. Stamped with the task's
+            // start: the metadata carries no timestamps, and the start is the one
+            // honest instant the task states. A missing or unreadable metadata
+            // file reads as no files, like every other optional input.
+            if let Ok(metadata) = fs::read_to_string(&metadata_path) {
+                let at = session_start(&records).map(|start| start.timestamp_ms);
+                let epoch_ms = at.unwrap_or(0);
+                for path in files_in_context(&metadata) {
+                    let id = match path.rsplit(['/', '\\']).next() {
+                        Some(base) if !base.is_empty() => base.to_string(),
+                        _ => path.clone(),
+                    };
+                    work.push(WorkEvent {
+                        epoch_ms,
+                        kind: "file_read",
+                        id,
+                        path: Some(path),
+                    });
+                }
+            }
+            Ok(ParsedSession {
+                meta,
+                spans,
+                usage,
+                runs: Vec::new(),
+                prompts: Vec::new(),
+                errors,
+                work,
+                denials: 0,
+                stamp: Some(pre),
+                // The re-stat refuses the stamp when a task file moved while it
+                // was read: the previous stamp then stays, and the next run
+                // re-ingests instead of skipping on a stale stamp.
+                restat: move || {
+                    task_fingerprint(&conversation_path, &ui_path, Some(&metadata_path))
+                },
             })
-            .collect();
-        store.ingest(
-            IngestBatch::new(&meta, &spans, &usage)
-                .tool_errors(&error_rows)
-                .work_events(&work_rows),
-        )?;
-        // Record the size actually consumed, so a file that grows after the
-        // read shows a mismatch next run instead of being skipped forever.
-        // The re-stat refuses the stamp when a task file moved while it was
-        // read: the previous stamp then stays, and the next run re-ingests
-        // instead of skipping on a stale stamp.
-        if restat_matches(
-            Some((mtime, size)),
-            task_fingerprint(&conversation_path, &ui_path, Some(&metadata_path)),
-        ) {
-            store.record_ingested_file(&fingerprint_key, mtime, size)?;
-        }
-        sessions += 1;
-        spans_total += spans.len();
-    }
-
-    // Catalog the installed config — global scope plus every known project
-    // root that still exists on disk — so usage joins against what is
-    // installed. Skills join from the shared sites (deduped by canonical
-    // path); MCP and permissions stay out of v1 (see
-    // `docs/specs/config-format-kilocode.md`), so their live usage still
-    // shows as orphaned rows in `inventory`.
-    let config_dir = kilo_home()?;
-    let surfaces = catalog_surfaces(Harness::Kilocode, &store.session_roots()?)?;
-    let surface_count = surfaces.len();
-    store.replace_surfaces(&surfaces)?;
-
-    store.record_analyzer_version(KILOCODE_ANALYZER_META_KEY, KILOCODE_ANALYZER_VERSION)?;
-    store.set_meta("analyzed_at", &chrono::Utc::now().to_rfc3339())?;
-    store.set_meta("projects_dir", &input.display().to_string())?;
-    store.set_meta("config_dir", &config_dir.display().to_string())?;
-    store.set_meta("harness", Harness::Kilocode.label())?;
-
-    Ok(AnalyzeStats {
-        sessions,
-        skipped,
-        spans_total,
-        surface_count,
-        denials: 0,
-    })
+        },
+    )
 }
 
 /// The kilo config root for this run: the environment read that
@@ -896,6 +859,7 @@ mod tests {
     use super::*;
     use crate::core::friction::ErrorCategory;
     use crate::core::surface::Scope;
+    use crate::store::{OpenMode, Store};
     use serde_json::json;
     use std::collections::HashSet;
 

@@ -8,15 +8,20 @@ use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 
 use crate::adapter::config::{
     add_skill_site, read_agent_surfaces, read_claude_md_surfaces, read_command_surfaces,
     read_mcp_server_surfaces, read_rule_surfaces, read_skill_surfaces,
 };
 use crate::adapter::opencode;
+use crate::adapter::transcript::{ToolError, WorkEvent};
 use crate::core::optimize::RunMode;
+use crate::core::span::Span;
+use crate::core::subagent::SubagentRun;
 use crate::core::surface::{Scope, Surface};
+use crate::core::usage::UsageEvent;
+use crate::store::{IngestBatch, OpenMode, SessionMeta, Store};
 
 /// A headless run-line renderer: one raw stdout line turned into the
 /// [`RunEvent`](opencode::RunEvent) the terminal shows. The signature is
@@ -220,6 +225,156 @@ pub fn catalog_surfaces(harness: Harness, roots: &[(String, String)]) -> Result<
         Harness::Kilocode => crate::adapter::kilocode::project_sites,
     };
     Ok(catalog_sites(&global, project_sites, roots, home))
+}
+
+/// One parsed session ready to ingest: everything [`analyze_template`] needs
+/// after the skip check. Per-harness parse code builds these — the transcript
+/// or database reading, the record mapping, the subagent joins — and the
+/// template owns the store order around them, so the skip, ingest, stamp,
+/// catalog, meta, and stats steps exist once
+/// (`pbi/2026-11-09-03-refactor-harness-analyze-template.md`).
+pub(crate) struct ParsedSession<F> {
+    /// The session row and its spans and usage events: the batch floor.
+    pub meta: SessionMeta,
+    pub spans: Vec<Span>,
+    pub usage: Vec<UsageEvent>,
+    /// The optional batch parts: empty for harnesses without them. The batch
+    /// starts every part empty, so an empty part ingests exactly like an
+    /// omitted builder call — one chain covers every harness byte-identically.
+    pub runs: Vec<SubagentRun>,
+    pub prompts: Vec<(usize, i64, &'static str)>,
+    /// Owned friction and work rows; the template borrows them into rows.
+    pub errors: Vec<ToolError>,
+    pub work: Vec<WorkEvent>,
+    /// Permission denials counted while parsing this session.
+    pub denials: usize,
+    /// The `(mtime, size)` pair to stamp when the re-stat gate agrees. It is
+    /// the pre-read pair, except where the harness records what it consumed
+    /// instead (Claude Code stamps the bytes read).
+    pub stamp: Option<(i64, i64)>,
+    /// The post-ingest freshness re-read: the live fingerprint the gate
+    /// compares the pre-read pair against. It runs after ingest, so a source
+    /// that grew mid-run refuses the stamp and is re-ingested next run.
+    pub restat: F,
+}
+
+/// The shared analyze driver, once for every harness: the incremental skip,
+/// one `parse` per surviving candidate, the ingest with its re-stat-gated
+/// stamp, then the config catalog, the meta block, and the stats.
+///
+/// Candidates are cheap to list (paths, snapshot rows, task dirs); `parse`
+/// does the expensive read, so a skipped candidate is never read — the fast
+/// incremental path stays fast. `parse` receives the pre-read pair the
+/// `fingerprint` probe returned, so the stamp records exactly what the skip
+/// compared. A new `meta` key is one edit in the block below, never one per
+/// harness.
+///
+/// Nine arguments because the template is the one call site that takes every
+/// per-harness input at once (identity, locations, version, candidates, and
+/// the two harness-shaped closures); bundling them would add a struct for a
+/// single caller. New harnesses add a call, not a parameter.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn analyze_template<C, F>(
+    harness: Harness,
+    db: &Path,
+    analyzer_key: &str,
+    analyzer_version: &str,
+    projects_dir: &Path,
+    config_dir: &Path,
+    candidates: Vec<C>,
+    fingerprint: impl Fn(&C) -> (String, Option<(i64, i64)>),
+    mut parse: impl FnMut(C, Option<(i64, i64)>) -> Result<ParsedSession<F>>,
+) -> Result<AnalyzeStats>
+where
+    F: Fn() -> Option<(i64, i64)>,
+{
+    let mut store = Store::open(db, OpenMode::ReadWrite).context("open store")?;
+
+    // Rows produced by older analysis semantics are rebuilt once: the
+    // fingerprint skip below would otherwise pin them forever, because the
+    // sources they came from will never change again.
+    let reuse_ingested = store.is_analyzer_current(analyzer_key, analyzer_version)?;
+
+    let mut sessions = 0;
+    let mut skipped = 0;
+    let mut spans_total = 0;
+    let mut denials = 0;
+    for candidate in candidates {
+        let (key, pre) = fingerprint(&candidate);
+        // Incremental skip: an unchanged fingerprint was already ingested.
+        // The probe runs before the read so a source that grows concurrently
+        // is guaranteed a mismatch — and a re-ingest — next run
+        // (`docs/specs/storage.md`).
+        if reuse_ingested
+            && let Some((mtime, size)) = pre
+            && store.is_ingested(&key, mtime, size)?
+        {
+            skipped += 1;
+            continue;
+        }
+        let one = parse(candidate, pre)?;
+        // `error_rows` borrows `one.errors`; `work_rows` borrows `one.work`.
+        let error_rows: Vec<(i64, &str, &str, &str, &str)> = one
+            .errors
+            .iter()
+            .map(|e| {
+                (
+                    e.epoch_ms,
+                    e.category.label(),
+                    e.excerpt.as_str(),
+                    e.tool.as_str(),
+                    e.target.as_str(),
+                )
+            })
+            .collect();
+        let work_rows: Vec<(i64, &str, &str, Option<&str>)> = one
+            .work
+            .iter()
+            .map(|e| (e.epoch_ms, e.kind, e.id.as_str(), e.path.as_deref()))
+            .collect();
+        // One session, one batch: the store applies its parts in its own
+        // order, so nothing here depends on the order these were parsed in.
+        store.ingest(
+            IngestBatch::new(&one.meta, &one.spans, &one.usage)
+                .subagent_runs(&one.runs)
+                .prompts(&one.prompts)
+                .tool_errors(&error_rows)
+                .work_events(&work_rows),
+        )?;
+        if let Some((mtime, size)) = one.stamp
+            && restat_matches(pre, (one.restat)())
+        {
+            // The re-stat above refuses the stamp when the source moved while
+            // it was read: the previous stamp then stays, and the next run
+            // re-ingests instead of skipping on a stale stamp.
+            store.record_ingested_file(&key, mtime, size)?;
+        }
+        sessions += 1;
+        spans_total += one.spans.len();
+        denials += one.denials;
+    }
+
+    // Catalog the installed config — global scope plus every known project root
+    // that still exists on disk — so usage joins against what is installed.
+    // The traversal (scope building, dedup, root gating) lives in
+    // `catalog_surfaces`; each harness module supplies only the site rows.
+    let surfaces = catalog_surfaces(harness, &store.session_roots()?)?;
+    let surface_count = surfaces.len();
+    store.replace_surfaces(&surfaces)?;
+
+    store.record_analyzer_version(analyzer_key, analyzer_version)?;
+    store.set_meta("analyzed_at", &chrono::Utc::now().to_rfc3339())?;
+    store.set_meta("projects_dir", &projects_dir.display().to_string())?;
+    store.set_meta("config_dir", &config_dir.display().to_string())?;
+    store.set_meta("harness", harness.label())?;
+
+    Ok(AnalyzeStats {
+        sessions,
+        skipped,
+        spans_total,
+        surface_count,
+        denials,
+    })
 }
 
 impl Harness {

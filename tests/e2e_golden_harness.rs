@@ -146,6 +146,35 @@ fn fixture_kilocode_tasks(root: &Path) -> PathBuf {
     tasks
 }
 
+fn fixture_claude_projects(root: &Path) -> PathBuf {
+    let projects = root.join("projects/-tmp-example-proj");
+    std::fs::create_dir_all(&projects).unwrap();
+    std::fs::write(
+        projects.join("aaaaaaaa-0000-0000-0000-000000000001.jsonl"),
+        concat!(
+            r#"{"type":"user","cwd":"/tmp/example/proj","timestamp":"2026-01-01T00:00:00.000Z","message":{"content":"<command-name>/git-commit</command-name>"}}"#,
+            "\n",
+            r#"{"type":"assistant","timestamp":"2026-01-01T00:00:01.000Z","message":{"model":"claude-opus-4-7","usage":{"input_tokens":10,"cache_read_input_tokens":90,"cache_creation_input_tokens":0,"output_tokens":40}}}"#,
+            "\n",
+            r#"{"type":"assistant","timestamp":"2026-01-01T00:00:03.000Z","message":{"model":"claude-opus-4-7","usage":{"input_tokens":0,"cache_read_input_tokens":250,"cache_creation_input_tokens":0,"output_tokens":60}}}"#,
+            "\n",
+            r#"{"type":"user","timestamp":"2026-01-01T00:00:05.000Z","message":{"content":"thanks"}}"#,
+        ),
+    )
+    .unwrap();
+    root.join("projects")
+}
+
+#[test]
+fn claude_analyze_matches_its_golden() {
+    let root = scratch_root("claude");
+    let projects = fixture_claude_projects(&root);
+    let db = root.join("store.db");
+    let stats = saniwalens::adapter::claude::analyze(Some(projects), &db).unwrap();
+    assert_eq!((stats.sessions, stats.skipped), (1, 0));
+    check_golden("claude.txt", &dump_store(&db, &root));
+}
+
 #[test]
 fn opencode_analyze_matches_its_golden() {
     let root = scratch_root("opencode");
