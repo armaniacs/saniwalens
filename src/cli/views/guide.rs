@@ -4,7 +4,8 @@ use std::path::Path;
 use crate::adapter::harness::{Harness, home_dir};
 use crate::core::period::TimeRange;
 use crate::core::scope::ScopeFilter;
-use crate::session::{Session, SessionEnv, config_file_path, env_roots, resolve_cli};
+use crate::session::{SessionEnv, config_file_path, env_roots, resolve_cli};
+use crate::store::Store;
 
 use super::super::report::Format;
 use super::super::window::{PeriodArgs, ReadArgs, WindowedDispatch};
@@ -409,11 +410,17 @@ fn run_scoped(
     scope_flag: Option<&str>,
     period: &PeriodArgs,
     read: &ReadArgs,
-    report: fn(&Session, &ScopeFilter, TimeRange, Format) -> anyhow::Result<()>,
+    report: fn(&Store, &Harness, &ScopeFilter, TimeRange, Format) -> anyhow::Result<()>,
 ) -> anyhow::Result<()> {
     let opened = dispatch.open_scoped(scope_flag, None, period, read, run_analyze)?;
     let (windowed, filter) = opened.into_parts();
-    report(&windowed.sess, &filter, windowed.window, windowed.format)
+    report(
+        &windowed.sess.store,
+        &windowed.sess.harness,
+        &filter,
+        windowed.window,
+        windowed.format,
+    )
 }
 
 pub(crate) fn run_guide<R: BufRead, W: Write>(
@@ -484,7 +491,13 @@ pub(crate) fn run_guide<R: BufRead, W: Write>(
                     run_analyze,
                 )?;
                 let (windowed, filter) = opened.into_parts();
-                doctor(&windowed.sess, &filter, windowed.window, windowed.format)?;
+                doctor(
+                    &windowed.sess.store,
+                    &windowed.sess.harness,
+                    &filter,
+                    windowed.window,
+                    windowed.format,
+                )?;
             }
             Purpose::Waste => {
                 run_scoped(dispatch, scope_flag, &period, &read, waste)?;

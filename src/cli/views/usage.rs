@@ -4,10 +4,10 @@
 
 use anyhow::{Context, Result};
 
+use crate::adapter::harness::Harness;
 use crate::core::bucket::{Bucket, JST_OFFSET_SECS, bucket_label};
 use crate::core::period::TimeRange;
 use crate::core::subagent::SplitCoverage;
-use crate::session::Session;
 use crate::store::Store;
 
 use super::super::{
@@ -15,13 +15,12 @@ use super::super::{
 };
 
 pub(crate) fn usage(
-    sess: &Session,
+    store: &Store,
+    _harness: &Harness,
     by: Option<&str>,
     window: TimeRange,
     format: Format,
 ) -> Result<()> {
-    let store = &sess.store;
-
     if let Some(by) = by {
         let bucket = Bucket::parse(by)
             .with_context(|| format!("unknown --by value '{by}' (year|month|week|day|hour)"))?;

@@ -4,10 +4,11 @@
 
 use anyhow::Result;
 
+use crate::adapter::harness::Harness;
 use crate::core::findings;
 use crate::core::period::TimeRange;
 use crate::core::thrash::{THRASH_GAP_SECS, THRASH_MIN_EDITS};
-use crate::session::Session;
+use crate::store::Store;
 
 use super::super::{Align, Format, TableSpec, ViewCtx, empty_in_window, note, render_view};
 
@@ -15,8 +16,12 @@ use super::super::{Align, Format, TableSpec, ViewCtx, empty_in_window, note, ren
 /// got stuck and kept retrying, as opposed to a hotspot's healthy spread-out
 /// edits. An episode is one session's edits to one path, so parallel work on
 /// a same-named file is never presented as one agent looping (`core::thrash`).
-pub(crate) fn stuck(sess: &Session, window: TimeRange, format: Format) -> Result<()> {
-    let store = &sess.store;
+pub(crate) fn stuck(
+    store: &Store,
+    _harness: &Harness,
+    window: TimeRange,
+    format: Format,
+) -> Result<()> {
     let episodes = findings::stuck_episodes(&store.file_edits(window)?);
     let episodes_json: Vec<serde_json::Value> = episodes
         .iter()

@@ -34,7 +34,7 @@ pub(crate) use report::*;
 pub(crate) use views::trend::*;
 pub(crate) use views::{
     doctor::doctor, failures::failures, inventory::inventory, overhead::overhead, stuck::stuck,
-    usage::usage,
+    usage::usage, waste::waste,
 };
 pub(crate) use window::*;
 
@@ -318,11 +318,19 @@ pub fn run() -> Result<()> {
             read,
         } => {
             let opened = dispatch.open(format.as_deref(), &period, &read, run_analyze)?;
-            usage(&opened.sess, by.as_deref(), opened.window, opened.format)
+            let s = &opened.sess;
+            usage(
+                &s.store,
+                &s.harness,
+                by.as_deref(),
+                opened.window,
+                opened.format,
+            )
         }
         Command::Trend { pair, format, read } => {
             let opened = dispatch.open_pair(format.as_deref(), &pair, &read, run_analyze)?;
-            trend(&opened.sess, opened.pair, opened.format)
+            let s = &opened.sess;
+            trend(&s.store, &s.harness, opened.pair, opened.format)
         }
         Command::Models {
             period,
@@ -330,7 +338,8 @@ pub fn run() -> Result<()> {
             read,
         } => {
             let opened = dispatch.open(format.as_deref(), &period, &read, run_analyze)?;
-            views::models::models(&opened.sess, opened.window, opened.format)
+            let s = &opened.sess;
+            views::models::models(&s.store, &s.harness, opened.window, opened.format)
         }
         Command::Sessions {
             sort,
@@ -340,7 +349,8 @@ pub fn run() -> Result<()> {
         } => {
             let opened = dispatch.open(format.as_deref(), &period, &read, run_analyze)?;
             let order = views::sessions::parse_sort(sort.as_deref())?;
-            views::sessions::sessions(&opened.sess, order, opened.window, opened.format)
+            let s = &opened.sess;
+            views::sessions::sessions(&s.store, &s.harness, order, opened.window, opened.format)
         }
         Command::Inventory {
             scope,
@@ -356,7 +366,14 @@ pub fn run() -> Result<()> {
                 run_analyze,
             )?;
             let (windowed, filter) = opened.into_parts();
-            inventory(&windowed.sess, &filter, windowed.window, windowed.format)
+            let s = &windowed.sess;
+            inventory(
+                &s.store,
+                &s.harness,
+                &filter,
+                windowed.window,
+                windowed.format,
+            )
         }
         Command::Waste {
             scope,
@@ -372,7 +389,14 @@ pub fn run() -> Result<()> {
                 run_analyze,
             )?;
             let (windowed, filter) = opened.into_parts();
-            views::waste::waste(&windowed.sess, &filter, windowed.window, windowed.format)
+            let s = &windowed.sess;
+            waste(
+                &s.store,
+                &s.harness,
+                &filter,
+                windowed.window,
+                windowed.format,
+            )
         }
         Command::Overhead {
             format,
@@ -380,7 +404,8 @@ pub fn run() -> Result<()> {
             read,
         } => {
             let opened = dispatch.open(format.as_deref(), &period, &read, run_analyze)?;
-            overhead(&opened.sess, opened.window, opened.format)
+            let s = &opened.sess;
+            overhead(&s.store, &s.harness, opened.window, opened.format)
         }
         Command::Prompts {
             format,
@@ -388,7 +413,8 @@ pub fn run() -> Result<()> {
             read,
         } => {
             let opened = dispatch.open(format.as_deref(), &period, &read, run_analyze)?;
-            views::prompts::prompts(&opened.sess, opened.window, opened.format)
+            let s = &opened.sess;
+            views::prompts::prompts(&s.store, &s.harness, opened.window, opened.format)
         }
         Command::Failures {
             scope,
@@ -404,7 +430,14 @@ pub fn run() -> Result<()> {
                 run_analyze,
             )?;
             let (windowed, filter) = opened.into_parts();
-            failures(&windowed.sess, &filter, windowed.window, windowed.format)
+            let s = &windowed.sess;
+            failures(
+                &s.store,
+                &s.harness,
+                &filter,
+                windowed.window,
+                windowed.format,
+            )
         }
         Command::Stuck {
             format,
@@ -412,7 +445,8 @@ pub fn run() -> Result<()> {
             read,
         } => {
             let opened = dispatch.open(format.as_deref(), &period, &read, run_analyze)?;
-            stuck(&opened.sess, opened.window, opened.format)
+            let s = &opened.sess;
+            stuck(&s.store, &s.harness, opened.window, opened.format)
         }
         Command::Doctor {
             scope,
@@ -428,7 +462,14 @@ pub fn run() -> Result<()> {
                 run_analyze,
             )?;
             let (windowed, filter) = opened.into_parts();
-            doctor(&windowed.sess, &filter, windowed.window, windowed.format)
+            let s = &windowed.sess;
+            doctor(
+                &s.store,
+                &s.harness,
+                &filter,
+                windowed.window,
+                windowed.format,
+            )
         }
         Command::Sql {
             query,
@@ -569,7 +610,7 @@ fn findings_input(store: &Store, window: TimeRange) -> Result<findings::Findings
     Ok(findings::FindingsInput {
         // No session start observed means the always-on section is omitted
         // rather than guessed at — the sentinel stays the core's business.
-        floor: store.baseline_floor(window)?,
+        floor: store.baseline_floor(window)?.into(),
         error_examples: store.error_examples(findings::EXAMPLES_PER_CATEGORY, window)?,
         error_breakdown: store
             .error_tool_breakdown_briefing(window, findings::BRIEFING_GROUPS_LIMIT)?,

@@ -15,6 +15,7 @@ use saniwalens::core::findings::{
 };
 use saniwalens::core::scope::ScopeFilter;
 use saniwalens::core::thrash::{FileEdit, THRASH_GAP_SECS, THRASH_MIN_EDITS};
+use saniwalens::store::FrictionCell;
 
 fn edit(session: &str, project: &str, path: &str, epoch: i64) -> FileEdit {
     FileEdit {
@@ -93,12 +94,17 @@ fn stuck_episodes_keep_the_legacy_gap_and_minimum_boundaries() {
 fn friction_rows_route_each_scope_like_the_legacy_view() {
     // alpha owns path-not-found outright; edit-precondition ties (global);
     // beta-only typo stays project-owned.
+    let cell = |project: &str, category: &str, count: i64| FrictionCell {
+        project: project.to_string(),
+        category: category.to_string(),
+        count,
+    };
     let cells = vec![
-        ("alpha".to_string(), "path-not-found".to_string(), 6),
-        ("beta".to_string(), "path-not-found".to_string(), 1),
-        ("alpha".to_string(), "edit-precondition".to_string(), 3),
-        ("beta".to_string(), "edit-precondition".to_string(), 3),
-        ("beta".to_string(), "typo".to_string(), 2),
+        cell("alpha", "path-not-found", 6),
+        cell("beta", "path-not-found", 1),
+        cell("alpha", "edit-precondition", 3),
+        cell("beta", "edit-precondition", 3),
+        cell("beta", "typo", 2),
     ];
     let all = vec![
         ("path-not-found".to_string(), 7),

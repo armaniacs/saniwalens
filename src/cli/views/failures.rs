@@ -4,11 +4,13 @@
 
 use anyhow::Result;
 
+use crate::adapter::harness::Harness;
 use crate::core::findings;
 use crate::core::friction::ErrorCategory;
 use crate::core::period::TimeRange;
 use crate::core::scope::ScopeFilter;
-use crate::session::{Session, Style};
+use crate::session::Style;
+use crate::store::Store;
 
 use super::super::{Align, Format, TableSpec, ViewCtx, empty_in_window, note, render_view};
 
@@ -19,12 +21,12 @@ use super::super::{Align, Format, TableSpec, ViewCtx, empty_in_window, note, ren
 /// no project owns, `project` each project's majority-owned failures, and
 /// `project:<slug>` everything that happened in that one project.
 pub(crate) fn failures(
-    sess: &Session,
+    store: &Store,
+    harness: &Harness,
     filter: &ScopeFilter,
     window: TimeRange,
     format: Format,
 ) -> Result<()> {
-    let store = &sess.store;
     let cells = store.error_counts_by_project(window)?;
     // The scope-blind totals feed only the `All` scope; other scopes route
     // the per-project cells, so no second query runs for them.
@@ -70,7 +72,7 @@ pub(crate) fn failures(
                 "count": row.count,
                 "spread_projects": row.spread,
                 "suggestion": ErrorCategory::from_label(&row.category)
-                    .suggestion(sess.harness.instruction_file()),
+                    .suggestion(harness.instruction_file()),
             })
         })
         .collect();
@@ -98,21 +100,21 @@ pub(crate) fn failures(
             format!(
                 "Failures spread across several projects — no single project owns them, so\n\
                  they read as habits or global-config problems. Fix these in {}.",
-                sess.harness.global_config_ref()
+                harness.global_config_ref()
             )
         }
         ScopeFilter::Project(None) => {
             format!(
                 "Failures each project owns (it holds the majority of that kind). Fix each\n\
                  in that project's own {}, not globally.",
-                sess.harness.project_config_ref()
+                harness.project_config_ref()
             )
         }
         ScopeFilter::Project(Some(_)) => {
             format!(
                 "Every recurring failure inside this one project, most frequent first.\n\
                  Fix them in this project's own {}.",
-                sess.harness.project_config_ref()
+                harness.project_config_ref()
             )
         }
     };
@@ -142,8 +144,7 @@ pub(crate) fn failures(
                 cells.extend([
                     error,
                     row.count.to_string(),
-                    ErrorCategory::from_label(&row.category)
-                        .suggestion(sess.harness.instruction_file()),
+                    ErrorCategory::from_label(&row.category).suggestion(harness.instruction_file()),
                 ]);
                 cells
             })

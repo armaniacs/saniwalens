@@ -5,9 +5,9 @@
 
 use anyhow::Result;
 
+use crate::adapter::harness::Harness;
 use crate::core::period::TimeRange;
-use crate::session::Session;
-use crate::store::SessionRow;
+use crate::store::{SessionRow, Store};
 
 use super::super::{Align, Format, TableSpec, ViewCtx, empty_in_window, render_view};
 
@@ -54,12 +54,12 @@ fn session_cell(row: &SessionRow) -> String {
 }
 
 pub(crate) fn sessions(
-    sess: &Session,
+    store: &Store,
+    _harness: &Harness,
     sort: SessionSort,
     window: TimeRange,
     format: Format,
 ) -> Result<()> {
-    let store = &sess.store;
     let mut rows = store.session_breakdown(window)?;
     sort_sessions(&mut rows, sort);
     let sessions: Vec<serde_json::Value> = rows

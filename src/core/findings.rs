@@ -16,6 +16,7 @@ use crate::core::thrash::{FileEdit, ThrashEpisode, detect_thrash};
 /// The briefing's thrash params, owned by the detector module (PBI C7) and
 /// re-exported here so `findings::THRASH_*` paths keep resolving.
 pub use crate::core::thrash::{THRASH_GAP_SECS, THRASH_MIN_EDITS};
+use crate::store::{FrictionCell, SessionRoot, ToolBreakdown};
 
 /// Top Bash leading words the briefing lists.
 pub const TOP_COMMANDS_LIMIT: usize = 15;
@@ -54,20 +55,43 @@ pub struct CatalogRow {
     pub uses: i64,
 }
 
+/// The empirical always-on floor as the briefing's assembly sees it: either
+/// no session start was observed (`Unknown` — the always-on section is
+/// omitted, never guessed at) or the leanest start was (`Observed`). Replaces
+/// the `Option<i64>` whose `None -> 0` conversion every caller re-derived
+/// (PBI C8). The `0` sentinel still crosses into `core::optimize::Findings`
+/// (whose `floor` documents `0 means unknown`) in exactly one `match` in
+/// [`collect_findings`], never via `unwrap_or` at a use site.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Floor {
+    #[default]
+    Unknown,
+    Observed(i64),
+}
+
+impl From<Option<i64>> for Floor {
+    fn from(floor: Option<i64>) -> Self {
+        match floor {
+            Some(floor) => Self::Observed(floor),
+            None => Self::Unknown,
+        }
+    }
+}
+
 /// Everything the briefing's assembly needs, fetched by the shell. Plain rows
 /// only — no store types, no queries, so every join below is unit-testable.
 #[derive(Debug, Default)]
 pub struct FindingsInput {
-    /// The empirical always-on floor; `None` when no session start was seen
-    /// (the briefing's "unknown" sentinel — never a guessed zero).
-    pub floor: Option<i64>,
+    /// The empirical always-on floor; [`Floor::Unknown`] when no session
+    /// start was seen (the briefing's "unknown" — never a guessed zero).
+    pub floor: Floor,
     /// `(project, category, excerpt)`, already capped per group by the fetch.
     pub error_examples: Vec<(String, String, String)>,
-    /// `(project, category, tool, count)` attribution rows.
-    pub error_breakdown: Vec<(String, String, String, i64)>,
-    /// `(project, category, count)` friction cells, before the actionable
-    /// filter — the filter is part of the routing, so it runs here.
-    pub friction_cells: Vec<(String, String, i64)>,
+    /// Tool attribution rows: which tool produced each project's failures.
+    pub error_breakdown: Vec<ToolBreakdown>,
+    /// Friction cells, before the actionable filter — the filter is part of
+    /// the routing, so it runs here.
+    pub friction_cells: Vec<FrictionCell>,
     /// Bash leading words, most frequent first.
     pub bash_commands: Vec<(String, i64)>,
     /// Most-edited files (basename counts), most frequent first.
@@ -76,8 +100,9 @@ pub struct FindingsInput {
     pub file_edits: Vec<FileEdit>,
     /// The installed-config catalog with usage, for the wedge routing.
     pub catalog: Vec<CatalogRow>,
-    /// `(root, project)` pairs for the per-project sections.
-    pub session_roots: Vec<(String, String)>,
+    /// Known `(root, project)` pairs for the per-project sections, with the
+    /// slug typed so a root can never stand in for one.
+    pub session_roots: Vec<SessionRoot>,
     /// Prompt behavioral-class counts.
     pub prompt_behaviors: Vec<(String, i64)>,
     /// `(subagent output tokens, subagent runs)` over the whole store.
@@ -192,11 +217,21 @@ pub struct FrictionViewRow {
 /// global rows rank by total then name, project rows by owned volume then slug
 /// with categories by count then name, and a single-project scope keeps the
 /// fetched cell order.
+///
+/// `cells` arrive typed; the ownership routing (`core::scope`) still reads
+/// plain tuples, so the projection happens here, once, in fetched order —
+/// which is what keeps the routing's tie-breaks identical.
 pub fn friction_rows(
-    cells: &[(String, String, i64)],
+    cells: &[FrictionCell],
     all: &[(String, i64)],
     filter: &ScopeFilter,
 ) -> Vec<FrictionViewRow> {
+    // The routing's input shape, projected in fetched order: `split_friction`
+    // breaks ties by first-seen maximum, so the projection must not reorder.
+    let plain: Vec<(String, String, i64)> = cells
+        .iter()
+        .map(|cell| (cell.project.clone(), cell.category.clone(), cell.count))
+        .collect();
     match filter {
         ScopeFilter::All => all
             .iter()
@@ -207,7 +242,7 @@ pub fn friction_rows(
                 spread: None,
             })
             .collect(),
-        ScopeFilter::Global => split_friction(cells)
+        ScopeFilter::Global => split_friction(&plain)
             .global
             .into_iter()
             .map(|g| FrictionViewRow {
@@ -217,7 +252,7 @@ pub fn friction_rows(
                 spread: Some(g.projects),
             })
             .collect(),
-        ScopeFilter::Project(None) => split_friction(cells)
+        ScopeFilter::Project(None) => split_friction(&plain)
             .per_project
             .into_iter()
             .flat_map(|(project, cats)| {
@@ -232,11 +267,11 @@ pub fn friction_rows(
             .collect(),
         ScopeFilter::Project(Some(slug)) => cells
             .iter()
-            .filter(|(project, _, _)| project == slug)
-            .map(|(project, category, count)| FrictionViewRow {
-                project: Some(project.clone()),
-                category: category.clone(),
-                count: *count,
+            .filter(|cell| cell.project == *slug)
+            .map(|cell| FrictionViewRow {
+                project: Some(cell.project.clone()),
+                category: cell.category.clone(),
+                count: cell.count,
                 spread: None,
             })
             .collect(),
@@ -342,9 +377,13 @@ pub fn inventory_rows(
 /// briefing and need not re-run the tool. Lists are capped where a long tail
 /// adds nothing for ranking.
 pub fn collect_findings(input: &FindingsInput) -> Findings {
-    // The briefing's "unknown floor" sentinel is 0 — no session start observed
-    // means the always-on section is omitted rather than guessed at.
-    let floor = input.floor.unwrap_or(0);
+    // The briefing's "unknown floor" crosses into the findings' `0 means
+    // unknown` contract here, in one explicit match — never via `unwrap_or`
+    // at a use site.
+    let floor = match input.floor {
+        Floor::Unknown => 0,
+        Floor::Observed(floor) => floor,
+    };
 
     let mut examples: HashMap<(String, String), Vec<String>> = HashMap::new();
     for (project, category, excerpt) in &input.error_examples {
@@ -357,20 +396,22 @@ pub fn collect_findings(input: &FindingsInput) -> Findings {
     // The split of each (project, category) across the tools that produced it —
     // so the briefing carries the attribution the agent otherwise re-derives.
     let mut by_tool: HashMap<(String, String), Vec<(String, i64)>> = HashMap::new();
-    for (project, category, tool, n) in &input.error_breakdown {
+    for row in &input.error_breakdown {
         by_tool
-            .entry((project.clone(), category.clone()))
+            .entry((row.project.clone(), row.category.clone()))
             .or_default()
-            .push((tool.clone(), *n));
+            .push((row.tool.clone(), row.count));
     }
 
     // Route actionable friction to the layer that owns each fix (core::scope):
     // majority-owned categories to their project, the spread rest to global.
+    // The routing still reads plain tuples, so the projection happens here in
+    // fetched order (see `friction_rows`).
     let cells: Vec<(String, String, i64)> = input
         .friction_cells
         .iter()
-        .filter(|(_, label, _)| ErrorCategory::from_label(label).is_actionable())
-        .cloned()
+        .filter(|cell| ErrorCategory::from_label(&cell.category).is_actionable())
+        .map(|cell| (cell.project.clone(), cell.category.clone(), cell.count))
         .collect();
     let split = split_friction(&cells);
 
@@ -444,7 +485,7 @@ pub fn collect_findings(input: &FindingsInput) -> Findings {
     let roots: HashMap<String, String> = input
         .session_roots
         .iter()
-        .map(|(root, project)| (project.clone(), root.clone()))
+        .map(|root| (root.project.0.clone(), root.root.clone()))
         .collect();
     let mut owned_friction: HashMap<String, Vec<(String, i64)>> =
         split.per_project.into_iter().collect();
@@ -580,15 +621,23 @@ mod tests {
             })
             .collect();
         input.friction_cells = vec![
-            ("alpha".to_string(), "path-not-found".to_string(), 3),
-            ("beta".to_string(), "path-not-found".to_string(), 3),
+            FrictionCell {
+                project: "alpha".to_string(),
+                category: "path-not-found".to_string(),
+                count: 3,
+            },
+            FrictionCell {
+                project: "beta".to_string(),
+                category: "path-not-found".to_string(),
+                count: 3,
+            },
         ];
-        input.error_breakdown = vec![(
-            "alpha".to_string(),
-            "path-not-found".to_string(),
-            "Read".to_string(),
-            6,
-        )];
+        input.error_breakdown = vec![ToolBreakdown {
+            project: "alpha".to_string(),
+            category: "path-not-found".to_string(),
+            tool: "Read".to_string(),
+            count: 6,
+        }];
         // Seven thrash episodes in one project — only THRASH_LINES_PER_PROJECT
         // lines may survive.
         input.file_edits = (0..THRASH_LINES_PER_PROJECT + 2)
@@ -621,7 +670,7 @@ mod tests {
     #[test]
     fn assembly_routes_and_aggregates_like_the_recorded_briefing() {
         let mut input = empty_input();
-        input.floor = Some(1000);
+        input.floor = Floor::Observed(1000);
         input.always_on_config_tokens = 700;
         input.bash_commands = vec![("ls".to_string(), 15), ("cd".to_string(), 5)];
         input.prompt_behaviors = vec![
@@ -631,36 +680,59 @@ mod tests {
         ];
         input.skill_out_tokens = vec![10, 20];
         input.subagent_totals = (60, 2);
-        input.session_roots = vec![("/repo/alpha".to_string(), "alpha".to_string())];
+        input.session_roots = vec![SessionRoot {
+            root: "/repo/alpha".to_string(),
+            project: crate::store::ProjectSlug("alpha".to_string()),
+        }];
         // `path-not-found` concentrates in alpha (project-owned);
         // `edit-precondition` ties across two projects (global);
         // `cancelled` is not actionable and must be dropped entirely.
         input.friction_cells = vec![
-            ("alpha".to_string(), "path-not-found".to_string(), 6),
-            ("beta".to_string(), "path-not-found".to_string(), 1),
-            ("alpha".to_string(), "edit-precondition".to_string(), 3),
-            ("beta".to_string(), "edit-precondition".to_string(), 3),
-            ("gamma".to_string(), "cancelled".to_string(), 9),
+            FrictionCell {
+                project: "alpha".to_string(),
+                category: "path-not-found".to_string(),
+                count: 6,
+            },
+            FrictionCell {
+                project: "beta".to_string(),
+                category: "path-not-found".to_string(),
+                count: 1,
+            },
+            FrictionCell {
+                project: "alpha".to_string(),
+                category: "edit-precondition".to_string(),
+                count: 3,
+            },
+            FrictionCell {
+                project: "beta".to_string(),
+                category: "edit-precondition".to_string(),
+                count: 3,
+            },
+            FrictionCell {
+                project: "gamma".to_string(),
+                category: "cancelled".to_string(),
+                count: 9,
+            },
         ];
         input.error_breakdown = vec![
-            (
-                "alpha".to_string(),
-                "path-not-found".to_string(),
-                "Read".to_string(),
-                6,
-            ),
-            (
-                "alpha".to_string(),
-                "edit-precondition".to_string(),
-                "Edit".to_string(),
-                2,
-            ),
-            (
-                "beta".to_string(),
-                "edit-precondition".to_string(),
-                "Write".to_string(),
-                3,
-            ),
+            ToolBreakdown {
+                project: "alpha".to_string(),
+                category: "path-not-found".to_string(),
+                tool: "Read".to_string(),
+                count: 6,
+            },
+            ToolBreakdown {
+                project: "alpha".to_string(),
+                category: "edit-precondition".to_string(),
+                tool: "Edit".to_string(),
+                count: 2,
+            },
+            ToolBreakdown {
+                project: "beta".to_string(),
+                category: "edit-precondition".to_string(),
+                tool: "Write".to_string(),
+                count: 3,
+            },
         ];
         input.error_examples = vec![(
             "alpha".to_string(),
@@ -720,7 +792,7 @@ mod tests {
         // means the always-on section is omitted rather than guessed at, and
         // the global figure is not claimed either.
         let mut input = empty_input();
-        input.floor = None;
+        input.floor = Floor::Unknown;
         input.always_on_config_tokens = 999;
 
         let findings = collect_findings(&input);

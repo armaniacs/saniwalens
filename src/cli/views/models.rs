@@ -5,9 +5,10 @@
 
 use anyhow::Result;
 
+use crate::adapter::harness::Harness;
 use crate::core::period::TimeRange;
 use crate::core::usage::bundle_models;
-use crate::session::Session;
+use crate::store::Store;
 
 use super::super::{Align, Format, TableSpec, ViewCtx, empty_in_window, render_view};
 
@@ -16,8 +17,12 @@ use super::super::{Align, Format, TableSpec, ViewCtx, empty_in_window, render_vi
 /// `tool_error` rows are excluded upstream — their `model` column carries the
 /// originating tool, not a model — and missing models bundle as `unknown`
 /// (a dropped row would read as a smaller total).
-pub(crate) fn models(sess: &Session, window: TimeRange, format: Format) -> Result<()> {
-    let store = &sess.store;
+pub(crate) fn models(
+    store: &Store,
+    _harness: &Harness,
+    window: TimeRange,
+    format: Format,
+) -> Result<()> {
     let main = bundle_models(store.model_usage_events(window)?);
     let subs = bundle_models(store.model_usage_subagents(window)?);
 

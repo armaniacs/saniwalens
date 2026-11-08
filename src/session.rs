@@ -220,16 +220,16 @@ impl Session {
     }
 
     /// Re-analyze against the roots the store was built from (recorded in
-    /// meta); a fresh db falls back to the defaults.
+    /// meta); a fresh db falls back to the defaults. The projects lookup
+    /// reads the live connection — the analyze step writes through its own
+    /// connection, so only the re-open after it stays: reopening to read one
+    /// meta key was the second of the two re-opens (PBI C8).
     fn refresh(
         &mut self,
         analyze: impl FnOnce(&Harness, Option<PathBuf>, &Path) -> Result<AnalyzeStats>,
     ) -> Result<()> {
         let projects = match self.db_path.exists() {
-            true => Store::open(&self.db_path, OpenMode::ReadWrite)
-                .context("open store")?
-                .meta("projects_dir")?
-                .map(PathBuf::from),
+            true => self.store.meta("projects_dir")?.map(PathBuf::from),
             false => None,
         };
         let stats = analyze(&self.harness, projects, &self.db_path)?;

@@ -355,6 +355,54 @@ pub struct CatalogEntry {
     pub description: Option<String>,
 }
 
+/// One friction cell: how often one failure category hit one project.
+/// A named struct rather than a `(project, category, count)` tuple so a
+/// swapped field order fails to compile instead of misrouting friction
+/// (PBI C8: the store <-> findings contract is typed, not commented).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FrictionCell {
+    pub project: String,
+    pub category: String,
+    pub count: i64,
+}
+
+/// One tool-attribution row: which tool produced a project's failures in a
+/// category. Named for the same reason as [`FrictionCell`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ToolBreakdown {
+    pub project: String,
+    pub category: String,
+    pub tool: String,
+    pub count: i64,
+}
+
+/// A normalized project slug as the store reports it: the scope half of a
+/// session root, typed so it cannot be passed where a filesystem root goes.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct ProjectSlug(pub String);
+
+impl ProjectSlug {
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl From<String> for ProjectSlug {
+    fn from(slug: String) -> Self {
+        Self(slug)
+    }
+}
+
+/// One known `(root, project)` pair: the directory project-config scanning
+/// walks with the normalized slug its surfaces are scoped to. The untyped
+/// [`Store::session_roots`] keeps its tuple shape for the adapter caller;
+/// this is the briefing reader's typed twin.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SessionRoot {
+    pub root: String,
+    pub project: ProjectSlug,
+}
+
 /// One session's cost shape: what it spent, how long it ran, and how often
 /// it stumbled. Zero-event and zero-friction sessions read 0, never vanish.
 #[derive(Debug, PartialEq)]
@@ -1172,7 +1220,7 @@ impl Store {
     /// category can be attributed to the project whose config should carry the
     /// fix — backing a `--project` filter and the dominant-project line in the
     /// summary.
-    pub fn error_counts_by_project(&self, range: TimeRange) -> Result<Vec<(String, String, i64)>> {
+    pub fn error_counts_by_project(&self, range: TimeRange) -> Result<Vec<FrictionCell>> {
         let category = encoding_column("tool_error", EventRole::Category);
         let (filter, binds) = range_clause(range, "e.started_epoch");
         let sql = format!(
@@ -1185,7 +1233,11 @@ impl Store {
         let mut stmt = self.conn.prepare(&sql)?;
         let rows = stmt
             .query_map(params_from_iter(binds), |row| {
-                Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+                Ok(FrictionCell {
+                    project: row.get(0)?,
+                    category: row.get(1)?,
+                    count: row.get(2)?,
+                })
             })?
             .collect::<rusqlite::Result<Vec<_>>>()?;
         Ok(rows)
@@ -1233,16 +1285,13 @@ impl Store {
         Ok(rows)
     }
 
-    /// Tool-failure counts split by project, category, and originating tool, as
-    /// `(project, category, tool, count)`, densest first. Answers "which tool
+    /// Tool-failure counts split by project, category, and originating tool,
+    /// densest first. Answers "which tool
     /// produced these failures" — e.g. path-not-found split across Read / Bash /
     /// Edit / a Playwright locator — so a report separates file friction from a
     /// browser miss that merely reads as "not found", and the seeded agent need
     /// not re-derive the attribution from the transcripts.
-    pub fn error_tool_breakdown(
-        &self,
-        range: TimeRange,
-    ) -> Result<Vec<(String, String, String, i64)>> {
+    pub fn error_tool_breakdown(&self, range: TimeRange) -> Result<Vec<ToolBreakdown>> {
         let category = encoding_column("tool_error", EventRole::Category);
         let tool = encoding_column("tool_error", EventRole::OriginatingTool);
         let (filter, binds) = range_clause(range, "e.started_epoch");
@@ -1256,7 +1305,12 @@ impl Store {
         let mut stmt = self.conn.prepare(&sql)?;
         let rows = stmt
             .query_map(params_from_iter(binds), |row| {
-                Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+                Ok(ToolBreakdown {
+                    project: row.get(0)?,
+                    category: row.get(1)?,
+                    tool: row.get(2)?,
+                    count: row.get(3)?,
+                })
             })?
             .collect::<rusqlite::Result<Vec<_>>>()?;
         Ok(rows)
@@ -1712,8 +1766,14 @@ impl Store {
     /// project P joins P's project row when one exists for that `(kind, id)`,
     /// else the global row. One event therefore counts on exactly one row
     /// (`docs/specs/surfaces.md`).
-    pub fn effective_catalog(&self, range: TimeRange) -> Result<Vec<CatalogEntry>> {
-        let (filter, binds) = range_clause(range, "e.started_epoch");
+    ///
+    /// The window covers the **events** half only: the catalog is current
+    /// config, the usage joined against it is historical. Callers that read no
+    /// window ([`Store::session_roots`], [`Store::always_on_config_tokens`])
+    /// take no window at all, so a windowed argument here always means
+    /// "usage within this window".
+    pub fn effective_catalog(&self, events_window: TimeRange) -> Result<Vec<CatalogEntry>> {
+        let (filter, binds) = range_clause(events_window, "e.started_epoch");
         let mut stmt = self.conn.prepare(&format!(
             "SELECT f.kind, f.id, f.scope, f.project, f.static_tokens,
                     f.startup_tokens, f.load_mode, f.attrs_json, f.description, COUNT(u.event_id)
@@ -1879,7 +1939,7 @@ impl Store {
         &self,
         range: TimeRange,
         limit: usize,
-    ) -> Result<Vec<(String, String, String, i64)>> {
+    ) -> Result<Vec<ToolBreakdown>> {
         let category = encoding_column("tool_error", EventRole::Category);
         let tool = encoding_column("tool_error", EventRole::OriginatingTool);
         let (filter, binds) = range_clause(range, "e.started_epoch");
@@ -1899,7 +1959,12 @@ impl Store {
         let mut stmt = self.conn.prepare(&sql)?;
         let rows = stmt
             .query_map(params_from_iter(params), |row| {
-                Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+                Ok(ToolBreakdown {
+                    project: row.get(0)?,
+                    category: row.get(1)?,
+                    tool: row.get(2)?,
+                    count: row.get(3)?,
+                })
             })?
             .collect::<rusqlite::Result<Vec<_>>>()?;
         Ok(rows)
@@ -1910,7 +1975,7 @@ impl Store {
         &self,
         range: TimeRange,
         limit: usize,
-    ) -> Result<Vec<(String, String, i64)>> {
+    ) -> Result<Vec<FrictionCell>> {
         let category = encoding_column("tool_error", EventRole::Category);
         let (filter, binds) = range_clause(range, "e.started_epoch");
         let sql = format!(
@@ -1929,7 +1994,11 @@ impl Store {
         let mut stmt = self.conn.prepare(&sql)?;
         let rows = stmt
             .query_map(params_from_iter(params), |row| {
-                Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+                Ok(FrictionCell {
+                    project: row.get(0)?,
+                    category: row.get(1)?,
+                    count: row.get(2)?,
+                })
             })?
             .collect::<rusqlite::Result<Vec<_>>>()?;
         Ok(rows)
@@ -2064,10 +2133,10 @@ impl Store {
     /// same `(kind, id, scope, project)` order.
     pub fn effective_catalog_briefing(
         &self,
-        range: TimeRange,
+        events_window: TimeRange,
         limit: usize,
     ) -> Result<Vec<CatalogEntry>> {
-        let (filter, binds) = range_clause(range, "e.started_epoch");
+        let (filter, binds) = range_clause(events_window, "e.started_epoch");
         let mut params: Vec<rusqlite::types::Value> = binds
             .iter()
             .copied()
@@ -2112,14 +2181,19 @@ impl Store {
         Ok(rows)
     }
 
-    /// Bounded `session_roots`: the first `limit` `(root, project)` pairs.
-    pub fn session_roots_briefing(&self, limit: usize) -> Result<Vec<(String, String)>> {
+    /// Bounded `session_roots`: the first `limit` pairs in root order, with
+    /// the slug typed. The untyped [`Store::session_roots`] keeps its tuple
+    /// shape for the adapter caller; this twin feeds `FindingsInput` alone.
+    pub fn session_roots_briefing(&self, limit: usize) -> Result<Vec<SessionRoot>> {
         let mut stmt = self.conn.prepare(
             "SELECT DISTINCT root, project FROM sessions WHERE root <> '' ORDER BY root LIMIT ?",
         )?;
         let rows = stmt
             .query_map([saturating_limit(limit)], |row| {
-                Ok((row.get(0)?, row.get(1)?))
+                Ok(SessionRoot {
+                    root: row.get(0)?,
+                    project: ProjectSlug(row.get(1)?),
+                })
             })?
             .collect::<rusqlite::Result<Vec<_>>>()?;
         Ok(rows)
@@ -3486,8 +3560,16 @@ mod tests {
         assert_eq!(
             rows,
             vec![
-                ("alpha".to_string(), "edit-precondition".to_string(), 2),
-                ("beta".to_string(), "edit-precondition".to_string(), 1),
+                FrictionCell {
+                    project: "alpha".to_string(),
+                    category: "edit-precondition".to_string(),
+                    count: 2,
+                },
+                FrictionCell {
+                    project: "beta".to_string(),
+                    category: "edit-precondition".to_string(),
+                    count: 1,
+                },
             ]
         );
     }
@@ -3814,18 +3896,18 @@ mod tests {
         assert_eq!(
             rows,
             vec![
-                (
-                    "alpha".to_string(),
-                    "path-not-found".to_string(),
-                    "Read".to_string(),
-                    2
-                ),
-                (
-                    "alpha".to_string(),
-                    "path-not-found".to_string(),
-                    "Bash".to_string(),
-                    1
-                ),
+                ToolBreakdown {
+                    project: "alpha".to_string(),
+                    category: "path-not-found".to_string(),
+                    tool: "Read".to_string(),
+                    count: 2,
+                },
+                ToolBreakdown {
+                    project: "alpha".to_string(),
+                    category: "path-not-found".to_string(),
+                    tool: "Bash".to_string(),
+                    count: 1,
+                },
             ]
         );
     }

@@ -7,12 +7,14 @@
 
 use anyhow::Result;
 
+use crate::adapter::harness::Harness;
 use crate::core::bucket::JST_OFFSET_SECS;
 use crate::core::period::{self, WindowPair};
 use crate::core::trend::{
     TrendWindowAggregates, TwoWindow, kind_pairs, skill_deltas, surface_deltas,
 };
-use crate::session::{Session, Style};
+use crate::session::Style;
+use crate::store::Store;
 
 use super::super::{Align, Format, TableSpec, ViewCtx, framed, note, render_view};
 
@@ -659,8 +661,12 @@ fn trend_section(label: &str) {
 /// a bad date fails like every other period error, and the store's numbers
 /// are the same windowed queries the single-window views read. One typed
 /// payload is built and both of the view's forms derive from it.
-pub(crate) fn trend(sess: &Session, pair: WindowPair, format: Format) -> Result<()> {
-    let store = &sess.store;
+pub(crate) fn trend(
+    store: &Store,
+    _harness: &Harness,
+    pair: WindowPair,
+    format: Format,
+) -> Result<()> {
     eprint_trend_windows(pair);
     let agg = store.trend_aggregates(pair)?;
     let payload = trend_payload(pair, &agg);
@@ -764,6 +770,7 @@ mod tests {
 
     use crate::adapter::harness::Harness;
     use crate::core::period::TimeRange;
+    use crate::session::Session;
     use crate::store::Store;
 
     use super::*;
@@ -1521,23 +1528,23 @@ mod tests {
     #[test]
     fn trend_runs_end_to_end_against_a_session() {
         // The full view path — including the empty store's early message —
-        // runs against a real Session without error. The payload and row
-        // structures are asserted by the tests above.
+        // runs against a real Session's store and harness without error. The
+        // payload and row structures are asserted by the tests above.
         let two = Session {
             harness: Harness::Claude,
             db_path: PathBuf::new(),
             store: two_window_store(),
         };
-        trend(&two, trend_pair(), Format::Table).unwrap();
-        trend(&two, trend_pair(), Format::Markdown).unwrap();
-        trend(&two, trend_pair(), Format::Json).unwrap();
+        trend(&two.store, &two.harness, trend_pair(), Format::Table).unwrap();
+        trend(&two.store, &two.harness, trend_pair(), Format::Markdown).unwrap();
+        trend(&two.store, &two.harness, trend_pair(), Format::Json).unwrap();
         let empty = Session {
             harness: Harness::Claude,
             db_path: PathBuf::new(),
             store: Store::in_memory().unwrap(),
         };
-        trend(&empty, trend_pair(), Format::Table).unwrap();
-        trend(&empty, trend_pair(), Format::Json).unwrap();
+        trend(&empty.store, &empty.harness, trend_pair(), Format::Table).unwrap();
+        trend(&empty.store, &empty.harness, trend_pair(), Format::Json).unwrap();
     }
 
     #[test]

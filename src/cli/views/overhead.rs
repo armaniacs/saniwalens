@@ -4,8 +4,10 @@
 
 use anyhow::Result;
 
+use crate::adapter::harness::Harness;
 use crate::core::period::TimeRange;
-use crate::session::{Session, Style};
+use crate::session::Style;
+use crate::store::Store;
 
 use super::super::{Align, Format, TableSpec, ViewCtx, empty_in_window, note, render_view};
 
@@ -14,8 +16,12 @@ use super::super::{Align, Format, TableSpec, ViewCtx, empty_in_window, note, ren
 /// leaves the residual — system prompt, built-in tools, and MCP tool schemas the
 /// catalog cannot weigh. The per-project floors let you infer an MCP server's
 /// real cost by comparing a project that enables it against one that does not.
-pub(crate) fn overhead(sess: &Session, window: TimeRange, format: Format) -> Result<()> {
-    let store = &sess.store;
+pub(crate) fn overhead(
+    store: &Store,
+    harness: &Harness,
+    window: TimeRange,
+    format: Format,
+) -> Result<()> {
     let floor = store.baseline_floor(window)?;
     let config = store.always_on_config_tokens()?;
     let residual = floor.map(|floor| (floor - config).max(0));
@@ -54,9 +60,9 @@ pub(crate) fn overhead(sess: &Session, window: TimeRange, format: Format) -> Res
                      the floor appears as newer sessions are analyzed. Discarding the store\n\
                      would backfill it from the {} still on disk, at the cost of every\n\
                      session whose {} {} has already pruned.",
-                    sess.harness.raw_source(),
-                    sess.harness.source_noun(),
-                    sess.harness.display_name()
+                    harness.raw_source(),
+                    harness.source_noun(),
+                    harness.display_name()
                 )
             })
         }
@@ -96,7 +102,7 @@ pub(crate) fn overhead(sess: &Session, window: TimeRange, format: Format) -> Res
             println!("{floor_line}");
             println!(
                 "  readable config ({}): {config} tokens",
-                sess.harness.readable_config()
+                harness.readable_config()
             );
             println!(
                 "  residual (system prompt + built-in tools + MCP schemas):                {residual} tokens"

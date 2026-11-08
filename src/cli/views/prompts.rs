@@ -5,24 +5,30 @@
 
 use anyhow::Result;
 
+use crate::adapter::harness::Harness;
 use crate::adapter::transcript::prompt_text_at;
 use crate::core::period::TimeRange;
 use crate::core::prompt::{SkillCandidate, cluster_candidates};
-use crate::session::{Session, Style};
+use crate::session::Style;
+use crate::store::Store;
 
 use super::super::{Align, Format, TableSpec, ViewCtx, note, render_view};
 
 /// Show the mix of how the user steers the session, and what it suggests. Heavy
 /// steering points to room for more autonomy; frequent corrections point to
 /// clearer upfront specs. The classes are lexical heuristics (`core::prompt`).
-pub(crate) fn prompts(sess: &Session, window: TimeRange, format: Format) -> Result<()> {
-    let store = &sess.store;
+pub(crate) fn prompts(
+    store: &Store,
+    harness: &Harness,
+    window: TimeRange,
+    format: Format,
+) -> Result<()> {
     let counts = store.prompt_behavior_counts(window)?;
     let total: i64 = counts.iter().map(|(_, n)| n).sum();
     // Skill candidates (PBI 12): repeated prompt shapes are skill material.
     // Texts are re-read from transcripts at report time — never stored — and
     // rotated or missing sources count as pruned, never as errors.
-    let (candidates, pruned) = skill_candidates(sess, window)?;
+    let (candidates, pruned) = skill_candidates(store, window)?;
     let behaviors: Vec<serde_json::Value> = counts
         .iter()
         .map(|(behavior, n)| {
@@ -66,7 +72,7 @@ pub(crate) fn prompts(sess: &Session, window: TimeRange, format: Format) -> Resu
         "How you steer {}, classified per prompt: instruct (substantive asks),\n\
          steer (\"go ahead\" / \"yes\"), correct (\"no, instead…\"), question. Lots of\n\
          steering = room for more autonomy; lots of correcting = unclear upfront specs.",
-        sess.harness.display_name()
+        harness.display_name()
     );
     let style = Style::stdout();
     let pct = |n: i64| (n as f64 * 100.0 / total as f64).round() as i64;
@@ -195,11 +201,11 @@ fn prompts_empty_message(store: &crate::store::Store, window: TimeRange) -> Resu
 /// The refs arrive ordered by transcript then line, so candidates keep the
 /// same first-seen order as the grouped read this replaces (PBI C7).
 pub(crate) fn skill_candidates(
-    sess: &Session,
+    store: &Store,
     window: TimeRange,
 ) -> Result<(Vec<SkillCandidate>, i64)> {
     use std::path::Path;
-    let refs = sess.store.prompt_refs(window)?;
+    let refs = store.prompt_refs(window)?;
     let mut texts: Vec<(String, String)> = Vec::new();
     let mut pruned: i64 = 0;
     for (path, line) in &refs {

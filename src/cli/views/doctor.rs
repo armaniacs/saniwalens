@@ -4,12 +4,13 @@
 
 use anyhow::Result;
 
-use crate::adapter::harness::home_dir;
+use crate::adapter::harness::{Harness, home_dir};
 use crate::core::friction::ErrorCategory;
 use crate::core::optimize as optimize_mod;
 use crate::core::period::TimeRange;
 use crate::core::scope::ScopeFilter;
-use crate::session::{Session, Style};
+use crate::session::Style;
+use crate::store::Store;
 
 use super::super::{
     Format, collect_findings, emit_json, empty_in_window, eprint_window, warn_missing_agent_split,
@@ -21,12 +22,12 @@ use super::super::{
 /// then each project's own findings ("optimize my global setup" and "optimize
 /// this project" are different tasks). `--scope` narrows to one layer.
 pub(crate) fn doctor(
-    sess: &Session,
+    store: &Store,
+    harness: &Harness,
     filter: &ScopeFilter,
     window: TimeRange,
     format: Format,
 ) -> Result<()> {
-    let store = &sess.store;
     eprint_window(window);
     let f = collect_findings(store, window)?;
 
@@ -72,7 +73,7 @@ pub(crate) fn doctor(
         style.heading(&format!(
             "{} usage health check — {session_count} sessions across \
              {project_count} projects",
-            sess.harness.display_name()
+            harness.display_name()
         ))
     );
     // The evaluation window, in-band for a text reader: the session count and
@@ -116,8 +117,7 @@ pub(crate) fn doctor(
                 cat.label,
                 style.dim(&format!(
                     "— {}",
-                    ErrorCategory::from_label(&cat.label)
-                        .suggestion(sess.harness.instruction_file())
+                    ErrorCategory::from_label(&cat.label).suggestion(harness.instruction_file())
                 ))
             ));
         }
@@ -131,7 +131,7 @@ pub(crate) fn doctor(
         }
         lines.push(format!(
             "  Fix in this project's own {} — details: {}",
-            sess.harness.project_config_ref(),
+            harness.project_config_ref(),
             style.command(&format!(
                 "saniwalens failures --scope project:{}",
                 p.project
@@ -155,13 +155,13 @@ pub(crate) fn doctor(
                         style.dim(&format!(
                             "— {}",
                             ErrorCategory::from_label(&cat.label)
-                                .suggestion(sess.harness.instruction_file())
+                                .suggestion(harness.instruction_file())
                         ))
                     ),
                     format!(
                         "  No single project owns it, so the fix belongs in {} — \
                          details: {}",
-                        sess.harness.global_config_ref(),
+                        harness.global_config_ref(),
                         style.command("saniwalens failures --scope global")
                     ),
                 ],
@@ -179,7 +179,7 @@ pub(crate) fn doctor(
                     "{} of all Bash commands are just `cd` — a working-directory \
                      convention in your global {} would cut the churn.",
                     style.warn(&format!("{cd_pct}%")),
-                    sess.harness.instruction_file()
+                    harness.instruction_file()
                 )],
             });
         }
@@ -232,7 +232,7 @@ pub(crate) fn doctor(
                     "  {} comes from your own global config files; the other {} is {}",
                     fmt_tokens(f.config_tokens),
                     fmt_tokens(residual),
-                    sess.harness.display_name()
+                    harness.display_name()
                 );
                 println!(
                     "  {}",
@@ -273,7 +273,7 @@ pub(crate) fn doctor(
     if filter.includes_global() && (!f.unused.is_empty() || !f.always_on_heavy.is_empty()) {
         pruning.push(format!(
             "  {}: {} → {}",
-            sess.harness.global_config_ref(),
+            harness.global_config_ref(),
             prune_phrase(&f.unused, &f.always_on_heavy),
             style.command("saniwalens waste --scope global")
         ));

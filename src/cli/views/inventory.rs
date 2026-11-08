@@ -4,10 +4,11 @@
 
 use anyhow::Result;
 
+use crate::adapter::harness::Harness;
 use crate::core::findings;
 use crate::core::period::TimeRange;
 use crate::core::scope::ScopeFilter;
-use crate::session::Session;
+use crate::store::Store;
 
 use super::super::{
     Align, Format, TableSpec, ViewCtx, in_scope, render_view, scope_cell, unused_label,
@@ -18,12 +19,12 @@ use super::super::{
 /// static cost and (for usage-measurable kinds) invocation count, unused ones
 /// flagged. Usage with no matching surface is shown as orphaned.
 pub(crate) fn inventory(
-    sess: &Session,
+    store: &Store,
+    harness: &Harness,
     filter: &ScopeFilter,
     window: TimeRange,
     format: Format,
 ) -> Result<()> {
-    let store = &sess.store;
     // Plain rows for the pure join: the store-row mapping is the fetch's half,
     // the join and the measurability routing live in `core::findings`.
     let catalog: Vec<findings::CatalogRow> = store
@@ -77,7 +78,7 @@ pub(crate) fn inventory(
     let empty_msg = (catalog.is_empty() && usage.is_empty())
         .then_some("nothing catalogued — run `saniwalens analyze` first".to_string());
 
-    let preamble_text = sess.harness.inventory_preamble().to_string();
+    let preamble_text = harness.inventory_preamble().to_string();
     let table = TableSpec {
         headers: &[
             "kind",

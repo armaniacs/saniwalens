@@ -5,13 +5,15 @@
 
 use anyhow::Result;
 
+use crate::adapter::harness::Harness;
 use crate::core::period::TimeRange;
 use crate::core::scope::ScopeFilter;
 use crate::core::surface::{
     DuplicateCandidate, HEAVY_TOKENS, LoadMode, RuleGlobs, StartupSavings, Wedge, classify_wedge,
     is_usage_measurable, never_fires, on_demand_tokens, redundant_pairs, startup_savings,
 };
-use crate::session::{Session, Style};
+use crate::session::Style;
+use crate::store::Store;
 
 use super::super::{
     Align, Format, TableSpec, ViewCtx, empty_in_window, in_scope, render_view, savings_cell,
@@ -19,12 +21,12 @@ use super::super::{
 };
 
 pub(crate) fn waste(
-    sess: &Session,
+    store: &Store,
+    _harness: &Harness,
     filter: &ScopeFilter,
     window: TimeRange,
     format: Format,
 ) -> Result<()> {
-    let store = &sess.store;
     let catalog: Vec<_> = store
         .effective_catalog(window)?
         .into_iter()

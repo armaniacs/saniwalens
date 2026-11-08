@@ -358,7 +358,15 @@ fn error_breakdown_and_catalog_briefing_reads_are_bounded() {
     assert_eq!(bounded_behaviors, full_behaviors);
 
     let full_roots = store.session_roots().unwrap();
-    let bounded_roots = store.session_roots_briefing(BRIEFING_GROUPS_LIMIT).unwrap();
+    // The briefing twin carries the slug typed: project back to tuples for
+    // the prefix comparison (PBI C8: the untyped reader stays for the adapter
+    // caller, which takes `&[(String, String)]`).
+    let bounded_roots: Vec<(String, String)> = store
+        .session_roots_briefing(BRIEFING_GROUPS_LIMIT)
+        .unwrap()
+        .into_iter()
+        .map(|root| (root.root, root.project.0))
+        .collect();
     assert_eq!(bounded_roots, full_roots);
 
     let full_agents = store.subagent_by_agent(TimeRange::ALL).unwrap();
