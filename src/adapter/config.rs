@@ -404,7 +404,10 @@ fn import_refs(content: &str) -> Vec<&str> {
 }
 
 /// Where an `@path` import points: relative to the importing file's directory,
-/// `~/` to the home directory, an absolute path as written.
+/// `~/` to the home directory, an absolute path as written. The result is
+/// The result is unconfined — the caller (`read_claude_md_surfaces`) canonicalizes it and
+/// keeps only targets inside the importing top-level file's directory, so a
+/// cloned repo cannot pull host files outside its root into the catalog.
 fn resolve_import(raw: &str, base_dir: &Path, home: Option<&Path>) -> Option<PathBuf> {
     match raw.strip_prefix("~/") {
         Some(rest) => Some(home?.join(rest)),
@@ -443,7 +446,10 @@ pub fn read_claude_md_surfaces(
             scope,
         ));
         let root = path.parent().unwrap_or(Path::new("")).to_path_buf();
-        pending.push((path.to_path_buf(), content, root, 0));
+        // The confinement boundary for this file's whole import graph: the
+        // canonicalized importing directory. Every hop resolves against it.
+        let canon_root = fs::canonicalize(&root).unwrap_or(root.clone());
+        pending.push((path.to_path_buf(), content, canon_root, 0));
     }
     // Breadth-first, so a file reachable at several depths is met at the
     // shallowest one and the hop limit cuts exactly where Claude Code does.
@@ -461,13 +467,24 @@ pub fn read_claude_md_surfaces(
             let Ok(resolved) = fs::canonicalize(&target) else {
                 continue;
             };
-            if !resolved.is_file() || !seen.insert(resolved) {
+            if !resolved.is_file() || !seen.insert(resolved.clone()) {
+                continue;
+            }
+            // Containment: an import resolving outside the importing root —
+            // `..` escapes, absolute paths, `~/`, symlink hops — is skipped
+            // with a warning rather than catalogued. Warn-once falls out of
+            // the `seen` gate above: repeats exit silently.
+            if !resolved.starts_with(&root) {
+                eprintln!(
+                    "warning: skipping @import outside the config root: {}",
+                    target.display()
+                );
                 continue;
             }
             let Ok(imported) = fs::read_to_string(&target) else {
                 continue;
             };
-            let shown = target.strip_prefix(&root).unwrap_or(&target);
+            let shown = resolved.strip_prefix(&root).unwrap_or(&target);
             surfaces.push(claude_md_surface(
                 &format!("@{}", shown.display()),
                 &target.display().to_string(),
@@ -1045,6 +1062,74 @@ mod tests {
 
         let ids: Vec<_> = surfaces.iter().map(|s| s.id.as_str()).collect();
         assert_eq!(ids, ["global", "@1.md", "@2.md", "@3.md", "@4.md", "@5.md"]);
+    }
+
+    #[test]
+    fn imports_escaping_the_importing_root_are_skipped() {
+        // `@../sibling/secret.md` and an absolute out-of-root path resolve
+        // outside the importing file's directory: neither may be catalogued.
+        let root = scratch_dir("import-confine");
+        let outside = scratch_dir("import-confine-outside");
+        fs::write(outside.join("secret.md"), "x".repeat(400)).unwrap();
+        fs::write(outside.join("other.md"), "x".repeat(400)).unwrap();
+        let abs = outside.join("other.md");
+        fs::write(
+            root.join("CLAUDE.md"),
+            format!(
+                "@inner.md\n@../{}/secret.md\n@{}\n",
+                outside.file_name().unwrap().to_str().unwrap(),
+                abs.display()
+            ),
+        )
+        .unwrap();
+        fs::write(root.join("inner.md"), "@../escape.md\nin-root body").unwrap();
+
+        let surfaces =
+            read_claude_md_surfaces(&[(&root.join("CLAUDE.md"), "global")], &Scope::Global, None);
+        fs::remove_dir_all(&root).ok();
+        fs::remove_dir_all(&outside).ok();
+
+        let ids: Vec<_> = surfaces.iter().map(|s| s.id.as_str()).collect();
+        assert_eq!(ids, ["global", "@inner.md"]);
+    }
+
+    #[test]
+    fn dotdot_paths_resolving_inside_the_root_are_still_weighed() {
+        // A `..` that stays inside the importing directory is not an escape.
+        let root = scratch_dir("import-dotdot-inside");
+        fs::create_dir_all(root.join("parts")).unwrap();
+        fs::write(root.join("CLAUDE.md"), "@parts/../a.md").unwrap();
+        fs::write(root.join("a.md"), "y".repeat(40)).unwrap();
+
+        let surfaces =
+            read_claude_md_surfaces(&[(&root.join("CLAUDE.md"), "global")], &Scope::Global, None);
+        fs::remove_dir_all(&root).ok();
+
+        let ids: Vec<_> = surfaces.iter().map(|s| s.id.as_str()).collect();
+        assert_eq!(ids, ["global", "@a.md"]);
+    }
+
+    #[test]
+    fn tilde_imports_outside_the_root_are_skipped() {
+        // `~/` resolves against the home directory, which is outside any
+        // project root: confining every import form to the root keeps one
+        // uniform rule with no carve-out an untrusted file could use.
+        let root = scratch_dir("import-tilde");
+        let home = scratch_dir("import-tilde-home");
+        fs::write(home.join("shared.md"), "x".repeat(400)).unwrap();
+        fs::write(root.join("CLAUDE.md"), "@~/shared.md\n@local.md").unwrap();
+        fs::write(root.join("local.md"), "y".repeat(40)).unwrap();
+
+        let surfaces = read_claude_md_surfaces(
+            &[(&root.join("CLAUDE.md"), "global")],
+            &Scope::Global,
+            Some(&home),
+        );
+        fs::remove_dir_all(&root).ok();
+        fs::remove_dir_all(&home).ok();
+
+        let ids: Vec<_> = surfaces.iter().map(|s| s.id.as_str()).collect();
+        assert_eq!(ids, ["global", "@local.md"]);
     }
 
     #[test]

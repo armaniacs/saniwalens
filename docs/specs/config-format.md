@@ -63,7 +63,11 @@ on its own. The import rules mirror Claude Code's documented behavior: an import
 is an `@` opening a whitespace-separated word (an e-mail address is not one),
 ignored inside code spans and fenced blocks; it resolves relative to the
 importing file, `~/` to the home directory, or as an absolute path; recursion
-stops after five hops; an import naming no readable file is skipped. The same
+stops after five hops; an import naming no readable file is skipped. Every
+import is further confined to the importing top-level file's directory: a
+target canonicalizing outside it (`..` escapes, absolute paths, `~/`, symlink
+hops) is skipped with a warning, so a cloned repo cannot pull host files
+outside its root into the catalog. The same
 resolved-path deduplication as the `AGENTS.md` symlink applies across the whole
 import graph ― a file imported twice, imported in a cycle, or imported *and*
 read as a top-level `AGENTS.md` is weighed once, with the top-level name
