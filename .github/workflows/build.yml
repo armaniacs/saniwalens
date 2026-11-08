@@ -18,6 +18,14 @@ on:
           ever downloaded by a human checking a pull request.
         required: true
         type: string
+      artifact-suffix:
+        description: >-
+          Extra name segment for the uploaded artifact, so a PR preview build
+          tells which PR it is (e.g. `pr-123`). Empty keeps the plain
+          per-triple name the release path uses.
+        required: false
+        default: ""
+        type: string
 
 jobs:
   build:
@@ -103,6 +111,6 @@ jobs:
 
       - uses: actions/upload-artifact@v7
         with:
-          name: saniwalens-${{ matrix.target }}
+          name: saniwalens-${{ matrix.target }}${{ inputs.artifact-suffix != '' && format('-{0}', inputs.artifact-suffix) || '' }}
           path: saniwalens-*.tar.gz
           if-no-files-found: error

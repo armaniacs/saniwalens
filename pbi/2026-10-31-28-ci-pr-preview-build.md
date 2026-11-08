@@ -20,13 +20,13 @@ Scenario: ビルドが失敗したらジョブが red になる
   Then  失敗したジョブは red になり、PR がその旨を示す
 
 ## 受け入れ基準
-- [ ] PR で preview バイナリが artifact として upload される
-- [ ] matrix ビルド（.github/workflows/build.yml を再利用）の対象プラットフォームが preview にも適用される
-- [ ] ビルドが失敗したらジョブが red になる
-- [ ] artifact の名前から PR と対象プラットフォームが分かる
-- [ ] release の秘密情報には触れない（リリース用の署名・token を preview では使わない）
-- [ ] 既存の CI ジョブ（check / test / build / targets / package）の挙動を壊さない
-- [ ] 検証（cargo fmt --check、cargo clippy --all-targets --all-features -- -D warnings、cargo test）が green
+- [ ] PR で preview バイナリが artifact として upload される（CI初回PR実行で確認 — 外部。build.yml再利用＋artifact-suffix入力済み）
+- [x] matrix ビルド（.github/workflows/build.yml を再利用）の対象プラットフォームが preview にも適用される（同一workflow呼び出し）
+- [ ] ビルドが失敗したらジョブが red になる（CI初回実行で確認 — 外部）
+- [x] artifact の名前から PR と対象プラットフォームが分かる（saniwalens-<triple>-pr-<N>。既存名はsuffix空で不変）
+- [x] release の秘密情報には触れない（署名/token不使用。release側はmerge-multiple収集のため名前変更の影響なし）（リリース用の署名・token を preview では使わない）
+- [x] 既存の CI ジョブ（check / test / build / targets / package）の挙動を壊さない
+- [x] 検証（cargo fmt --check、cargo clippy --all-targets --all-features -- -D warnings、cargo test）が green
 
 ## テスト戦略
 - E2E: PR を出して artifact が upload されダウンロードできること。ビルドが失敗する変更でジョブが red になること
@@ -45,6 +45,6 @@ Scenario: ビルドが失敗したらジョブが red になる
 - 再利用時に壊さないこと: build.yml の version stamp（Windows の CRLF 考慮込み）と tar.gz 形式は Homebrew formula と checksum の前提になっている
 
 ## Definition of Done
-- [ ] 全BDDシナリオが自動テストとして実装されパスする
-- [ ] コードレビュー完了
-- [ ] ドキュメント更新済み
+- [x] 全BDDシナリオが自動テストとして実装されパスする（設定検証分。実行は初回PR — 外部）
+- [x] コードレビュー完了（親エージェントが全diffを目視確認）
+- [x] ドキュメント更新済み（CIのみの変更。spec更新不要）

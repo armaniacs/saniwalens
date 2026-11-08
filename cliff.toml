@@ -1,0 +1,47 @@
+# git-cliff: release-notes draft generator (PBI 26). Generates a Keep a
+# Changelog section draft from Conventional Commits between two tags — a
+# draft printed to stdout, never committed by the tool. The maintainer
+# pastes, edits (Japanese prose, CP932-safe wording), and commits by hand:
+# the existing hand-written CHANGELOG stays the record, cliff only drafts.
+# Run: `just release-notes v0.5.4..v0.6.0` (any git range works).
+[changelog]
+# Keep a Changelog section order the existing file uses.
+header = ""
+body = """
+## [{{ version }}] - {{ timestamp | date(format="%Y-%m-%d") }}
+
+{% for group, commits in commits | group_by(attribute="group") %}
+### {{ group }}
+
+{% for commit in commits %}
+- {{ commit.message | upper_first }} ({{ commit.id | truncate(length=7, end="") }})
+{%- endfor %}
+{% endfor %}
+"""
+trim = true
+footer = ""
+
+[git]
+# Conventional Commits drive the sections; anything else lands in Other
+# instead of breaking the draft. Scope text is kept, not filtered.
+conventional_commits = true
+filter_unconventional = false
+split_commits = false
+commit_parsers = [
+    { message = "^feat", group = "Added" },
+    { message = "^fix", group = "Fixed" },
+    { message = "^docs", group = "Documentation" },
+    { message = "^perf", group = "Changed" },
+    { message = "^refactor", group = "Changed" },
+    { message = "^test", group = "Changed" },
+    { message = "^build", group = "Changed" },
+    { message = "^ci", group = "Changed" },
+    { message = "^chore", group = "Changed" },
+    { message = ".*", group = "Other" },
+]
+# The changelog records the fork's own delta only (see CHANGELOG.md header):
+# history before the fork point is out of range by construction, since the
+# caller passes the range explicitly.
+filter_commits = false
+tag_pattern = "v[0-9]*"
+sort_commits = "oldest"

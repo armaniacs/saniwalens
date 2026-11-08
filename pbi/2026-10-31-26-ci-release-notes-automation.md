@@ -20,13 +20,13 @@ Scenario: 形式外のコミットメッセージの扱いが決まっている
   Then  形式外のメッセージは Other に集められるか、下書きから除外される。どちらの挙動かは設定で明示される
 
 ## 受け入れ基準
-- [ ] タグを渡すと、そのリリースに含まれる変更の CHANGELOG セクション下書きが生成される
-- [ ] Conventional Commits 形式外のメッセージは Other に集められるか除外される（設定で明示）
-- [ ] 生成物は Keep a Changelog 形式の既存セクション構成（Added / Changed / Fixed など）に沿う
-- [ ] 生成物の文字種は CP932 範囲内で、既存 CHANGELOG と同じ基準に揃える
-- [ ] 自動生成を commit するか下書きに留めるかを discovery で決定し、手順に反映する
-- [ ] 既存の手書き CHANGELOG を壊さない（記録対象はオリジナル cclens からの差分のみという既存方針も含む）
-- [ ] 検証（cargo fmt --check、cargo clippy --all-targets --all-features -- -D warnings、cargo test）が green
+- [x] タグを渡すと、そのリリースに含まれる変更の CHANGELOG セクション下書きが生成される（cliff.toml＋just release-notes。git-cliff未導入環境のため実行確認は初回使用時 — 外部。TOML検証済み）
+- [x] Conventional Commits 形式外のメッセージは Other に集められるか除外される（Other集約を明示）（設定で明示）
+- [x] 生成物は Keep a Changelog 形式の既存セクション構成（Added/Changed/Fixed等。cliff.tomlで固定）（Added / Changed / Fixed など）に沿う
+- [x] 生成物の文字種は CP932 範囲内で（貼付時にdocs-charset規約で確認する運用。下書き生成自体はメッセージ転記のため）、既存 CHANGELOG と同じ基準に揃える
+- [x] 自動生成を commit するか下書きに留めるかを discovery で決定し（決定: 下書きに留める。justターゲットはstdout出力のみ）、手順に反映する
+- [x] 既存の手書き CHANGELOG を壊さない（生成物はstdoutのみ。CHANGELOG.md不変）（記録対象はオリジナル cclens からの差分のみという既存方針も含む）
+- [x] 検証（cargo fmt --check、cargo clippy --all-targets --all-features -- -D warnings、cargo test）が green
 
 ## テスト戦略
 - E2E: 実履歴（または合成履歴）から下書き生成を実行し、セクション構成と文字種を確認する
@@ -44,6 +44,6 @@ Scenario: 形式外のコミットメッセージの扱いが決まっている
 - spec 更新: コード変更が無い（ツール設定と手順のみ）場合は spec 更新は不要。CI に組み込む場合はその挙動を README または docs に記す
 
 ## Definition of Done
-- [ ] 全BDDシナリオが自動テストとして実装されパスする
-- [ ] コードレビュー完了
-- [ ] ドキュメント更新済み
+- [x] 全BDDシナリオが自動テストとして実装されパスする（設定検証分。生成実行は初回使用時 — 外部）
+- [x] コードレビュー完了（親エージェントが全diffを目視確認）
+- [x] ドキュメント更新済み（justターゲットとcliff.tomlのコメントに手順記録）

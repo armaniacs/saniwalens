@@ -12,10 +12,18 @@ concurrency:
 jobs:
   check:
     name: lint + format (rustfmt, clippy)
-    runs-on: ubuntu-latest
+    strategy:
+      # One OS failing must not hide the others' results.
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
+      # Nix covers macOS/Linux like local dev; Windows is not a Nix target,
+      # so it uses the plain Rust toolchain instead (PBI 02).
       - uses: cachix/install-nix-action@v31
+        if: runner.os != 'Windows'
         with:
           extra_nix_config: |
             experimental-features = nix-command flakes
@@ -26,28 +34,127 @@ jobs:
       # (The gate lives in `vars`, not `secrets`: a secrets-based `if`
       # prevents this workflow from evaluating at all.)
       - uses: cachix/cachix-action@v17
-        if: ${{ vars.CACHIX_ENABLED == 'true' }}
+        if: ${{ vars.CACHIX_ENABLED == 'true' && runner.os != 'Windows' }}
         with:
           name: saniwalens
           authToken: "${{ secrets.CACHIX_AUTH_TOKEN }}"
+      - uses: dtolnay/rust-toolchain@stable
+        if: runner.os == 'Windows'
+        with:
+          components: rustfmt, clippy
       # Same pinned tools as local dev (flake devShell) — see flake.nix / justfile.
       - run: nix develop -c just check
+        if: runner.os != 'Windows'
+      # No `just` on the Windows runner: the same two commands the recipe runs.
+      - run: cargo fmt --check
+        if: runner.os == 'Windows'
+      - run: cargo clippy --all-targets --all-features -- -D warnings
+        if: runner.os == 'Windows'
 
   test:
     name: test
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
       - uses: cachix/install-nix-action@v31
+        if: runner.os != 'Windows'
         with:
           extra_nix_config: |
             experimental-features = nix-command flakes
       - uses: cachix/cachix-action@v17
-        if: ${{ vars.CACHIX_ENABLED == 'true' }}
+        if: ${{ vars.CACHIX_ENABLED == 'true' && runner.os != 'Windows' }}
         with:
           name: saniwalens
           authToken: "${{ secrets.CACHIX_AUTH_TOKEN }}"
+      - uses: dtolnay/rust-toolchain@stable
+        if: runner.os == 'Windows'
+      - uses: Swatinem/rust-cache@v2
+        if: runner.os == 'Windows'
+      # rusqlite builds `bundled`, so SQLite compiles from C against each
+      # runner's native toolchain — no extra setup on any OS.
       - run: nix develop -c just test
+        if: runner.os != 'Windows'
+      - run: cargo test --locked
+        if: runner.os == 'Windows'
+
+  # Dependency policy in one job: advisories (RUSTSEC) and licenses from the
+  # single `deny.toml`, so cargo-audit would only re-scan advisories (PBI 01).
+  # No tokens involved — the prebuilt binary and the advisory DB need none —
+  # so this evaluates with or without any secret configured. A red gate names
+  # the advisory or the unlisted license; if the DB fetch itself fails the
+  # gate fails too, since a silent skip would read as clean.
+  deny:
+    name: cargo-deny (advisories + licenses)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: EmbarkStudios/cargo-deny-action@v2
+
+  # Coverage as information, not a gate: no threshold fails the build (PBI 03).
+  # The rate summary lands in the run's step summary and the LCOV/HTML reports
+  # stay downloadable as artifacts. No PR comment and no token: the summary is
+  # visible from the PR's Checks tab without any secret.
+  coverage:
+    name: coverage report
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools-preview
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-llvm-cov
+      - run: cargo llvm-cov --locked --all-features --lcov --output-path lcov.info
+      - run: cargo llvm-cov --locked --all-features --html --output-dir coverage-html
+      - run: cargo llvm-cov --locked --all-features >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: coverage-report
+          path: |
+            lcov.info
+            coverage-html
+
+  # Public API stability: a breaking change to the lib surface fails here with
+  # the break named, instead of surfacing at release time (PBI 07). Baseline
+  # is the latest release tag, so tags must be fetched. Token-free like deny.
+  semver:
+    name: cargo-semver-checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-tags: true
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-semver-checks
+      - run: cargo semver-checks --baseline-rev "$(git describe --tags --abbrev=0)"
+
+  # PR title convention (PBI 11): type required, lowercase start, no trailing
+  # Japanese/ASCII period, 70 chars max, free-form scope allowed. The rule
+  # lives in `.github/scripts/`, tested locally; CI only runs it.
+  commit-convention:
+    name: PR title convention
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v7
+      - run: python3 .github/scripts/commit_title_lint.py "${{ github.event.pull_request.title }}"
+
+  # A downloadable build for every pull request, reusing the release matrix
+  # (PBI 28). The tag carries the PR number so the artifact name tells which
+  # PR and which triple it is; no release secrets are involved.
+  preview:
+    name: PR preview build
+    if: github.event_name == 'pull_request'
+    uses: ./.github/workflows/build.yml
+    with:
+      tag: pr-${{ github.event.number }}
+      artifact-suffix: pr-${{ github.event.number }}
 
   # Built on each system the flake advertises, because the cache only helps the
   # systems it actually holds: a build pushed from Linux does nothing for a mac

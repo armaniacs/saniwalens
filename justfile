@@ -22,3 +22,10 @@ fmt:
 # build the release binary
 build:
     cargo build --release
+
+# print a CHANGELOG section draft for a git range (PBI 26):
+# `just release-notes v0.5.4..HEAD`. Draft only — the maintainer pastes,
+# edits, and commits by hand (CHANGELOG.md stays hand-written).
+# Requires git-cliff (not in the dev shell): `cargo install git-cliff`.
+release-notes range:
+    git-cliff --config cliff.toml {{range}}

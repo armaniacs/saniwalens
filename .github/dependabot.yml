@@ -1,0 +1,21 @@
+# Dependabot: automated Cargo dependency update PRs (PBI 08). Update PRs run
+# the normal CI (lint + format / test), so a breaking update fails like any
+# other change. Frequency is weekly — this is a CLI with a small tree, not a
+# service with a CVE window to chase daily.
+#
+# Pin policy: `rusqlite` is pinned in Cargo.toml with a comment (newer
+# libsqlite3-sys needs an unstable feature on stable Rust). Dependabot cannot
+# know that, so rusqlite updates are reviewed-and-closed by hand when CI
+# shows the toolchain breakage — recorded here so the next reviewer does not
+# re-derive it. Everything else merges when green.
+version: 2
+updates:
+  - package-ecosystem: cargo
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    # No `ignore` entries: every update arrives as a PR and CI decides.
+    # rusqlite in particular stays review-to-close while the Cargo.toml pin
+    # comment applies (see above).

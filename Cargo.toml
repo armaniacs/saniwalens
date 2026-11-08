@@ -22,6 +22,8 @@ exclude = [
   ".claude/",
   ".github/",
   "AGENTS.md",
+  "cliff.toml",
+  "deny.toml",
   "flake.lock",
   "flake.nix",
   "justfile",
