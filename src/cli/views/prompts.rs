@@ -5,7 +5,7 @@
 
 use anyhow::Result;
 
-use crate::adapter::transcript::prompt_text_in;
+use crate::adapter::transcript::prompt_text_at;
 use crate::core::period::TimeRange;
 use crate::core::prompt::{SkillCandidate, cluster_candidates};
 use crate::session::{Session, Style};
@@ -188,31 +188,22 @@ pub(crate) fn prompts(sess: &Session, window: TimeRange, format: Format) -> Resu
 
 /// Skill-candidate extraction for the prompts view (PBI 12): group the
 /// window's prompt texts by reusable shape, keep repeats, count the rest as
-/// pruned. Texts are re-read from transcripts here — never stored — one file
-/// read per transcript no matter how many pointers it holds.
+/// pruned. Texts resolve through the adapter one pointer at a time — never
+/// stored — and rotated or missing sources count as pruned, never as errors.
+/// The refs arrive ordered by transcript then line, so candidates keep the
+/// same first-seen order as the grouped read this replaces (PBI C7).
 pub(crate) fn skill_candidates(
     sess: &Session,
     window: TimeRange,
 ) -> Result<(Vec<SkillCandidate>, i64)> {
-    use std::collections::BTreeMap;
+    use std::path::Path;
     let refs = sess.store.prompt_refs(window)?;
-    let mut by_path: BTreeMap<&str, Vec<i64>> = BTreeMap::new();
-    for (path, line) in &refs {
-        by_path.entry(path.as_str()).or_default().push(*line);
-    }
     let mut texts: Vec<(String, String)> = Vec::new();
     let mut pruned: i64 = 0;
-    for (path, lines) in &by_path {
-        match std::fs::read_to_string(path) {
-            Err(_) => pruned += lines.len() as i64,
-            Ok(content) => {
-                for line in lines {
-                    match prompt_text_in(&content, *line) {
-                        Some(text) => texts.push((text, format!("{path}:{line}"))),
-                        None => pruned += 1,
-                    }
-                }
-            }
+    for (path, line) in &refs {
+        match prompt_text_at(Path::new(path), *line) {
+            Some(text) => texts.push((text, format!("{path}:{line}"))),
+            None => pruned += 1,
         }
     }
     let candidates = cluster_candidates(

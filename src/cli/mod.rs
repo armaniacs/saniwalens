@@ -15,10 +15,10 @@ use crate::core::findings;
 use crate::core::friction::ErrorCategory;
 use crate::core::optimize as optimize_mod;
 use crate::core::period::TimeRange;
-use crate::core::scope::{ScopeFilter, split_friction};
+use crate::core::scope::ScopeFilter;
 use crate::core::subagent::SplitCoverage;
-use crate::core::surface::{StartupSavings, Wedge, is_usage_measurable};
-use crate::core::thrash::detect_thrash;
+use crate::core::surface::{StartupSavings, Wedge};
+use crate::core::thrash::{THRASH_GAP_SECS, THRASH_MIN_EDITS};
 use crate::session::{
     AnalyzeStats, Session, SessionEnv, Style, env_roots, eprint_freshness, freshness_line,
     guard_harness, resolve_cli,
@@ -1478,11 +1478,9 @@ fn shorten_to_tilde(path: &str, home: Option<&str>) -> String {
 /// edits. An episode is one session's edits to one path, so parallel work on
 /// a same-named file is never presented as one agent looping (`core::thrash`).
 fn stuck(sess: &Session, window: TimeRange, format: Format) -> Result<()> {
-    const GAP_SECS: i64 = 5 * 60;
-    const MIN_EDITS: u32 = 4;
     let store = &sess.store;
     eprint_window(window);
-    let episodes = detect_thrash(&store.file_edits(window)?, GAP_SECS, MIN_EDITS);
+    let episodes = findings::stuck_episodes(&store.file_edits(window)?);
     if format == Format::Json {
         let episodes: Vec<serde_json::Value> = episodes
             .iter()
@@ -1506,7 +1504,9 @@ fn stuck(sess: &Session, window: TimeRange, format: Format) -> Result<()> {
         println!(
             "{}",
             empty_in_window(
-                &format!("no thrash episodes (>= {MIN_EDITS} rapid re-edits) — run analyze first"),
+                &format!(
+                    "no thrash episodes (>= {THRASH_MIN_EDITS} rapid re-edits) — run analyze first"
+                ),
                 window
             )
         );
@@ -1540,10 +1540,10 @@ fn stuck(sess: &Session, window: TimeRange, format: Format) -> Result<()> {
         format,
     );
     note(&format!(
-        "bursts of >= {MIN_EDITS} edits to one file within {}m by a single session —\n\
+        "bursts of >= {THRASH_MIN_EDITS} edits to one file within {}m by a single session —\n\
          likely where the agent got stuck. `--format json` carries the session id and\n\
          full path to investigate with.",
-        GAP_SECS / 60
+        THRASH_GAP_SECS / 60
     ));
     Ok(())
 }
@@ -1560,62 +1560,16 @@ fn note(text: &str) {
 /// no project owns, `project` each project's majority-owned failures, and
 /// `project:<slug>` everything that happened in that one project.
 fn failures(sess: &Session, filter: &ScopeFilter, window: TimeRange, format: Format) -> Result<()> {
-    struct FrictionRow {
-        project: Option<String>,
-        category: String,
-        count: i64,
-        /// How many projects the count spreads across (global scope only).
-        spread: Option<usize>,
-    }
-
     let store = &sess.store;
     eprint_window(window);
     let cells = store.error_counts_by_project(window)?;
-
-    let counts: Vec<FrictionRow> = match filter {
-        ScopeFilter::All => store
-            .error_counts(window)?
-            .into_iter()
-            .map(|(category, count)| FrictionRow {
-                project: None,
-                category,
-                count,
-                spread: None,
-            })
-            .collect(),
-        ScopeFilter::Global => split_friction(&cells)
-            .global
-            .into_iter()
-            .map(|g| FrictionRow {
-                project: None,
-                category: g.category,
-                count: g.total,
-                spread: Some(g.projects),
-            })
-            .collect(),
-        ScopeFilter::Project(None) => split_friction(&cells)
-            .per_project
-            .into_iter()
-            .flat_map(|(project, cats)| {
-                cats.into_iter().map(move |(category, count)| FrictionRow {
-                    project: Some(project.clone()),
-                    category,
-                    count,
-                    spread: None,
-                })
-            })
-            .collect(),
-        ScopeFilter::Project(Some(slug)) => cells
-            .into_iter()
-            .filter(|(project, _, _)| project == slug)
-            .map(|(project, category, count)| FrictionRow {
-                project: Some(project),
-                category,
-                count,
-                spread: None,
-            })
-            .collect(),
+    // The scope-blind totals feed only the `All` scope; other scopes route
+    // the per-project cells, so no second query runs for them.
+    let all: Vec<(String, i64)> = match filter {
+        ScopeFilter::All => store.error_counts(window)?,
+        _ => Vec::new(),
     };
+    let counts = findings::friction_rows(&cells, &all, filter);
     let total: i64 = counts.iter().map(|row| row.count).sum();
 
     // Unknown stored labels (typos, schema drift) are still listed — nothing
@@ -2173,49 +2127,58 @@ fn inventory(
 ) -> Result<()> {
     let store = &sess.store;
     eprint_window(window);
-    let catalog: Vec<_> = store
+    // Plain rows for the pure join: the store-row mapping is the fetch's half,
+    // the join and the measurability routing live in `core::findings`.
+    let catalog: Vec<findings::CatalogRow> = store
         .effective_catalog(window)?
         .into_iter()
         .filter(|e| in_scope(filter, &e.scope, &e.project))
+        .map(|e| findings::CatalogRow {
+            kind: e.kind,
+            id: e.id,
+            scope: e.scope,
+            project: e.project,
+            startup_tokens: e.startup_tokens,
+            static_tokens: e.static_tokens,
+            load_mode: e.load_mode,
+            uses: e.uses,
+        })
         .collect();
     let usage = store.usage_counts(window)?;
+    let rows = findings::inventory_rows(&catalog, &usage, filter);
 
     if format == Format::Json {
-        let catalogued: std::collections::HashSet<(&str, &str)> = catalog
+        let items: Vec<serde_json::Value> = rows
             .iter()
-            .map(|e| (e.kind.as_str(), e.id.as_str()))
-            .collect();
-        let mut items: Vec<serde_json::Value> = catalog
-            .iter()
-            .map(|entry| {
-                let measurable = is_usage_measurable(&entry.kind);
-                serde_json::json!({
-                    "kind": entry.kind,
-                    "id": entry.id,
-                    "scope": entry.scope,
-                    "project": if entry.project.is_empty() { None } else { Some(&entry.project) },
-                    "static_tokens": entry.static_tokens,
-                    "startup_tokens": entry.startup_tokens,
-                    "uses": if measurable { Some(entry.uses) } else { None },
-                    "load_mode": entry.load_mode,
-                    "status": if measurable && entry.uses == 0 {
-                        if window.is_all() { "unused" } else { "unused-in-window" }
-                    } else if !measurable { "catalog-only" } else { "" },
-                })
+            .map(|row| {
+                use findings::InventoryStatus as Status;
+                match row.status {
+                    Status::Orphaned => serde_json::json!({
+                        "kind": row.kind, "id": row.id,
+                        "scope": null, "project": null,
+                        "static_tokens": null, "startup_tokens": null,
+                        "uses": row.uses, "load_mode": null,
+                        "status": "orphaned",
+                    }),
+                    _ => serde_json::json!({
+                        "kind": row.kind,
+                        "id": row.id,
+                        "scope": row.scope,
+                        "project": if row.project.is_empty() { None } else { Some(&row.project) },
+                        "static_tokens": row.static_tokens,
+                        "startup_tokens": row.startup_tokens,
+                        "uses": row.uses,
+                        "load_mode": row.load_mode,
+                        "status": match row.status {
+                            Status::Unused if window.is_all() => "unused",
+                            Status::Unused => "unused-in-window",
+                            Status::CatalogOnly => "catalog-only",
+                            _ => "",
+                        },
+                    }),
+                }
             })
             .collect();
-        if *filter == ScopeFilter::All {
-            for (kind, id, count) in &usage {
-                if !catalogued.contains(&(kind.as_str(), id.as_str())) {
-                    items.push(serde_json::json!({
-                        "kind": kind, "id": id, "scope": null, "project": null,
-                        "static_tokens": null, "startup_tokens": null,
-                        "uses": count, "load_mode": null,
-                        "status": "orphaned",
-                    }));
-                }
-            }
-        }
         return emit_json(&with_window(
             serde_json::json!({ "surfaces": items }),
             window,
@@ -2227,57 +2190,48 @@ fn inventory(
     }
 
     preamble(format, &framed(sess.harness.inventory_preamble(), window));
-    let mut rows: Vec<Vec<String>> = Vec::new();
-    for entry in &catalog {
-        let measurable = is_usage_measurable(&entry.kind);
-        // "unused" is only meaningful for usage-measurable kinds; catalog-only
-        // kinds (rules, hooks, CLAUDE.md) emit no events, so 0 means nothing.
-        let (uses_cell, status) = if measurable {
-            (
-                entry.uses.to_string(),
-                if entry.uses == 0 {
-                    unused_label(window)
-                } else {
-                    ""
-                },
-            )
-        } else {
-            ("-".to_string(), "(catalog-only)")
-        };
-        let tokens = |value: Option<i64>| value.map_or_else(|| "?".to_string(), |t| t.to_string());
-        rows.push(vec![
-            entry.kind.clone(),
-            entry.id.clone(),
-            scope_cell(&entry.scope, &entry.project),
-            tokens(entry.startup_tokens),
-            tokens(entry.static_tokens),
-            uses_cell,
-            entry.load_mode.clone(),
-            status.to_string(),
-        ]);
-    }
-
-    // Orphaned usage has no scope to filter on; it appears in the full view only.
-    let catalogued: std::collections::HashSet<(&str, &str)> = catalog
-        .iter()
-        .map(|e| (e.kind.as_str(), e.id.as_str()))
-        .collect();
-    for (kind, id, count) in &usage {
-        if *filter != ScopeFilter::All {
-            break;
-        }
-        if !catalogued.contains(&(kind.as_str(), id.as_str())) {
-            rows.push(vec![
-                kind.clone(),
-                id.clone(),
+    let mut table: Vec<Vec<String>> = Vec::new();
+    for row in &rows {
+        use findings::InventoryStatus as Status;
+        if matches!(row.status, Status::Orphaned) {
+            table.push(vec![
+                row.kind.clone(),
+                row.id.clone(),
                 "-".to_string(),
                 "-".to_string(),
                 "-".to_string(),
-                count.to_string(),
+                row.uses.map_or_else(|| "?".to_string(), |n| n.to_string()),
                 "-".to_string(),
                 "ORPHANED".to_string(),
             ]);
+            continue;
         }
+        // "unused" is only meaningful for usage-measurable kinds; catalog-only
+        // kinds (rules, hooks, CLAUDE.md) emit no events, so 0 means nothing.
+        // The pure row carries that distinction as uses/status already.
+        let (uses_cell, status) = match row.status {
+            Status::Unused => (
+                row.uses.map_or_else(|| "?".to_string(), |n| n.to_string()),
+                unused_label(window),
+            ),
+            Status::InUse => (
+                row.uses.map_or_else(|| "?".to_string(), |n| n.to_string()),
+                "",
+            ),
+            Status::CatalogOnly => ("-".to_string(), "(catalog-only)"),
+            Status::Orphaned => unreachable!("handled above"),
+        };
+        let tokens = |value: Option<i64>| value.map_or_else(|| "?".to_string(), |t| t.to_string());
+        table.push(vec![
+            row.kind.clone(),
+            row.id.clone(),
+            scope_cell(&row.scope, &row.project),
+            tokens(row.startup_tokens),
+            tokens(row.static_tokens),
+            uses_cell,
+            row.load_mode.clone().unwrap_or_default(),
+            status.to_string(),
+        ]);
     }
 
     render(
@@ -2301,7 +2255,7 @@ fn inventory(
             Align::Left,
             Align::Left,
         ],
-        &rows,
+        &table,
         format,
     );
     Ok(())

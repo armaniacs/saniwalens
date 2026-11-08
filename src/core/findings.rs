@@ -10,9 +10,12 @@ use crate::core::friction::ErrorCategory;
 use crate::core::optimize::{
     AgentCost, Findings, FrictionCat, ProjectFindings, SurfaceRef, ThrashLine,
 };
-use crate::core::scope::split_friction;
+use crate::core::scope::{ScopeFilter, split_friction};
 use crate::core::surface::{HEAVY_TOKENS, LoadMode, is_usage_measurable, on_demand_tokens};
-use crate::core::thrash::{FileEdit, detect_thrash};
+use crate::core::thrash::{FileEdit, ThrashEpisode, detect_thrash};
+/// The briefing's thrash params, owned by the detector module (PBI C7) and
+/// re-exported here so `findings::THRASH_*` paths keep resolving.
+pub use crate::core::thrash::{THRASH_GAP_SECS, THRASH_MIN_EDITS};
 
 /// Top Bash leading words the briefing lists.
 pub const TOP_COMMANDS_LIMIT: usize = 15;
@@ -25,10 +28,6 @@ pub const EXAMPLES_PER_CATEGORY: u32 = 3;
 pub const EXAMPLES_PER_GLOBAL_CATEGORY: usize = 3;
 /// Thrash episodes listed per project: a longer tail is noise for ranking.
 pub const THRASH_LINES_PER_PROJECT: usize = 5;
-/// Max quiet gap that still joins two edits into one thrash episode.
-pub const THRASH_GAP_SECS: i64 = 5 * 60;
-/// Edits needed within the gap before a burst counts as thrash at all.
-pub const THRASH_MIN_EDITS: u32 = 4;
 
 /// Max distinct groups one briefing store read materializes (grouped counts,
 /// catalog rows, agent splits, roots). The briefing passes this to the
@@ -165,6 +164,177 @@ pub fn config_wedges(catalog: &[CatalogRow]) -> ScopedWedges {
         }
     }
     scoped
+}
+
+/// Thrash episodes over already-fetched edits, densest first: the `stuck`
+/// view's assembly (PBI C7). The fetch stays with the shell; the gap and the
+/// minimum come from the detector's single definitions, so tuning them tunes
+/// every caller. The per-project line cap stays a render-side cut in the view.
+pub fn stuck_episodes(edits: &[FileEdit]) -> Vec<ThrashEpisode> {
+    detect_thrash(edits, THRASH_GAP_SECS, THRASH_MIN_EDITS)
+}
+
+/// One friction row as the `failures` view renders it: the owning project for
+/// project-routed rows, the category, its count, and — for global rows only —
+/// how many projects the count spreads across.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FrictionViewRow {
+    pub project: Option<String>,
+    pub category: String,
+    pub count: i64,
+    pub spread: Option<usize>,
+}
+
+/// Route already-fetched friction cells to the scope the caller asked for: the
+/// `failures` view's assembly (PBI C7). `cells` are the per-project counts,
+/// `all` the scope-blind totals; each side feeds only the scope that reads it.
+/// Order matches the legacy view: scope-blind totals arrive pre-ranked,
+/// global rows rank by total then name, project rows by owned volume then slug
+/// with categories by count then name, and a single-project scope keeps the
+/// fetched cell order.
+pub fn friction_rows(
+    cells: &[(String, String, i64)],
+    all: &[(String, i64)],
+    filter: &ScopeFilter,
+) -> Vec<FrictionViewRow> {
+    match filter {
+        ScopeFilter::All => all
+            .iter()
+            .map(|(category, count)| FrictionViewRow {
+                project: None,
+                category: category.clone(),
+                count: *count,
+                spread: None,
+            })
+            .collect(),
+        ScopeFilter::Global => split_friction(cells)
+            .global
+            .into_iter()
+            .map(|g| FrictionViewRow {
+                project: None,
+                category: g.category,
+                count: g.total,
+                spread: Some(g.projects),
+            })
+            .collect(),
+        ScopeFilter::Project(None) => split_friction(cells)
+            .per_project
+            .into_iter()
+            .flat_map(|(project, cats)| {
+                cats.into_iter()
+                    .map(move |(category, count)| FrictionViewRow {
+                        project: Some(project.clone()),
+                        category,
+                        count,
+                        spread: None,
+                    })
+            })
+            .collect(),
+        ScopeFilter::Project(Some(slug)) => cells
+            .iter()
+            .filter(|(project, _, _)| project == slug)
+            .map(|(project, category, count)| FrictionViewRow {
+                project: Some(project.clone()),
+                category: category.clone(),
+                count: *count,
+                spread: None,
+            })
+            .collect(),
+    }
+}
+
+/// Whether an inventory row's usage cell names a live count: `InUse` and
+/// `Unused` carry one, `CatalogOnly` kinds (rules, hooks, CLAUDE.md) emit no
+/// events so 0 means nothing, and `Orphaned` usage has no catalog entry.
+#[derive(Debug, Clone, PartialEq)]
+pub enum InventoryStatus {
+    InUse,
+    Unused,
+    CatalogOnly,
+    Orphaned,
+}
+
+/// One inventory row as the `inventory` view renders it: the catalog's static
+/// cost, the measured use (`None` for catalog-only kinds), and the routing
+/// status. `load_mode` is `None` only for orphaned usage, which has no catalog
+/// row to read one from. The `Unused` vs `Unused (window)` wording stays a
+/// render-side label in the view — the pure row only says `Unused` either way.
+#[derive(Debug, Clone, PartialEq)]
+pub struct InventoryViewRow {
+    pub kind: String,
+    pub id: String,
+    pub scope: String,
+    pub project: String,
+    pub static_tokens: Option<i64>,
+    pub startup_tokens: Option<i64>,
+    pub uses: Option<i64>,
+    pub load_mode: Option<String>,
+    pub status: InventoryStatus,
+}
+
+/// Join the already scope-filtered catalog against already-fetched usage: the
+/// `inventory` view's assembly (PBI C7). Catalog order is preserved; orphaned
+/// usage (no matching surface) appends in fetched order, but only for the
+/// unscoped view — orphans have no scope to filter on. Scope filtering itself
+/// stays with the fetch; measurability lives here, next to the wedge routing
+/// that reads the same predicate. The windowed `Unused (window)` wording is a
+/// render-side label in the view: it needs the window, this join does not.
+pub fn inventory_rows(
+    catalog: &[CatalogRow],
+    usage: &[(String, String, i64)],
+    filter: &ScopeFilter,
+) -> Vec<InventoryViewRow> {
+    let mut rows: Vec<InventoryViewRow> = catalog
+        .iter()
+        .map(|entry| {
+            let measurable = is_usage_measurable(&entry.kind);
+            let (uses, status) = if measurable {
+                (
+                    Some(entry.uses),
+                    if entry.uses == 0 {
+                        InventoryStatus::Unused
+                    } else {
+                        InventoryStatus::InUse
+                    },
+                )
+            } else {
+                (None, InventoryStatus::CatalogOnly)
+            };
+            InventoryViewRow {
+                kind: entry.kind.clone(),
+                id: entry.id.clone(),
+                scope: entry.scope.clone(),
+                project: entry.project.clone(),
+                static_tokens: entry.static_tokens,
+                startup_tokens: entry.startup_tokens,
+                uses,
+                load_mode: Some(entry.load_mode.clone()),
+                status,
+            }
+        })
+        .collect();
+    if *filter == ScopeFilter::All {
+        let catalogued: std::collections::HashSet<(&str, &str)> = catalog
+            .iter()
+            .map(|e| (e.kind.as_str(), e.id.as_str()))
+            .collect();
+        for (kind, id, count) in usage {
+            if !catalogued.contains(&(kind.as_str(), id.as_str())) {
+                rows.push(InventoryViewRow {
+                    kind: kind.clone(),
+                    id: id.clone(),
+                    scope: String::new(),
+                    project: String::new(),
+                    static_tokens: None,
+                    startup_tokens: None,
+                    uses: Some(*count),
+                    load_mode: None,
+                    status: InventoryStatus::Orphaned,
+                });
+            }
+        }
+    }
+    rows
 }
 
 /// Assemble the complete briefing from fetched rows — every view's detail as

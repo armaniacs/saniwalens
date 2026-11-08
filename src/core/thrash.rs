@@ -8,6 +8,14 @@ use std::collections::HashMap;
 
 use crate::core::path::basename;
 
+/// Max quiet gap that still joins two edits into one thrash episode.
+/// Single definition (PBI C7): the briefing assembly and the `stuck` view
+/// share these names instead of each keeping local copies.
+pub const THRASH_GAP_SECS: i64 = 5 * 60;
+/// Edits needed within the gap before a burst counts as thrash at all.
+/// Single definition (PBI C7): see `THRASH_GAP_SECS`.
+pub const THRASH_MIN_EDITS: u32 = 4;
+
 /// One edit to one file, with the work context that makes it comparable to
 /// another edit: the same path touched by a different session is different work.
 #[derive(Debug, Clone, PartialEq, Eq)]
