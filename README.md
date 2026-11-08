@@ -1,5 +1,7 @@
 # saniwalens
 
+**English** | [日本語](./README.ja.md)
+
 A lens onto your coding-agent usage. `saniwalens` reads your agent session
 transcripts and
 live configuration, extracts them into a local SQLite store, and shows **where
@@ -137,7 +139,8 @@ Not supported in `0.5.4`: DSH (DeepSeek harness app) and any other harness.
 DSH support is the next candidate; see [`CONTRIBUTING.md`](CONTRIBUTING.md)
 for what a new-harness contribution needs (an OpenAI-compatible endpoint
 alone is not enough ― the transcript and config formats must be observable
-and OSS-reproducible).
+and OSS-reproducible). Security reports go through
+[`SECURITY.md`](SECURITY.md) (private advisories, never public issues).
 
 ## Config file
 
