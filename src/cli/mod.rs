@@ -1488,6 +1488,32 @@ fn failures(sess: &Session, filter: &ScopeFilter, window: TimeRange, format: For
     };
     let total: i64 = counts.iter().map(|row| row.count).sum();
 
+    // Unknown stored labels (typos, schema drift) are still listed — nothing
+    // is dropped — but their unknown-ness warns instead of silently joining
+    // `Other`'s suggestion. Warn-once shape mirrors the waste view.
+    let mut unknown_labels: Vec<String> = counts
+        .iter()
+        .filter(|row| !ErrorCategory::is_known_label(&row.category))
+        .map(|row| row.category.clone())
+        .collect();
+    unknown_labels.sort();
+    unknown_labels.dedup();
+    if !unknown_labels.is_empty() {
+        eprintln!(
+            "{}",
+            Style::stderr().warn(&format!(
+                "warning: {} stored categor{} unknown ({}); shown with the unclassified suggestion",
+                unknown_labels.len(),
+                if unknown_labels.len() == 1 {
+                    "y is"
+                } else {
+                    "ies are"
+                },
+                unknown_labels.join(", ")
+            ))
+        );
+    }
+
     if format == Format::Json {
         let failures: Vec<serde_json::Value> = counts
             .iter()
@@ -1503,7 +1529,14 @@ fn failures(sess: &Session, filter: &ScopeFilter, window: TimeRange, format: For
             })
             .collect();
         return emit_json(&with_window(
-            serde_json::json!({ "total": total, "failures": failures }),
+            serde_json::json!({
+                "total": total,
+                "failures": failures,
+                "unknown_labels": {
+                    "count": unknown_labels.len(),
+                    "labels": unknown_labels,
+                },
+            }),
             window,
         ));
     }

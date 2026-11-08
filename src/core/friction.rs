@@ -86,6 +86,14 @@ impl ErrorCategory {
         }
     }
 
+    /// Whether a stored category label is one the classifier knows — every
+    /// `label()` output, including the genuine `"other"` bucket. Anything
+    /// else (typos, schema drift, future labels) is unknown: still stored,
+    /// still shown, but warned about instead of silently joining `Other`.
+    pub fn is_known_label(label: &str) -> bool {
+        !matches!(Self::from_label(label), ErrorCategory::Other)
+            || label == ErrorCategory::Other.label()
+    }
     /// Whether recurring instances point to something the user can fix. The
     /// non-actionable rest is noise: user stops (`Cancelled`), infra blips
     /// (`Transient`), and the unclassified buckets (`CommandFailed`, `Other`)
@@ -511,5 +519,53 @@ mod tests {
         assert!(!ErrorCategory::Transient.is_actionable());
         assert!(!ErrorCategory::CommandFailed.is_actionable());
         assert!(!ErrorCategory::Other.is_actionable());
+    }
+
+    #[test]
+    fn every_known_label_round_trips_as_known() {
+        // All sixteen `label()` outputs — including the genuine "other"
+        // bucket — are known; nothing the classifier itself wrote warns.
+        for label in [
+            "edit-precondition",
+            "blocked-by-hook",
+            "command-not-found",
+            "path-not-found",
+            "compile-error",
+            "test-failure",
+            "timeout",
+            "tool-not-available",
+            "input-validation",
+            "web-error",
+            "binary-file",
+            "mcp-error",
+            "cancelled",
+            "transient",
+            "command-failed",
+            "other",
+        ] {
+            assert!(
+                ErrorCategory::is_known_label(label),
+                "{label} should be known"
+            );
+        }
+    }
+
+    #[test]
+    fn typos_and_drift_are_unknown_never_silently_other() {
+        // Unknown stored labels must be visible as unknown, not silently
+        // filed under Other: typos, case variants, empties, future labels.
+        for label in [
+            "edit-preconditon",
+            "Edit-Precondition",
+            "",
+            "timeout ",
+            "hook-blocked",
+            "startup-heavy",
+        ] {
+            assert!(
+                !ErrorCategory::is_known_label(label),
+                "{label:?} should be unknown"
+            );
+        }
     }
 }
