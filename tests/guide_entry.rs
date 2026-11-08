@@ -46,3 +46,21 @@ fn no_subcommand_without_a_terminal_keeps_todays_clap_error() {
         "clap's missing-subcommand error is preserved byte-for-byte: {stderr}"
     );
 }
+
+#[test]
+fn harness_with_flag_value_falls_through_to_clap_not_the_guide() {
+    // `--harness --help` is a flag in the value position: guide_entry must
+    // return Normal, so clap — not the guide — owns the invocation. clap
+    // reports the missing value (exit 2); the guide never starts.
+    let out = run_piped("harness-flag-value", &["--harness", "--help"]);
+    assert!(!out.status.success(), "a flag value must fail as today");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("a value is required"),
+        "clap's missing-value error owns the invocation: {stderr}"
+    );
+    assert!(
+        !stderr.contains("interactive terminal"),
+        "the guide must not start: {stderr}"
+    );
+}

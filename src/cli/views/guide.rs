@@ -44,13 +44,15 @@ pub(crate) fn guide_entry(argv: &[String]) -> Entry {
             profile = Some(value.to_string());
         } else if arg == "--harness" {
             match args.next() {
-                Some(value) => harness = Some(value.clone()),
-                None => return Entry::Normal,
+                // A `-` token in the value position is a flag, not a preset:
+                // `--harness --help` must reach clap, not the guide.
+                Some(value) if !value.starts_with('-') => harness = Some(value.clone()),
+                _ => return Entry::Normal,
             }
         } else if arg == "--profile" {
             match args.next() {
-                Some(value) => profile = Some(value.clone()),
-                None => return Entry::Normal,
+                Some(value) if !value.starts_with('-') => profile = Some(value.clone()),
+                _ => return Entry::Normal,
             }
         } else if arg != "tui" {
             // A `-` flag (--help, --version, …) or a real subcommand:
@@ -673,6 +675,21 @@ mod tests {
     fn empty_harness_equals_value_is_normal() {
         let argv = vec!["saniwalens".to_string(), "--harness=".to_string()];
         assert!(matches!(guide_entry(&argv), Entry::Normal));
+    }
+
+    #[test]
+    fn a_flag_in_the_harness_value_position_is_normal() {
+        // `--harness --help` must reach clap's help, not the guide: a value
+        // starting with `-` is a flag, not a preset.
+        for argv in [
+            vec!["saniwalens", "--harness", "--help"],
+            vec!["saniwalens", "--profile", "--version"],
+            vec!["saniwalens", "--harness", "-x"],
+            vec!["saniwalens", "tui", "--harness", "--help"],
+        ] {
+            let owned: Vec<String> = argv.iter().map(|s| s.to_string()).collect();
+            assert!(matches!(guide_entry(&owned), Entry::Normal), "{argv:?}");
+        }
     }
 
     #[test]
