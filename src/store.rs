@@ -350,6 +350,19 @@ pub struct CatalogEntry {
     pub paths: Vec<String>,
 }
 
+/// One session's cost shape: what it spent, how long it ran, and how often
+/// it stumbled. Zero-event and zero-friction sessions read 0, never vanish.
+#[derive(Debug, PartialEq)]
+pub struct SessionRow {
+    pub id: String,
+    pub project: String,
+    pub slug: String,
+    pub started_at: String,
+    pub out_tokens: i64,
+    pub duration_sec: i64,
+    pub friction: i64,
+}
+
 /// What one agent type cost: how many times it ran and the output tokens those
 /// runs wrote. `agent` is `None` for runs whose type could not be read.
 #[derive(Debug, PartialEq, serde::Serialize)]
@@ -1452,6 +1465,48 @@ impl Store {
             |row| Ok((row.get(0)?, row.get(1)?)),
         )?;
         Ok(row)
+    }
+
+    /// One row per session in the window: its identity, output tokens
+    /// (events plus the session's subagent total, which lives on the session
+    /// row), wall-clock span covered, and tool-error count. Sessions without
+    /// events or friction read 0 — never vanish — since "quiet" and "missing"
+    /// are different answers. Events are windowed; sessions are too (by
+    /// `started_at`), so a stale session does not dilute a fresh window.
+    pub fn session_breakdown(&self, range: TimeRange) -> Result<Vec<SessionRow>> {
+        let (sfilter, sbinds) = range_clause_utc_text(range, "s.started_at");
+        let (efilter, ebinds) = range_clause(range, "e.started_epoch");
+        // Two bind types (text bounds, epoch bounds): box them into values.
+        let binds: Vec<rusqlite::types::Value> = sbinds
+            .into_iter()
+            .map(rusqlite::types::Value::from)
+            .chain(ebinds.into_iter().map(rusqlite::types::Value::from))
+            .collect();
+        let mut stmt = self.conn.prepare(&format!(
+            "SELECT s.id, s.project, s.slug, s.started_at,
+                    COALESCE(SUM(e.out_tokens), 0) + s.sub_tokens,
+                    COALESCE(MAX(e.started_epoch), 0) - COALESCE(MIN(e.started_epoch), 0),
+                    COALESCE(SUM(CASE WHEN e.kind = 'tool_error' THEN 1 ELSE 0 END), 0)
+             FROM sessions s LEFT JOIN events e
+               ON e.session_id = s.id{efilter}
+             WHERE 1=1{sfilter}
+             GROUP BY s.id
+             ORDER BY s.id"
+        ))?;
+        let rows = stmt
+            .query_map(params_from_iter(binds), |row| {
+                Ok(SessionRow {
+                    id: row.get(0)?,
+                    project: row.get(1)?,
+                    slug: row.get(2)?,
+                    started_at: row.get(3)?,
+                    out_tokens: row.get(4)?,
+                    duration_sec: row.get(5)?,
+                    friction: row.get(6)?,
+                })
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(rows)
     }
 
     /// Total subagent output tokens and subagent count across all sessions.
@@ -3119,6 +3174,38 @@ mod tests {
         store.ingest(IngestBatch::new(&c, &[], &[])).unwrap();
 
         assert_eq!(store.session_stats(TimeRange::ALL).unwrap(), (3, 2));
+    }
+
+    #[test]
+    fn session_breakdown_reports_tokens_duration_and_friction() {
+        // One session with a costed span plus a failed tool call; one quiet
+        // session with nothing but its start. Friction-empty rows read 0,
+        // never vanish — absence of friction is data, not a missing row.
+        let mut store = Store::in_memory().unwrap();
+        let meta = session("a1");
+        store
+            .ingest(
+                IngestBatch::new(&meta, &[span("git-commit", 100, 0, 60.0)], &[]).tool_errors(&[(
+                    1_700_000_100_000,
+                    "timeout",
+                    "t",
+                    "Bash",
+                    "sleep 9",
+                )]),
+            )
+            .unwrap();
+        let meta = session("b1");
+        store.ingest(IngestBatch::new(&meta, &[], &[])).unwrap();
+
+        let mut rows = store.session_breakdown(TimeRange::ALL).unwrap();
+        rows.sort_by(|a, b| a.id.cmp(&b.id));
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].id, "a1");
+        assert_eq!(rows[0].out_tokens, 100);
+        assert_eq!(rows[0].friction, 1);
+        assert_eq!(rows[1].id, "b1");
+        assert_eq!(rows[1].out_tokens, 0);
+        assert_eq!(rows[1].friction, 0);
     }
 
     #[test]

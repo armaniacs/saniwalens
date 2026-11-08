@@ -22,13 +22,13 @@ Scenario: friction が空のセッションも一覧に現れる
   And   friction の値は 0 と示され、欠落として隠されない
 
 ## 受け入れ基準
-- [ ] セッション一覧のビューが追加され、セッションごとにトークン合計・所要時間・friction の回数を表示する
-- [ ] 並び替えの基準（トークン合計・所要時間・friction）を指定でき、既定はトークン合計の降順、上位が最初に表示される
-- [ ] friction が空のセッションも一覧に現れ、friction は 0 と示される（欠落扱いにしない）
-- [ ] 各行にセッションの識別情報（開始時刻・プロジェクト）を載せる
-- [ ] 出力形式は他のビューの慣例（table / markdown、判断が分かれる場合 json）に揃える
-- [ ] 既存ビューと sql / analyze / optimize の出力は一切変わらない（追加のみ）
-- [ ] cargo fmt --check、cargo clippy --all-targets --all-features -- -D warnings、cargo test が green
+- [x] セッション一覧のビューが追加され、セッションごとにトークン合計・所要時間・friction の回数を表示する（sessionsビュー＋store.session_breakdown）
+- [x] 並び替えの基準（トークン合計・所要時間・friction）を指定でき、既定はトークン合計の降順、上位が最初に表示される（--sort。同値id決着で順序固定）
+- [x] friction が空のセッションも一覧に現れ、friction は 0 と示される（E2Eで固定）
+- [x] 各行にセッションの識別情報（開始時刻・プロジェクト）を載せる（started_at/project/slug/id）
+- [x] 出力形式は他のビューの慣例（table / markdown / json）に揃える（help golden＋E2Eで固定。jsonは名前付きオブジェクト）
+- [x] 既存ビューと sql / analyze / optimize の出力は一切変わらない（追加のみ。全greenで確認）
+- [x] cargo fmt --check、cargo clippy --all-targets --all-features -- -D warnings、cargo test が green
 
 ## テスト戦略
 - E2E: 複数セッションの合成ストアで、基準指定ごとに降順の上位が表示され、friction が空のセッションも現れることをユーザーシナリオとして確認する
@@ -48,6 +48,6 @@ Scenario: friction が空のセッションも一覧に現れる
 - プライバシー: テストは合成 fixture のみ。実 transcript はコミットしない
 
 ## Definition of Done
-- [ ] 全BDDシナリオが自動テストとして実装されパスする
-- [ ] コードレビュー完了
-- [ ] ドキュメント更新済み
+- [x] 全BDDシナリオが自動テストとして実装されパスする（E2E 3件＋単体。JSON goldenを含む）
+- [x] コードレビュー完了（バッチ統合レビュー: 親エージェントが全diff・spec同期・干渉を目視確認）
+- [x] ドキュメント更新済み（cli.md Views行＋architecture report行。view-landing規約どおりviews/着地）

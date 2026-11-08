@@ -13,7 +13,7 @@ use clap::CommandFactory;
 /// row is one item, so a name cannot be added without its capture (the old
 /// two arrays let exactly that through: `zip` stopped at the shorter side
 /// without a word).
-const PINNED: [(&str, &str); 10] = [
+const PINNED: [(&str, &str); 11] = [
     ("usage", USAGE_HELP),
     ("trend", TREND_HELP),
     ("inventory", INVENTORY_HELP),
@@ -24,6 +24,7 @@ const PINNED: [(&str, &str); 10] = [
     ("stuck", STUCK_HELP),
     ("doctor", DOCTOR_HELP),
     ("models", MODELS_HELP),
+    ("sessions", SESSIONS_HELP),
 ];
 
 /// The captured `usage --help` bytes: the PBI 40 baseline (2026-11-01).
@@ -230,7 +231,25 @@ const WHOLE_HISTORY: [&str; 4] = ["analyze", "sql", "optimize", "tui"];
 /// this pins the set's size: deleting a view and its capture row together
 /// agrees with itself, but not with the CLI contract the spec states, so the
 /// count forces that change to be deliberate.
-const WINDOWED_VIEW_COUNT: usize = 10;
+/// The captured `sessions --help` bytes: the PBI 13 baseline (2026-11-08).
+const SESSIONS_HELP: &str = r#"Every session: what it spent, how long it ran, and how often tool calls kept failing inside it — costliest first
+
+Usage: saniwalens sessions [OPTIONS]
+
+Options:
+      --harness <HARNESS>  Which agent harness to analyze: claude (default) | opencode | kilocode. Global so every command resolves its store and input roots through it. See `docs/specs/harness.md`
+      --sort <SORT>        Sort by: tokens (total output) | duration (wall-clock span) | friction (tool-error count). Default: tokens
+      --profile <PROFILE>  Named preset from the config file to run under. Global so every command resolves through it; an explicit --harness or --db still wins over whatever the profile sets. See `docs/specs/cli.md`
+      --since <DATE>       Only count events on or after this date (YYYY-MM-DD, JST)
+      --until <DATE>       Only count events through this date (YYYY-MM-DD, JST) — the whole day counts
+      --last <SPAN>        Rolling window ending now: <N>d | <N>h | <N>w (e.g. 7d). Exclusive with the explicit dates
+      --format <FORMAT>    Output format: table | markdown | json
+      --frozen             Read the store as-is; skip the automatic refresh
+      --db <DB>            Store path (default: $XDG_STATE_HOME/saniwalens/saniwalens.db)
+  -h, --help               Print help
+"#;
+
+const WINDOWED_VIEW_COUNT: usize = 11;
 
 /// The remedy half of the view-set tripwire's failure message, pinned here so
 /// its wording cannot drift away from what it prescribes.
