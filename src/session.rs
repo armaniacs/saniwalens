@@ -156,13 +156,41 @@ impl Session {
         analyze: impl FnOnce(&Harness, Option<PathBuf>, &Path) -> Result<AnalyzeStats>,
     ) -> Result<Self> {
         if frozen {
-            let sess = Self::open(harness, db, config_db, env)?;
+            // Frozen means no mutation at all: resolve without the legacy
+            // move, open read-only (no create, no chmod, no migrate), guard,
+            // and print the same freshness line as the analyzing path.
+            let sess = Self::open_frozen(harness, db, config_db, env)?;
             eprint_freshness(&freshness_line(sess.store.meta("analyzed_at")?.as_deref()));
             return Ok(sess);
         }
         let mut sess = Self::open(harness, db, config_db, env)?;
         sess.refresh(analyze)?;
         Ok(sess)
+    }
+
+    /// Resolve and open without writing anything: no legacy-store move, no
+    /// directory creation, no owner-only chmod, no migration. Read-only open
+    /// fails on a missing store — frozen never creates one.
+    fn open_frozen(
+        harness: &Harness,
+        db: Option<PathBuf>,
+        config_db: Option<&Path>,
+        env: &SessionEnv,
+    ) -> Result<Self> {
+        let path = store_path(
+            db.or_else(|| config_db.map(Path::to_path_buf)),
+            harness,
+            env.state_home,
+            env.home.map(Path::new),
+        )?;
+        let store = Store::open(&path, OpenMode::ReadOnly)
+            .with_context(|| format!("open store {} (run `analyze` first?)", path.display()))?;
+        guard_harness(&store, harness, &path)?;
+        Ok(Session {
+            harness: *harness,
+            db_path: path,
+            store,
+        })
     }
 
     /// The read-only path for `sql`: resolve and migrate like everything
@@ -694,6 +722,69 @@ mod tests {
         )
         .unwrap();
         assert_eq!(sess.harness, Harness::Claude);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn open_read_frozen_leaves_the_store_untouched() {
+        // Frozen reads promise no mutation: the store's bytes and mtime must
+        // survive a frozen open exactly. A ReadWrite open (chmod, migrate)
+        // changes them, so this pins the read-only path.
+        let dir = example_dir("open-frozen-untouched");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = store_with_harness(&dir, "s.db", Some(Harness::Claude.label()));
+        let env = SessionEnv {
+            state_home: Some(&dir),
+            home: None,
+            config_home: None,
+        };
+        let before_bytes = std::fs::read(&path).unwrap();
+        let before_mtime = std::fs::metadata(&path).unwrap().modified().unwrap();
+        let _sess = Session::open_read(
+            &Harness::Claude,
+            Some(path.clone()),
+            None,
+            true,
+            &env,
+            panic_analyzer(),
+        )
+        .unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), before_bytes);
+        assert_eq!(
+            std::fs::metadata(&path).unwrap().modified().unwrap(),
+            before_mtime
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn open_read_frozen_succeeds_on_a_readonly_store() {
+        // A frozen open never creates, chmods, or migrates, so it works where
+        // nothing may be written — a read-only filesystem equivalent.
+        use std::os::unix::fs::PermissionsExt;
+        let dir = example_dir("open-frozen-readonly");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = store_with_harness(&dir, "s.db", Some(Harness::Claude.label()));
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o444)).unwrap();
+        let env = SessionEnv {
+            state_home: Some(&dir),
+            home: None,
+            config_home: None,
+        };
+        let sess = Session::open_read(
+            &Harness::Claude,
+            Some(path.clone()),
+            None,
+            true,
+            &env,
+            panic_analyzer(),
+        )
+        .unwrap();
+        assert_eq!(sess.db_path, path);
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
         let _ = std::fs::remove_dir_all(&dir);
     }
 

@@ -766,7 +766,11 @@ mod tests {
         );
 
         // All flags valid: the session opens (the frozen read never runs the
-        // analyzer) and the resolved values come back resolved.
+        // analyzer) and the resolved values come back resolved. Frozen
+        // never creates, so the store below already exists — the old
+        // creating open violated the no-create contract (`cli.md`).
+        crate::store::Store::open(&dir.join("store.db"), crate::store::OpenMode::ReadWrite)
+            .unwrap();
         let period = PeriodArgs {
             since: None,
             until: None,
@@ -846,7 +850,10 @@ mod tests {
             "the period error must come before the open: {err}"
         );
 
-        // All flags valid: the filter comes back resolved beside the read.
+        // All flags valid: the filter comes back resolved beside the read
+        // (frozen reads an existing store; it never creates one).
+        crate::store::Store::open(&dir.join("store.db"), crate::store::OpenMode::ReadWrite)
+            .unwrap();
         let opened = dispatch
             .open_scoped(Some("global"), None, &period, &read, panic_analyzer())
             .expect("the flags resolve and the store opens");
@@ -902,7 +909,10 @@ mod tests {
             );
         }
 
-        // The two values it does take resolve to the formats doctor renders.
+        // The two values it does take resolve to the formats doctor renders
+        // (frozen reads an existing store; it never creates one).
+        crate::store::Store::open(&dir.join("store.db"), crate::store::OpenMode::ReadWrite)
+            .unwrap();
         for (value, expected) in [(None, Format::Table), (Some("json"), Format::Json)] {
             let opened = dispatch
                 .open_scoped_table_json(Some("project"), value, &period, &read, panic_analyzer())
@@ -956,7 +966,10 @@ mod tests {
             "the pair error must come before the open: {err}"
         );
 
-        // All flags valid: the pair resolves and the session opens.
+        // All flags valid: the pair resolves and the session opens
+        // (frozen reads an existing store; it never creates one).
+        crate::store::Store::open(&dir.join("store.db"), crate::store::OpenMode::ReadWrite)
+            .unwrap();
         let pair = PairArgs {
             since: None,
             until: None,
