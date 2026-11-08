@@ -199,6 +199,14 @@ pub fn startup_savings(load_mode: LoadMode, startup_tokens: Option<u64>) -> Star
 /// is the injected threshold for "large" static cost. The "unused" verdict is
 /// gated on measurability so a rule or CLAUDE.md is never called unused for
 /// emitting no events (`docs/specs/surfaces.md`).
+///
+/// Precedence is deliberate and pinned by test: an unused heavy always-on
+/// surface reports [`Wedge::AlwaysOnHeavy`], never [`Wedge::Unused`] — the
+/// startup cost dominates the verdict (it also sorts first via
+/// [`Wedge::priority`]). No current adapter produces that combination
+/// (measurable kinds are never `StartupFull`), so the arm is latent until a
+/// future kind does; the test below locks the order against an innocent
+/// reorder.
 pub fn classify_wedge(
     measurable: bool,
     load_mode: LoadMode,
@@ -268,6 +276,17 @@ mod tests {
     fn a_costly_rarely_used_surface_is_costly_rare() {
         let wedge = classify_wedge(true, LoadMode::StartupDescription, Some(2000), 1, 1000);
         assert_eq!(wedge, Some(Wedge::CostlyRare));
+    }
+
+    #[test]
+    fn an_unused_heavy_always_on_surface_stays_always_on_heavy() {
+        // Precedence pin (PBI 16): the always-on arm runs before the unused
+        // arm on purpose — the startup cost dominates the verdict. No
+        // current adapter produces this combination (measurable kinds are
+        // never StartupFull), so this locks the order for the future kind
+        // that does; swapping the arms must fail here, not in a report.
+        let wedge = classify_wedge(true, LoadMode::StartupFull, Some(1500), 0, 1000);
+        assert_eq!(wedge, Some(Wedge::AlwaysOnHeavy));
     }
 
     #[test]
