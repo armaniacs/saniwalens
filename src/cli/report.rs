@@ -116,10 +116,22 @@ fn markdown_row(row: &[String]) -> String {
     format!(
         "| {} |",
         row.iter()
-            .map(|cell| sanitize_cell(cell))
+            .map(|cell| escape_markdown_cell(cell))
             .collect::<Vec<_>>()
             .join(" | ")
     )
+}
+
+/// Escape one data cell for the markdown table: sanitize first (no escape to
+/// the terminal), then backslash-escape `|` so it reads as data rather than a
+/// column break, then fold newlines to `<br>` so one logical row stays one
+/// physical line. Headers are fixed strings and bypass this; the Table path
+/// is unaffected (spaces separate its columns, pipes are harmless there).
+fn escape_markdown_cell(cell: &str) -> String {
+    sanitize_cell(cell)
+        .replace('|', "\\|")
+        .replace("\r\n", "<br>")
+        .replace(['\r', '\n'], "<br>")
 }
 
 /// Column widths over sanitized cells, so escape bytes never widen a column.
@@ -293,6 +305,31 @@ mod tests {
     fn markdown_row_sanitizes_cells_but_keeps_structure() {
         let row = vec!["a\x1b[2Jb".to_string(), "plain".to_string()];
         assert_eq!(markdown_row(&row), "| ab | plain |");
+    }
+
+    #[test]
+    fn markdown_cells_escape_pipes() {
+        // A literal `|` must read as data, never as a column break.
+        assert_eq!(escape_markdown_cell("a|b"), "a\\|b");
+        assert_eq!(escape_markdown_cell("|lead"), "\\|lead");
+        assert_eq!(escape_markdown_cell("trail|"), "trail\\|");
+        assert_eq!(escape_markdown_cell("a||b"), "a\\|\\|b");
+        assert_eq!(escape_markdown_cell("plain"), "plain");
+        // Headers bypass escaping (fixed strings); only body cells escape.
+        let row = vec!["a|b".to_string(), "c".to_string()];
+        assert_eq!(markdown_row(&row), "| a\\|b | c |");
+    }
+
+    #[test]
+    fn markdown_cells_fold_newlines() {
+        // One logical row stays one physical line: newlines become `<br>`.
+        assert_eq!(escape_markdown_cell("a\nb"), "a<br>b");
+        assert_eq!(escape_markdown_cell("a\r\nb"), "a<br>b");
+        assert_eq!(escape_markdown_cell("a\rb"), "a<br>b");
+        assert_eq!(escape_markdown_cell("trail\n"), "trail<br>");
+        assert_eq!(escape_markdown_cell("plain"), "plain");
+        let row = vec!["a\nb|c".to_string()];
+        assert_eq!(markdown_row(&row), "| a<br>b\\|c |");
     }
 
     #[test]
