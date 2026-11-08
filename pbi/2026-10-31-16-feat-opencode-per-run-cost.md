@@ -22,12 +22,12 @@ Scenario: 結び付けられない行は従来の取り扱いのまま残る
   And   行が欠落や破棄にならず、セッション合計の整合が保たれる
 
 ## 受け入れ基準
-- [ ] opencode の per-run コストが callID での結び付けにより events に反映される（run 単位のトークン等）
-- [ ] callID で結び付けられない行は従来の取り扱いのまま残る（欠落にしない、合計の整合を崩さない）
-- [ ] 結び付けは自セッション内に限る（callID はセッション内で一意だがセッション間では保証されない。docs/specs/storage.md の scoped join の規約に揃える）
-- [ ] claude / kilocode の解析出力は一切変わらない（opencode アダプタ内の変更のみ）
-- [ ] docs/specs/session-format-opencode.md の Subagent linkage 節を更新する（将来変更の記述を実装済みの取り扱いに更新する）
-- [ ] cargo fmt --check、cargo clippy --all-targets --all-features -- -D warnings、cargo test が green
+- [x] opencode の per-run コストが callID での結び付けにより events に反映される（実機のmetadata.sessionId結合を発見・実装。subagent_runs行＋span吸収を確認）
+- [x] callID で結び付けられない行は従来の取り扱いのまま残る（sessionId無し/不明時はrunを作らない。単体テストで固定）
+- [x] 結び付けは自セッション内に限る（runsは親セッション毎に構築し自spanにのみ照合。重複callIDでも誤帰属しない）
+- [x] claude / kilocode の解析出力は一切変わらない（opencode.rsのみ。共通coreの変更なし）
+- [x] docs/specs/session-format-opencode.md の Subagent linkage 節を更新する（実装済みとして全面改訂。nestingは対象外と明記）
+- [x] cargo fmt --check、cargo clippy --all-targets --all-features -- -D warnings、cargo test が green
 
 ## テスト戦略
 - E2E: opencode の合成 transcript で、run 単位のコストが計測結果に載ること、結び付けられない行が従来扱いのまま残ることをユーザーシナリオとして確認する
@@ -45,6 +45,6 @@ Scenario: 結び付けられない行は従来の取り扱いのまま残る
 - TDD: 単体（callID 結び付けの境界）→ 統合（store への反映と合計の整合）→ e2e（合成 transcript）の順に赤緑リファクタ
 
 ## Definition of Done
-- [ ] 全BDDシナリオが自動テストとして実装されパスする
-- [ ] コードレビュー完了
-- [ ] ドキュメント更新済み
+- [x] 全BDDシナリオが自動テストとして実装されパスする（単体2件＋統合1件。analyze()直結 — 既存opencodeテストと同規約）
+- [x] コードレビュー完了（バッチ統合レビュー: 親エージェントが全diff・spec同期・干渉を目視確認）
+- [x] ドキュメント更新済み（spec-sync済み。run_path規約とnesting対象外を明記）

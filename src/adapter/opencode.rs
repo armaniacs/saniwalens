@@ -22,7 +22,8 @@ use crate::core::span::{
     DEFAULT_IDLE_GAP_MS, Record, RecordKind, Source, extract_spans, session_start,
 };
 use crate::core::surface::{LoadMode, Scope, Surface};
-use crate::core::usage::extract_usage_events;
+use crate::core::subagent::SubagentRun;
+use crate::core::usage::{attribute_subagents, extract_usage_events, output_tokens};
 use crate::store::{IngestBatch, OpenMode, SessionMeta, Store};
 
 /// The model label when a message names none — honest, never a guess.
@@ -33,7 +34,7 @@ const UNKNOWN_MODEL: &str = "unknown";
 /// It lives apart from the shared `CLAUDE_ANALYZER_VERSION` (`adapter::transcript`) on
 /// purpose: an opencode-only change must never force every Claude Code user
 /// through a full re-analyze. Stored under its own `meta` key.
-pub const OPENCODE_ANALYZER_VERSION: &str = "4";
+pub const OPENCODE_ANALYZER_VERSION: &str = "5";
 
 /// The `meta` key holding the opencode analysis semantics.
 pub const OPENCODE_ANALYZER_META_KEY: &str = "opencode_analyzer_version";
@@ -591,6 +592,69 @@ fn part_record_kind(part: &PartRow<'_>, message: &MessageRow<'_>) -> Option<Reco
     }
 }
 
+/// One `task` tool part's link to the subagent session it started, read from
+/// the part's own `state.metadata.sessionId` — the child session id the
+/// parent names. opencode runs subagents in-session, so there is no sidecar
+/// transcript: the run's cost is the child session's own output tokens, and
+/// its locator is `opencode:<child session id>` (joinable back to
+/// `sessions.id` by stripping the prefix).
+fn task_runs(
+    parts: &[PartRow],
+    sessions: &std::collections::HashMap<&str, &SnapshotSession>,
+    costs: &std::collections::HashMap<&str, u64>,
+    session_id: &str,
+    mut ordinal: usize,
+) -> Vec<SubagentRun> {
+    let mut runs = Vec::new();
+    for part in parts {
+        if part_tool(part) != Some("task") {
+            continue;
+        }
+        let state = part.data.get("state");
+        let input = state.and_then(|s| s.get("input"));
+        let child = state
+            .and_then(|s| s.get("metadata"))
+            .and_then(|m| m.get("sessionId"))
+            .and_then(|v| v.as_str());
+        let Some(child) = child else { continue };
+        let Some(child_session) = sessions.get(child) else {
+            // Names a session that is not in this snapshot (pruned, or a
+            // different file's): no cost to attribute anywhere. Dropped, not
+            // guessed — the session totals still carry the spend.
+            continue;
+        };
+        let call_id = part.data.get("callID").and_then(|v| v.as_str());
+        let agent_id = call_id
+            .map(str::to_string)
+            .unwrap_or_else(|| format!("{session_id}#task-{ordinal}"));
+        ordinal += 1;
+        runs.push(SubagentRun {
+            agent: Some(
+                input
+                    .and_then(|i| i.get("subagent_type"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown")
+                    .to_string(),
+            ),
+            agent_id,
+            run_path: format!("opencode:{child}"),
+            tool_use_id: call_id.map(str::to_string),
+            parent_agent_id: None,
+            spawn_depth: 1,
+            model: state
+                .and_then(|s| s.get("metadata"))
+                .and_then(|m| m.get("model"))
+                .and_then(|m| m.get("modelID"))
+                .and_then(|v| v.as_str())
+                .map(str::to_string),
+            prompt_id: None,
+            out_tokens: costs.get(child).copied().unwrap_or(0),
+            started_epoch_ms: child_session.time_created_ms,
+            root_tool_use_id: call_id.map(str::to_string),
+        });
+    }
+    runs
+}
 /// One assistant message's cost row. Message-level tokens are authoritative
 /// (at most one `step-finish` part echoes them), so parts are never summed.
 /// `prompt_size` mirrors the Claude Code sum — see
@@ -710,6 +774,51 @@ pub fn analyze(input: Option<PathBuf>, db: &Path) -> Result<AnalyzeStats> {
     let mut sessions = 0;
     let mut skipped = 0;
     let mut spans_total = 0;
+    // Per-session output totals up front: a parent's runs cost what their
+    // child sessions wrote, and children can come after parents in the
+    // snapshot. Parsing is pure, so this pass changes nothing.
+    let mut child_costs: std::collections::HashMap<&str, u64> = std::collections::HashMap::new();
+    let mut sessions_by_id: std::collections::HashMap<&str, &SnapshotSession> =
+        std::collections::HashMap::new();
+    for session in &snapshot.sessions {
+        sessions_by_id.insert(session.id.as_str(), session);
+        let session_messages = messages_by_session
+            .get(session.id.as_str())
+            .cloned()
+            .unwrap_or_default();
+        let message_rows: Vec<MessageRow> = session_messages
+            .iter()
+            .map(|m| MessageRow {
+                id: m.id.as_str(),
+                session_id: m.session_id.as_str(),
+                time_created_ms: m.time_created_ms,
+                parent_id: m.data.get("parentID").and_then(|v| v.as_str()),
+                data: &m.data,
+            })
+            .collect();
+        let mut part_rows: Vec<PartRow> = session_messages
+            .iter()
+            .flat_map(|m| {
+                parts_by_message
+                    .get(m.id.as_str())
+                    .cloned()
+                    .unwrap_or_default()
+            })
+            .map(|p| PartRow {
+                id: p.id.as_str(),
+                message_id: p.message_id.as_str(),
+                session_id: p.session_id.as_str(),
+                time_created_ms: p.time_created_ms,
+                data: &p.data,
+            })
+            .collect();
+        part_rows.sort_by_key(|p| (p.time_created_ms, p.id));
+        child_costs.insert(
+            session.id.as_str(),
+            output_tokens(&parse_session(&message_rows, &part_rows)),
+        );
+    }
+    let mut ordinal = 0usize;
     for session in &snapshot.sessions {
         let session_messages = messages_by_session
             .get(session.id.as_str())
@@ -753,8 +862,22 @@ pub fn analyze(input: Option<PathBuf>, db: &Path) -> Result<AnalyzeStats> {
             .collect();
         part_rows.sort_by_key(|p| (p.time_created_ms, p.id));
         let records = parse_session(&message_rows, &part_rows);
-        let spans = extract_spans(&records, DEFAULT_IDLE_GAP_MS);
+        let mut spans = extract_spans(&records, DEFAULT_IDLE_GAP_MS);
         let usage = extract_usage_events(&records);
+        // Per-run costs joined on callID: each `task` part naming a child
+        // session becomes one run carrying that session's own output tokens.
+        // Parts that name no session (or an unknown one) are skipped, and
+        // spans with no matching run keep their cost — attribution only ever
+        // moves tokens it can join, the same rule as the Claude Code path.
+        let runs = task_runs(
+            &part_rows,
+            &sessions_by_id,
+            &child_costs,
+            &session.id,
+            ordinal,
+        );
+        ordinal += runs.len();
+        attribute_subagents(&mut spans, &runs);
         let meta = SessionMeta {
             id: session.id.clone(),
             project: session.directory.clone(),
@@ -788,7 +911,8 @@ pub fn analyze(input: Option<PathBuf>, db: &Path) -> Result<AnalyzeStats> {
         store.ingest(
             IngestBatch::new(&meta, &spans, &usage)
                 .tool_errors(&error_rows)
-                .work_events(&work_rows),
+                .work_events(&work_rows)
+                .subagent_runs(&runs),
         )?;
         store.record_ingested_file(&fingerprint_key, session.time_updated_ms, message_count)?;
         sessions += 1;
@@ -828,6 +952,114 @@ mod tests {
     use crate::core::span::Source;
     use crate::core::surface::{LoadMode, Scope};
     use serde_json::json;
+
+    fn task_part<'a>(
+        session_id: &'a str,
+        call_id: Option<&str>,
+        child: Option<&str>,
+        agent: &str,
+        model: Option<&str>,
+    ) -> Value {
+        let mut state = serde_json::Map::new();
+        state.insert("status".to_string(), Value::String("completed".into()));
+        let mut input = serde_json::Map::new();
+        input.insert("subagent_type".to_string(), Value::String(agent.into()));
+        let mut meta = serde_json::Map::new();
+        if let Some(child) = child {
+            meta.insert("sessionId".to_string(), Value::String(child.into()));
+        }
+        if let Some(model) = model {
+            meta.insert(
+                "model".to_string(),
+                json!({"modelID": model, "providerID": "example"}),
+            );
+        }
+        state.insert("input".to_string(), Value::Object(input));
+        state.insert("metadata".to_string(), Value::Object(meta));
+        let mut part = serde_json::Map::new();
+        part.insert("type".to_string(), Value::String("tool".into()));
+        part.insert("tool".to_string(), Value::String("task".into()));
+        if let Some(call_id) = call_id {
+            part.insert("callID".to_string(), Value::String(call_id.into()));
+        }
+        part.insert("state".to_string(), Value::Object(state));
+        Value::Object(part)
+    }
+
+    #[test]
+    fn runs_link_task_calls_to_their_child_session() {
+        // A task part naming a child session becomes one run: agent type and
+        // model from the call, out_tokens from the child's own cost, the
+        // parent's callID as the join key both sides share.
+        let part = task_part("ses_1", Some("call_9"), Some("ses_child"), "Explore", Some("m"));
+        let parts = [PartRow {
+            id: "prt_1",
+            message_id: "msg_1",
+            session_id: "ses_1",
+            time_created_ms: 1_000,
+            data: &part,
+        }];
+        let child = SnapshotSession {
+            id: "ses_child".into(),
+            slug: "s".into(),
+            directory: "/tmp".into(),
+            time_created_ms: 2_000,
+            time_updated_ms: 3_000,
+        };
+        let sessions = std::collections::HashMap::from([("ses_child", &child)]);
+        let mut costs = std::collections::HashMap::new();
+        costs.insert("ses_child", 42u64);
+        let runs = task_runs(&parts, &sessions, &costs, "ses_1", 0);
+        assert_eq!(runs.len(), 1);
+        let run = &runs[0];
+        assert_eq!(run.agent.as_deref(), Some("Explore"));
+        assert_eq!(run.agent_id, "call_9");
+        assert_eq!(run.tool_use_id.as_deref(), Some("call_9"));
+        assert_eq!(run.model.as_deref(), Some("m"));
+        assert_eq!(run.out_tokens, 42);
+        assert_eq!(run.spawn_depth, 1);
+        assert_eq!(run.run_path, "opencode:ses_child");
+    }
+
+    #[test]
+    fn runs_skip_unjoinable_task_parts() {
+        // No child session, no callID, unknown agent: still a run (counted,
+        // unattributed) or skipped — but never a crash, and never someone
+        // else's cost.
+        let no_child = task_part("ses_1", Some("call_x"), Some("ses_gone"), "Explore", None);
+        let no_call = task_part("ses_1", None, Some("ses_child"), "Explore", None);
+        let parts = [
+            PartRow {
+                id: "p1",
+                message_id: "m1",
+                session_id: "ses_1",
+                time_created_ms: 1_000,
+                data: &no_child,
+            },
+            PartRow {
+                id: "p2",
+                message_id: "m1",
+                session_id: "ses_1",
+                time_created_ms: 2_000,
+                data: &no_call,
+            },
+        ];
+        let child = SnapshotSession {
+            id: "ses_child".into(),
+            slug: "s".into(),
+            directory: "/tmp".into(),
+            time_created_ms: 2_000,
+            time_updated_ms: 3_000,
+        };
+        let sessions = std::collections::HashMap::from([("ses_child", &child)]);
+        let costs = std::collections::HashMap::from([("ses_child", 7u64)]);
+        let runs = task_runs(&parts, &sessions, &costs, "ses_1", 0);
+        // The dangling sessionId is dropped (no cost to attribute anywhere);
+        // the callID-less call still counts with an unattributed key.
+        assert_eq!(runs.len(), 1);
+        assert_eq!(runs[0].tool_use_id, None);
+        assert_eq!(runs[0].out_tokens, 7);
+    }
 
     #[test]
     fn a_user_message_with_text_is_a_human_turn() {
@@ -1660,6 +1892,96 @@ mod run_event_tests {
         assert_eq!((third.sessions, third.skipped), (1, 0));
 
         unsafe { std::env::remove_var("XDG_CONFIG_HOME") };
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn task_spawns_become_attributed_subagent_runs() {
+        // End to end through analyze: a parent session whose `task` tool part
+        // names a child session writes one subagent run carrying the child's
+        // own output tokens, and the parent span that spawned it absorbs that
+        // cost (no double count: the run's total is the child's measurement,
+        // attributed once). Synthetic DB only — never a real transcript.
+        let dir = std::env::temp_dir().join(format!(
+            "saniwalens-opencode-runs-test-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let input = dir.join("opencode.db");
+        let conn = rusqlite::Connection::open(&input).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE session (id TEXT, slug TEXT, directory TEXT, time_created INTEGER, time_updated INTEGER);
+             CREATE TABLE message (id TEXT, session_id TEXT, time_created INTEGER, data TEXT);
+             CREATE TABLE part (id TEXT, message_id TEXT, session_id TEXT, time_created INTEGER, data TEXT);",
+        )
+        .unwrap();
+        // Child session first: its assistant message carries 40 output tokens.
+        conn.execute(
+            "INSERT INTO session (id, slug, directory, time_created, time_updated)
+             VALUES ('ses_child', 'proj', '/tmp/example/proj', 1700000000000, 1700000000000)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO message (id, session_id, time_created, data)
+             VALUES ('msg_c', 'ses_child', 1700000000000, '{\"role\":\"assistant\",\"model\":\"sonnet\",\"tokens\":{\"input\":5,\"output\":40}}')",
+            [],
+        )
+        .unwrap();
+        // Parent session: a skill span (its own 10 tokens) whose window holds
+        // a `task` tool part spawning the child. The spawn joins the run on
+        // callID, so the parent span absorbs the child's 40 tokens.
+        conn.execute(
+            "INSERT INTO session (id, slug, directory, time_created, time_updated)
+             VALUES ('ses_1', 'proj', '/tmp/example/proj', 1700000001000, 1700000002000)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO message (id, session_id, time_created, data)
+             VALUES ('msg_1', 'ses_1', 1700000001000, '{\"role\":\"assistant\",\"model\":\"opus\",\"tokens\":{\"input\":5,\"output\":10}}')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO part (id, message_id, session_id, time_created, data)
+             VALUES ('prt_0', 'msg_1', 'ses_1', 1700000000000, '{\"type\":\"tool\",\"tool\":\"skill\",\"callID\":\"call_0\",\"state\":{\"status\":\"completed\",\"input\":{\"name\":\"review\"}}}')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO part (id, message_id, session_id, time_created, data)
+             VALUES ('prt_1', 'msg_1', 'ses_1', 1700000001000, '{\"type\":\"tool\",\"tool\":\"task\",\"callID\":\"call_9\",\"state\":{\"status\":\"completed\",\"input\":{\"subagent_type\":\"Explore\",\"prompt\":\"look around\"},\"metadata\":{\"sessionId\":\"ses_child\",\"model\":{\"modelID\":\"sonnet\",\"providerID\":\"example\"}}}}')",
+            [],
+        )
+        .unwrap();
+        drop(conn);
+
+        let db = dir.join("store.db");
+        let stats = analyze(Some(input), &db).unwrap();
+        assert_eq!((stats.sessions, stats.skipped), (2, 0));
+
+        let store = Store::open(&db, OpenMode::ReadWrite).unwrap();
+        let (cols, rows) = store
+            .query("SELECT agent, agent_id, out_tokens, spawn_depth FROM subagent_runs ORDER BY agent_id")
+            .unwrap();
+        assert_eq!(
+            cols,
+            vec!["agent", "agent_id", "out_tokens", "spawn_depth"]
+        );
+        assert_eq!(rows.len(), 1, "exactly the joined spawn: {rows:?}");
+        assert_eq!(
+            rows[0],
+            vec!["Explore", "call_9", "40", "1"],
+            "the run carries the child's own cost"
+        );
+        // The parent span absorbed the run: its own 10 plus the 40 it spawned.
+        let (_, spans) = store
+            .query("SELECT sub_tokens, out_tokens FROM events WHERE kind = 'skill_invocation'")
+            .unwrap();
+        assert_eq!(spans, vec![vec!["40", "10"]]);
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }

@@ -122,15 +122,31 @@ the floor; the `overhead` reconciliation (`surfaces.md`) is the honest check,
 and this paragraph is where the assumption is versioned when opencode
 documents it.
 
-## Subagent linkage (v1 scope)
+## Subagent linkage (per-run costs since PBI 16)
 
-A `task` spawn is exact on the parent side (`callID`). There is **no
-subagent-side transcript** — opencode runs subagents in-session, and the
-`subtask` part is the child-side mirror, not a cost ledger. Per-agent cost
-attribution (`subagent_runs`) is therefore **out of scope for v1**: spawns
-count agent-surface usage, and session-level totals come from the `session`
-row's `tokens_*`. A future change that finds per-run costs joins on `callID`
-/ `metadata.sessionId` without disturbing this mapping.
+A `task` spawn is exact on the parent side (`callID`). opencode runs
+subagents in-session, so there is no sidecar transcript — but each `task`
+tool part names the run's own session in `state.metadata.sessionId`, and
+that id joins `session.id`. A part whose `sessionId` matches a session in
+the snapshot becomes one `subagent_runs` row: agent type from
+`input.subagent_type`, the parent's `callID` as the join key both sides
+share (`tool_use_id` and `root_tool_use_id`), the model from
+`state.metadata.model.modelID`, and `out_tokens` summed from the child
+session's own assistant cost rows. The row's locator is
+`opencode:<child session id>` — there is no per-run transcript file, so the
+child session id (joinable back to `sessions.id`) stands in for the sidecar
+path a Claude Code run would carry. Spawns count agent-surface usage as
+before; this only adds the run rows.
+
+Attribution reuses the shared join (`core::usage::attribute_subagents`):
+runs are built per parent session and matched only against that session's
+spans, so a `callID` that repeats in another session can never misattribute
+— the scoping the storage join contract requires. Parts that name no
+session, or a session outside the snapshot, keep the old behavior: no run is
+written, and the session totals still carry the spend. Nested spawns (a
+`task` part inside a child session) write their own depth-1 rows and stay
+unattributed until the nesting join exists. `OPENCODE_ANALYZER_VERSION`
+bumped with the change, so stores refresh through a full re-ingest once.
 
 ## What is deliberately not mapped (v1)
 
