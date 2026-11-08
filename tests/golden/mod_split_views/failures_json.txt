@@ -1,0 +1,16 @@
+{
+  "failures": [
+    {
+      "category": "timeout",
+      "count": 3,
+      "project": null,
+      "spread_projects": null,
+      "suggestion": "slow commands; raise timeout or split the work"
+    }
+  ],
+  "total": 3,
+  "unknown_labels": {
+    "count": 0,
+    "labels": []
+  }
+}

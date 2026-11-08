@@ -1,0 +1,4 @@
+| kind | id | scope | start tok | static tok | uses | load mode | status |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| skill | idle-skill | global | 100 | 500 | 0 | on_demand | UNUSED |
+| skill | used-skill | global | 100 | 500 | 1 | on_demand |  |

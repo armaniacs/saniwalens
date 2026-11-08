@@ -1,0 +1,23 @@
+Claude Code usage health check — 1 sessions across 1 projects
+
+WHAT TO FIX FIRST
+  1. In demo, 2 tool calls failed in recurring ways:
+        2× timeout — slow commands; raise timeout or split the work
+     Fix in this project's own .claude / CLAUDE.md — details: saniwalens failures --scope project:demo
+  2. 25% of your prompts steer and 13% correct — rework that clearer upfront specs could cut. Details: saniwalens prompts
+
+COST (token estimates, not billing)
+  Every session starts with ~12.0k tokens of context before any work:
+  200 comes from your own global config files; the other 11.8k is Claude Code
+  itself (system prompt, built-in tools, MCP schemas) plus each project's own config (AGENTS.md, skill descriptions) — `saniwalens overhead` splits it per project.
+  Output written so far: 300 tokens by skills on the main thread, 500 by 0 subagent runs.
+  Only 400 of those tokens (1 of 0 runs) have a per-agent split — the rest were analyzed before runs were extracted and their transcripts are gone.
+  Among the runs that have one: Explore 400 (1 run). Full split: saniwalens usage
+
+CONFIG WORTH PRUNING
+  Installed config that costs attention (or context) without earning it:
+  ~/.claude: 1 surface installed but never used → saniwalens waste --scope global
+
+LOOKS HEALTHY
+  no failure habit spans multiple projects
+  your global config is lean (200 of the ~12.0k startup tokens)

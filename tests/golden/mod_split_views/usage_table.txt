@@ -1,0 +1,17 @@
+What ran and what it cost. First the subagent bill per agent type
+(costliest first), then how often each skill ran — output tokens written,
+context growth while it ran, and wall-clock seconds (most-invoked first).
+A section with nothing to show is omitted.
+
+tokens: main-thread skill output 400, subagents 500 (0 agents)
+per-agent split covers 440 tokens over 2 run(s); the other 60 tokens over 0 run(s) have no split (analyzed before runs were extracted, transcripts since pruned)
+
+agent    runs  out tokens
+-------------------------
+Explore     1         400
+Plan        1          40
+
+skill   runs  out tokens  ctx growth  seconds
+---------------------------------------------
+commit     1         300           5        2
+review     1         100           5        2

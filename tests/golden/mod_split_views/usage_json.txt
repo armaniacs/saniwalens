@@ -1,0 +1,43 @@
+{
+  "agent_split": {
+    "known_runs": 2,
+    "known_tokens": 440,
+    "missing_runs": 0,
+    "missing_tokens": 60,
+    "total_runs": 0,
+    "total_tokens": 500
+  },
+  "agents": [
+    {
+      "agent": "Explore",
+      "out_tokens": 400,
+      "runs": 1
+    },
+    {
+      "agent": "Plan",
+      "out_tokens": 40,
+      "runs": 1
+    }
+  ],
+  "skills": [
+    {
+      "ctx_growth": 5,
+      "duration_sec": 2.0,
+      "invocations": 1,
+      "out_tokens": 300,
+      "skill": "commit"
+    },
+    {
+      "ctx_growth": 5,
+      "duration_sec": 2.0,
+      "invocations": 1,
+      "out_tokens": 100,
+      "skill": "review"
+    }
+  ],
+  "tokens": {
+    "main_out": 400,
+    "sub_agents": 0,
+    "sub_tokens": 500
+  }
+}

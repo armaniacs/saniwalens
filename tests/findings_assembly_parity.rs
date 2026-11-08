@@ -232,40 +232,47 @@ fn friction_view_row_shape_stays_render_ready() {
 #[test]
 fn views_hold_no_shaping_definitions_only_calls() {
     // stuck/failures/inventory: the fetch + pure + render split. The shaping
-    // (thrash params, friction routing, measurability) lives in core; the shell
-    // only fetches rows, calls the pure fns, and renders.
+    // (thrash params, friction routing, measurability) lives in core; the views
+    // only fetch rows, call the pure fns, and render. (PBI C6: the views moved
+    // from the `cli/mod.rs` shell to one file each under `cli/views/`, so the
+    // call sites below are read from the landed files, not the shell.)
     let shell = read_src("src/cli/mod.rs");
+    let stuck = read_src("src/cli/views/stuck.rs");
+    let failures = read_src("src/cli/views/failures.rs");
+    let inventory = read_src("src/cli/views/inventory.rs");
+    for source in [&shell, &stuck, &failures, &inventory] {
+        assert!(
+            !source.contains("detect_thrash(&"),
+            "stuck must call findings::stuck_episodes, not detect_thrash directly"
+        );
+        assert!(
+            !source.contains("split_friction(&"),
+            "failures must call findings::friction_rows, not split_friction directly"
+        );
+        assert!(
+            !source.contains("is_usage_measurable(&"),
+            "inventory must use findings::inventory_rows, not is_usage_measurable directly"
+        );
+        assert!(
+            !source.contains("const GAP_SECS: i64"),
+            "no local thrash params in the shell"
+        );
+        assert!(
+            !source.contains("const MIN_EDITS: u32"),
+            "no local thrash params in the shell"
+        );
+    }
     assert!(
-        !shell.contains("detect_thrash(&"),
-        "stuck must call findings::stuck_episodes, not detect_thrash directly"
+        stuck.contains("stuck_episodes("),
+        "the stuck view reaches the pure stuck assembly"
     );
     assert!(
-        !shell.contains("split_friction(&"),
-        "failures must call findings::friction_rows, not split_friction directly"
+        failures.contains("friction_rows("),
+        "the failures view reaches the pure friction assembly"
     );
     assert!(
-        !shell.contains("is_usage_measurable(&"),
-        "inventory must use findings::inventory_rows, not is_usage_measurable directly"
-    );
-    assert!(
-        !shell.contains("const GAP_SECS: i64"),
-        "no local thrash params in the shell"
-    );
-    assert!(
-        !shell.contains("const MIN_EDITS: u32"),
-        "no local thrash params in the shell"
-    );
-    assert!(
-        shell.contains("stuck_episodes("),
-        "the shell reaches the pure stuck assembly"
-    );
-    assert!(
-        shell.contains("friction_rows("),
-        "the shell reaches the pure friction assembly"
-    );
-    assert!(
-        shell.contains("inventory_rows("),
-        "the shell reaches the pure inventory assembly"
+        inventory.contains("inventory_rows("),
+        "the inventory view reaches the pure inventory assembly"
     );
 }
 

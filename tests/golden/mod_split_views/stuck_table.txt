@@ -1,0 +1,10 @@
+Files the agent kept re-editing in rapid bursts — the signature of getting stuck
+and retrying. Worth checking what blocked it there (a rule? missing context?).
+
+project  file     edits  within
+-------------------------------
+demo     main.rs      5    4m0s
+
+bursts of >= 4 edits to one file within 5m by a single session —
+likely where the agent got stuck. `--format json` carries the session id and
+full path to investigate with.

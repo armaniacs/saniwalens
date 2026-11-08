@@ -1,0 +1,65 @@
+{
+  "global": {
+    "agent_split": {
+      "known_runs": 1,
+      "known_tokens": 400,
+      "missing_runs": 0,
+      "missing_tokens": 100,
+      "total_runs": 0,
+      "total_tokens": 500
+    },
+    "agents": [
+      {
+        "agent": "Explore",
+        "out_tokens": 400,
+        "runs": 1
+      }
+    ],
+    "always_on_heavy": [],
+    "cd_pct": null,
+    "config_tokens": 200,
+    "correct_pct": 13,
+    "floor": 12000,
+    "friction_global": [],
+    "hotspots": [],
+    "main_out": 300,
+    "steer_pct": 25,
+    "sub_agents": 0,
+    "sub_tokens": 500,
+    "top_commands": [],
+    "unused": [
+      {
+        "id": "idle-skill",
+        "kind": "skill",
+        "on_demand_tokens": 500,
+        "startup_tokens": 100
+      }
+    ]
+  },
+  "projects": [
+    {
+      "always_on_heavy": [],
+      "friction": [
+        {
+          "by_tool": [
+            [
+              "Bash",
+              2
+            ]
+          ],
+          "count": 2,
+          "examples": [
+            "t",
+            "t"
+          ],
+          "label": "timeout",
+          "projects": 1
+        }
+      ],
+      "project": "demo",
+      "root": "",
+      "thrash": [],
+      "unused": []
+    }
+  ]
+}

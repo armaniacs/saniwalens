@@ -1,0 +1,5 @@
+| error | count | suggestion |
+| --- | --- | --- |
+| timeout | 3 | slow commands; raise timeout or split the work |
+
+3 tool failures (denials from the transcript's own marker where present; everything else is a lexical heuristic)

@@ -1,0 +1,12 @@
+{
+  "config_tokens": 0,
+  "floor": 12000,
+  "per_project": [
+    {
+      "floor": 12000,
+      "project": "demo",
+      "sessions": 1
+    }
+  ],
+  "residual": 12000
+}

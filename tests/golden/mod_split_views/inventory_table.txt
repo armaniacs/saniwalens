@@ -1,0 +1,11 @@
+Everything installed in your config — skills, rules, agents, MCP servers,
+CLAUDE.md — with where it is installed (scope) and whether it was ever used.
+"start tok" is what every session pays for having it installed; "static tok"
+is the whole definition, which for a skill or agent is paid only on invocation.
+UNUSED marks delete candidates; rules and CLAUDE.md are catalog-only because
+using them leaves no trace in transcripts.
+
+kind   id          scope   start tok  static tok  uses  load mode  status
+-------------------------------------------------------------------------
+skill  idle-skill  global        100         500     0  on_demand  UNUSED
+skill  used-skill  global        100         500     1  on_demand        

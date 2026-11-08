@@ -1,0 +1,6 @@
+Skill activity per time bucket (times in JST). A long-running skill counts
+whole in the bucket it started in, so fine buckets can show spikes.
+
+bucket   runs  out tokens  ctx growth  seconds
+----------------------------------------------
+2023-11     2         400          10        4

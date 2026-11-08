@@ -1,6 +1,12 @@
+pub(crate) mod doctor;
+pub(crate) mod failures;
 pub(crate) mod guide;
+pub(crate) mod inventory;
 pub(crate) mod models;
+pub(crate) mod overhead;
 pub(crate) mod prompts;
 pub(crate) mod sessions;
+pub(crate) mod stuck;
 pub(crate) mod trend;
+pub(crate) mod usage;
 pub(crate) mod waste;

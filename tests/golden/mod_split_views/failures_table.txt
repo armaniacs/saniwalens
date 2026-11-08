@@ -1,0 +1,8 @@
+Tool calls that kept failing the same way, grouped by kind of failure.
+Every row wastes turns and tokens; the suggestion says what usually fixes it.
+
+error    count  suggestion                                    
+--------------------------------------------------------------
+timeout      3  slow commands; raise timeout or split the work
+
+3 tool failures (denials from the transcript's own marker where present; everything else is a lexical heuristic)
