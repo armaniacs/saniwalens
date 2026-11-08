@@ -1387,6 +1387,7 @@ impl Store {
         Ok(TrendWindowAggregates {
             by_kind: self.event_rollup_by_kind(range)?,
             skills: self.skill_usage(range)?,
+            surfaces: self.usage_counts(range)?,
             sessions,
             subagent_runs,
             sub_tokens,

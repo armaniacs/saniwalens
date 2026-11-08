@@ -22,12 +22,12 @@ Scenario: 履歴が 1 週間分しか無い場合は比較不能を明示して�
   And   通常の usage 表示にフォールバックし、全件落ちたと読めるような誤った差分は出さない
 
 ## 受け入れ基準
-- [ ] surface 単位の使用差分が週次（既定は直近 7 日とその前の 7 日）で提示され、行ごとに両期間の値・差分・向き（増えた / 落ちた / 同じ）を載せる
-- [ ] 差分の対象は usage / events 側のみ。カタログ（surfaces）のスナップショット蓄積は作らない（docs/specs/storage.md の契約「snapshot of now, not an accumulation」を変えない）
-- [ ] 比較できる前の期間が無い場合（履歴が 1 週間分のみ等）は、比較不能の旨を明示して通常の usage 表示にフォールバックする。-100% や全件ゼロなど誤読を生む表示を出さない
-- [ ] 差分行の並びは差分の大きい順など既存 trend の慣例に揃え、行が無い節は省略する（裸の見出しを出さない）
-- [ ] 既存ビューと sql / analyze / optimize の出力は一切変わらない（追加・拡張のみ）
-- [ ] cargo fmt --check、cargo clippy --all-targets --all-features -- -D warnings、cargo test が green
+- [x] surface 単位の使用差分が週次（既定は直近 7 日とその前の 7 日）で提示され、行ごとに両期間の値・差分・向き（増えた / 落ちた / 同じ）を載せる（Surfaces節。skill_deltasと同規約）
+- [x] 差分の対象は usage / events 側のみ。カタログのスナップショット蓄積は作らない（契約どおり。カタログ不使用）
+- [x] 比較できる前の期間が無い場合（履歴が 1 週間分のみ等）は、比較不能の旨を明示して通常の usage 表示にフォールバックする（NoBaseline機構を踏襲。n/a明示）
+- [x] 差分行の並びは差分の大きい順など既存 trend の慣例に揃え、行が無い節は省略する（|delta|降順＋kind/id決着。trend_table省略規約を共有）
+- [x] 既存ビューと sql / analyze / optimize の出力は一切変わらない（JSON golden更新はsurfaces追加のみ。既存キーの値不変を確認）
+- [x] cargo fmt --check、cargo clippy --all-targets --all-features -- -D warnings、cargo test が green
 
 ## テスト戦略
 - E2E: 2 週間分の使用履歴がある合成ストアで、増えた / 落ちた surface が向き付きで提示されることをユーザーシナリオとして確認する
@@ -47,6 +47,6 @@ Scenario: 履歴が 1 週間分しか無い場合は比較不能を明示して�
 - プライバシー: 合成 fixture のみ。実 transcript はコミットしない
 
 ## Definition of Done
-- [ ] 全BDDシナリオが自動テストとして実装されパスする
-- [ ] コードレビュー完了
-- [ ] ドキュメント更新済み
+- [x] 全BDDシナリオが自動テストとして実装されパスする（core単体＋JSON golden＋E2E相当。trend_json golden更新）
+- [x] コードレビュー完了（バッチ統合レビュー: 親エージェントが全diff・spec同期・干渉を目視確認）
+- [x] ドキュメント更新済み（cli.md trend行にsurfaces節を追加。spec-sync済み）

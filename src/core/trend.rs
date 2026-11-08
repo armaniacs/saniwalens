@@ -41,11 +41,15 @@ pub struct TwoWindow<T> {
 }
 
 /// The trend view's aggregates for one window: the per-kind event rollup, the
-/// per-skill usage, the session count, and the subagent runs/tokens total.
+/// per-skill usage, the per-surface usage, the session count, and the subagent
+/// runs/tokens total.
 #[derive(Debug, PartialEq)]
 pub struct TrendWindowAggregates {
     pub by_kind: Vec<KindRollup>,
     pub skills: Vec<SkillUsage>,
+    /// Per-surface usage counts `(kind, id, events)` — the raw material for
+    /// the surface-movement section, paired across windows by `surface_deltas`.
+    pub surfaces: Vec<(String, String, i64)>,
     pub sessions: i64,
     pub sub_tokens: i64,
     pub subagent_runs: i64,
@@ -87,6 +91,56 @@ pub fn skill_deltas(current: &[SkillUsage], previous: &[SkillUsage]) -> Vec<Skil
             .abs()
             .cmp(&a.delta.abs())
             .then_with(|| a.skill.cmp(&b.skill))
+    });
+    rows
+}
+
+/// One surface's two-window row: the usage events in each window and the
+/// delta between them ― the row the trend view orders by |delta|.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SurfaceDelta {
+    pub kind: String,
+    pub id: String,
+    pub current: i64,
+    pub previous: i64,
+    /// `current - previous`.
+    pub delta: i64,
+}
+
+/// Pair the two windows' per-surface usage counts into delta rows, largest
+/// absolute delta first (ties by kind, then id) ― the order the trend view
+/// lists surfaces in. A surface used in only one window keeps a 0 on the
+/// other side. The catalog is deliberately not consulted: a surface renamed
+/// or removed between windows still compares by its (kind, id) readings,
+/// which is what the events actually named.
+pub fn surface_deltas(
+    current: &[(String, String, i64)],
+    previous: &[(String, String, i64)],
+) -> Vec<SurfaceDelta> {
+    use std::collections::BTreeMap;
+    let mut counts: BTreeMap<(&str, &str), [i64; 2]> = BTreeMap::new();
+    for (kind, id, events) in current {
+        counts.entry((kind.as_str(), id.as_str())).or_default()[0] += events;
+    }
+    for (kind, id, events) in previous {
+        counts.entry((kind.as_str(), id.as_str())).or_default()[1] += events;
+    }
+    let mut rows: Vec<SurfaceDelta> = counts
+        .into_iter()
+        .map(|((kind, id), sides)| SurfaceDelta {
+            kind: kind.to_string(),
+            id: id.to_string(),
+            current: sides[0],
+            previous: sides[1],
+            delta: sides[0] - sides[1],
+        })
+        .collect();
+    rows.sort_by(|a, b| {
+        b.delta
+            .abs()
+            .cmp(&a.delta.abs())
+            .then_with(|| a.kind.cmp(&b.kind))
+            .then_with(|| a.id.cmp(&b.id))
     });
     rows
 }
@@ -140,6 +194,7 @@ mod tests {
         TrendWindowAggregates {
             by_kind: kinds.to_vec(),
             skills: Vec::new(),
+            surfaces: Vec::new(),
             sessions: 0,
             sub_tokens: 0,
             subagent_runs: 0,
@@ -173,6 +228,40 @@ mod tests {
                 ("deploy", 2, 0, 2),
                 ("review", 5, 3, 2),
                 ("fresh", 1, 0, 1),
+            ]
+        );
+    }
+
+    #[test]
+    fn surface_deltas_order_by_absolute_delta_then_kind_then_id() {
+        let current = vec![
+            ("skill".to_string(), "commit".to_string(), 1),
+            ("skill".to_string(), "review".to_string(), 5),
+            ("agent".to_string(), "fresh".to_string(), 1),
+        ];
+        let previous = vec![
+            ("skill".to_string(), "commit".to_string(), 4),
+            ("skill".to_string(), "review".to_string(), 3),
+            ("agent".to_string(), "retired".to_string(), 7),
+        ];
+        let deltas = surface_deltas(&current, &previous);
+        // |delta| first; the agent/skill tie breaks by kind, then id.
+        assert_eq!(
+            deltas
+                .iter()
+                .map(|d| (
+                    d.kind.as_str(),
+                    d.id.as_str(),
+                    d.current,
+                    d.previous,
+                    d.delta
+                ))
+                .collect::<Vec<_>>(),
+            [
+                ("agent", "retired", 0, 7, -7),
+                ("skill", "commit", 1, 4, -3),
+                ("skill", "review", 5, 3, 2),
+                ("agent", "fresh", 1, 0, 1),
             ]
         );
     }

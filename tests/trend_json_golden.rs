@@ -268,6 +268,26 @@ const GOLDEN: &str = r#"{
     "previous": 1,
     "reason": null
   },
+  "surfaces": [
+    {
+      "current": 0,
+      "delta": -1,
+      "direction": "down",
+      "id": "review",
+      "kind": "skill",
+      "previous": 1,
+      "reason": null
+    },
+    {
+      "current": 1,
+      "delta": 0,
+      "direction": "same",
+      "id": "commit",
+      "kind": "skill",
+      "previous": 1,
+      "reason": null
+    }
+  ],
   "window": {
     "current": {
       "since": "1970-01-02T00:00:00+09:00",

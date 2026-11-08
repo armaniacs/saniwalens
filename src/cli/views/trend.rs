@@ -9,7 +9,9 @@ use anyhow::Result;
 
 use crate::core::bucket::JST_OFFSET_SECS;
 use crate::core::period::{self, WindowPair};
-use crate::core::trend::{TrendWindowAggregates, TwoWindow, kind_pairs, skill_deltas};
+use crate::core::trend::{
+    TrendWindowAggregates, TwoWindow, kind_pairs, skill_deltas, surface_deltas,
+};
 use crate::session::{Session, Style};
 
 use super::super::{Align, Format, emit_json, framed, note, preamble, render};
@@ -102,6 +104,17 @@ pub(crate) struct KindPayload {
     duration_sec: Metric<f64>,
 }
 
+/// One surface's payload: the usage events in each window with the delta and
+/// the direction — the largest-movement-first order the aggregation gives.
+/// The row names `kind/id`: usage is joined on that pair everywhere else.
+#[derive(Debug, Clone, serde::Serialize)]
+pub(crate) struct SurfacePayload {
+    kind: String,
+    id: String,
+    #[serde(flatten)]
+    events: Metric<i64>,
+}
+
 /// One skill's payload: the invocations in each window with the delta and the
 /// direction — the largest-movement-first order the aggregation gives.
 #[derive(Debug, Clone, serde::Serialize)]
@@ -141,6 +154,7 @@ pub(crate) struct TrendPayload {
     window: PayloadWindows,
     kinds: Vec<KindPayload>,
     skills: Vec<SkillPayload>,
+    surfaces: Vec<SurfacePayload>,
     sessions: Metric<i64>,
     subagent_runs: Metric<i64>,
     sub_tokens: Metric<i64>,
@@ -173,6 +187,7 @@ impl TrendPayload {
                 ]
             })
             .chain(self.skills.iter().map(|skill| skill.invocations.reason))
+            .chain(self.surfaces.iter().map(|surface| surface.events.reason))
             .chain([
                 self.sessions.reason,
                 self.subagent_runs.reason,
@@ -368,6 +383,33 @@ pub(crate) fn trend_payload(
             ),
         })
         .collect();
+    // A surface's previous side exists when the previous window holds a usage
+    // row for that (kind, id) pair — the same presence signal as skills, one
+    // level more specific (`surface_deltas` folds the two windows' counts, not
+    // their rows).
+    let previous_surfaces: std::collections::BTreeSet<(&str, &str)> = agg
+        .previous
+        .surfaces
+        .iter()
+        .map(|(kind, id, _)| (kind.as_str(), id.as_str()))
+        .collect();
+    let surfaces: Vec<SurfacePayload> =
+        surface_deltas(&agg.current.surfaces, &agg.previous.surfaces)
+            .iter()
+            .map(|d| SurfacePayload {
+                kind: d.kind.clone(),
+                id: d.id.clone(),
+                events: metric(
+                    if previous_surfaces.contains(&(d.kind.as_str(), d.id.as_str())) {
+                        Baseline::Measured(d.previous)
+                    } else {
+                        Baseline::Absent
+                    },
+                    d.current,
+                    int_judge,
+                ),
+            })
+            .collect();
     // The totals follow the sessions axis: the previous window's baseline
     // exists when it holds a session, whose columns are the subagent figures.
     // A session that ran no subagent measures 0 runs — a real baseline, so
@@ -396,6 +438,7 @@ pub(crate) fn trend_payload(
         },
         kinds,
         skills,
+        surfaces,
         sessions: metric(
             baseline_of_total(agg.previous.sessions),
             agg.current.sessions,
@@ -512,6 +555,25 @@ fn trend_skill_rows(payload: &TrendPayload) -> Vec<Vec<String>> {
                 skill.skill.clone(),
                 skill.invocations.previous.to_string(),
                 skill.invocations.current.to_string(),
+                delta,
+                direction,
+            ]
+        })
+        .collect()
+}
+
+/// The per-surface section's rows, derived from the payload: `kind/id`,
+/// both windows' event counts, and the judged delta — largest movement first.
+pub(crate) fn trend_surface_rows(payload: &TrendPayload) -> Vec<Vec<String>> {
+    payload
+        .surfaces
+        .iter()
+        .map(|surface| {
+            let (delta, direction) = int_cells(&surface.events);
+            vec![
+                format!("{}/{}", surface.kind, surface.id),
+                surface.events.previous.to_string(),
+                surface.events.current.to_string(),
                 delta,
                 direction,
             ]
@@ -663,6 +725,19 @@ pub(crate) fn trend(sess: &Session, pair: WindowPair, format: Format) -> Result<
             Align::Left,
         ],
         &trend_skill_rows(&payload),
+        format,
+    );
+    trend_table(
+        "Surfaces (largest movement first):",
+        &["surface", "previous", "current", "delta", "direction"],
+        &[
+            Align::Left,
+            Align::Right,
+            Align::Right,
+            Align::Right,
+            Align::Left,
+        ],
+        &trend_surface_rows(&payload),
         format,
     );
     trend_table(
@@ -1409,6 +1484,7 @@ mod tests {
                 duration_sec: unavailable(0.0, 0.0, UnavailableReason::NotApplicable),
             }],
             skills: Vec::new(),
+            surfaces: Vec::new(),
             sessions: metric(Baseline::Measured(1), 0, int_judge),
             subagent_runs: metric(Baseline::Measured(0), 0, int_judge),
             sub_tokens: metric(Baseline::Measured(0), 0, int_judge),
