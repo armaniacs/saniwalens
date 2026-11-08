@@ -203,3 +203,10 @@ injected as tuning constants (what counts as "high cost", "low usage"). It does
 that a wedge should be acted on — those judgements belong to the human reading
 the report, or to the `optimize` AI-proposal session that consumes this same
 joined data.
+
+Rows whose `load_mode` label is unknown to the core (not one of the five known
+labels) are **excluded from wedge routing** — no default mode is assumed, since
+any default would misstate savings — and are counted in
+`ScopedWedges::unknown_load_modes` (raw labels; the count is its length). The
+core stays pure: the CLI renders the warning and the JSON field from that
+count.

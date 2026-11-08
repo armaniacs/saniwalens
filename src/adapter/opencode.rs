@@ -33,7 +33,7 @@ const UNKNOWN_MODEL: &str = "unknown";
 /// It lives apart from the shared `CLAUDE_ANALYZER_VERSION` (`adapter::transcript`) on
 /// purpose: an opencode-only change must never force every Claude Code user
 /// through a full re-analyze. Stored under its own `meta` key.
-pub const OPENCODE_ANALYZER_VERSION: &str = "3";
+pub const OPENCODE_ANALYZER_VERSION: &str = "4";
 
 /// The `meta` key holding the opencode analysis semantics.
 pub const OPENCODE_ANALYZER_META_KEY: &str = "opencode_analyzer_version";
@@ -1556,5 +1556,106 @@ mod run_event_tests {
             render_run_line(r#"{"type":"text","text":"  "}"#),
             RunEvent::Silent
         );
+    }
+
+    // ---- PBI 10: the opencode skip is out of scope for the mtime fix ----
+
+    /// A synthetic opencode database — never a real one
+    /// (`.claude/rules/session-data-privacy.md`).
+    fn fixture_db(path: &std::path::Path) {
+        let conn = rusqlite::Connection::open(path).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE session (id TEXT, slug TEXT, directory TEXT, time_created INTEGER, time_updated INTEGER);
+             CREATE TABLE message (id TEXT, session_id TEXT, time_created INTEGER, data TEXT);
+             CREATE TABLE part (id TEXT, message_id TEXT, session_id TEXT, time_created INTEGER, data TEXT);",
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO session (id, slug, directory, time_created, time_updated)
+             VALUES ('ses_1', 'proj', '/tmp/example/proj', 1700000000000, 1700000000000)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO message (id, session_id, time_created, data)
+             VALUES ('msg_1', 'ses_1', 1700000000000, '{\"role\":\"user\"}')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO part (id, message_id, session_id, time_created, data)
+             VALUES ('prt_1', 'msg_1', 'ses_1', 1700000000000, '{\"type\":\"text\",\"text\":\"do the thing\"}')",
+            [],
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn the_skip_keys_on_db_rows_not_on_the_db_file_mtime() {
+        // Out-of-scope pin for PBI 10
+        // (`pbi/2026-11-08-10-fix-fingerprint-stale-skip.md`): opencode's
+        // fingerprint is `(time_updated_ms, message_count)` from the
+        // database rows, so moving the database file's mtime — at any
+        // granularity — must not re-ingest, and only a row change must.
+        let dir = std::env::temp_dir().join(format!(
+            "saniwalens-opencode-incremental-test-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        // No other test sets `XDG_CONFIG_HOME`, so the env read has no
+        // parallel reader to race with.
+        unsafe { std::env::set_var("XDG_CONFIG_HOME", dir.join("config-home")) };
+        let input = dir.join("opencode.db");
+        fixture_db(&input);
+
+        let db = dir.join("store.db");
+        let first = analyze(Some(input.clone()), &db).unwrap();
+        assert_eq!((first.sessions, first.skipped), (1, 0));
+
+        // Unchanged rows, moved file mtime: still skipped. The file stat is
+        // not the fingerprint, so the PBI-10 granularity change cannot reach
+        // this path.
+        let stamp = std::time::SystemTime::UNIX_EPOCH
+            + std::time::Duration::new(1_700_000_100, 600_000_000);
+        std::fs::File::options()
+            .write(true)
+            .open(&input)
+            .unwrap()
+            .set_modified(stamp)
+            .unwrap();
+        let second = analyze(Some(input.clone()), &db).unwrap();
+        assert_eq!(
+            (second.sessions, second.skipped),
+            (0, 1),
+            "a bare file-mtime move must not re-ingest an opencode session"
+        );
+
+        // New row + bumped time_updated: re-ingested.
+        let conn = rusqlite::Connection::open(&input).unwrap();
+        conn.execute(
+            "INSERT INTO message (id, session_id, time_created, data)
+             VALUES ('msg_2', 'ses_1', 1700000005000, '{\"role\":\"user\"}')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO part (id, message_id, session_id, time_created, data)
+             VALUES ('prt_2', 'msg_2', 'ses_1', 1700000005000, '{\"type\":\"text\",\"text\":\"and more\"}')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "UPDATE session SET time_updated = 1700000005000 WHERE id = 'ses_1'",
+            [],
+        )
+        .unwrap();
+        drop(conn);
+        let third = analyze(Some(input.clone()), &db).unwrap();
+        assert_eq!((third.sessions, third.skipped), (1, 0));
+
+        unsafe { std::env::remove_var("XDG_CONFIG_HOME") };
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }

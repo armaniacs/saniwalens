@@ -312,4 +312,33 @@ mod tests {
             StartupSavings::Declutter
         );
     }
+
+    #[test]
+    fn unknown_load_mode_labels_parse_to_none() {
+        // A future harness may write a label this version never knew (PBI 07):
+        // it must stay unknown, never read as a known mode.
+        assert_eq!(LoadMode::from_label("startup_preload"), None);
+    }
+
+    #[test]
+    fn empty_and_case_variant_labels_are_unknown() {
+        // No normalization: the store holds exact labels, so "" and case
+        // drift must not quietly become a known mode either.
+        assert_eq!(LoadMode::from_label(""), None);
+        assert_eq!(LoadMode::from_label("Startup_Full"), None);
+        assert_eq!(LoadMode::from_label("ON_DEMAND"), None);
+    }
+
+    #[test]
+    fn all_five_known_labels_round_trip() {
+        for mode in [
+            LoadMode::StartupFull,
+            LoadMode::StartupDescription,
+            LoadMode::PathConditional,
+            LoadMode::OnDemand,
+            LoadMode::ToolSchema,
+        ] {
+            assert_eq!(LoadMode::from_label(mode.label()), Some(mode));
+        }
+    }
 }

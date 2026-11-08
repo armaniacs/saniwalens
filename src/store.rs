@@ -93,7 +93,9 @@ CREATE TABLE IF NOT EXISTS meta (
     value TEXT NOT NULL
 );
 -- Incremental-ingest fingerprints: a transcript whose (mtime, size) matches is
--- skipped on re-analyze (see docs/specs/storage.md).
+-- skipped on re-analyze (see docs/specs/storage.md). `mtime` is epoch
+-- nanoseconds; values stamped before the nanos change never match again, so
+-- the first run after the upgrade re-ingests once, idempotently.
 CREATE TABLE IF NOT EXISTS ingested_files (
     path  TEXT PRIMARY KEY,
     mtime INTEGER NOT NULL,
@@ -1421,6 +1423,7 @@ impl Store {
 
     /// Whether a source file's `(mtime, size)` matches its recorded ingest
     /// fingerprint — if so, re-analyzing may skip it (`docs/specs/storage.md`).
+    /// `mtime` is epoch nanoseconds (`adapter::harness::file_fingerprint`).
     pub fn is_ingested(&self, path: &str, mtime: i64, size: i64) -> Result<bool> {
         let matched = self.conn.query_row(
             "SELECT COUNT(*) FROM ingested_files WHERE path = ?1 AND mtime = ?2 AND size = ?3",
@@ -1433,6 +1436,7 @@ impl Store {
     /// Record a source file's ingest fingerprint. Call **after** the read
     /// completes, with the pre-read stat — a file that grew mid-read then shows
     /// a changed fingerprint next run and is re-ingested (`docs/specs/storage.md`).
+    /// `mtime` is epoch nanoseconds (`adapter::harness::file_fingerprint`).
     pub fn record_ingested_file(&mut self, path: &str, mtime: i64, size: i64) -> Result<()> {
         self.conn.execute(
             "INSERT OR REPLACE INTO ingested_files (path, mtime, size) VALUES (?1, ?2, ?3)",

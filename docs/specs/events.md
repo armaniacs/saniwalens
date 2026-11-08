@@ -51,6 +51,17 @@ Two kinds carry caveats that downstream reports must honour:
   concrete instance* (the actual failing path), which a report shows directly.
   It lives only in the local store (gitignored, never committed), so the privacy
   rule — no real data in the repo — still holds.
+- A `tool_error`'s friction category (`core::friction`) follows two precedence
+  rules. First, **a concrete cause beats `cancelled`**: the interruption
+  patterns are checked only after every specific cause (path-not-found,
+  edit-precondition, …), so a real failure with an interruption-like fragment
+  appended keeps its cause instead of vanishing into the non-actionable
+  `cancelled` bucket. Second, **short interruption fragments require the whole
+  message**: `tool execution aborted` and `task cancelled` classify as
+  `cancelled` only when they are the entire (trimmed, case-insensitive) error
+  text — project content merely mentioning them is not a user stop. Longer,
+  tool-specific stop markers (`cancelled: parallel tool call`, `request
+  interrupted by user`, …) still match by containment.
 
 - **`file_edit`** stores the basename *and* the full path because the two answer
   different questions. A hotspot ranking wants the basename — it is the name a

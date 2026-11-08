@@ -370,7 +370,11 @@ atomicity means a failure mid-ingest leaves the previous rows intact rather
 than a half-replaced file.
 
 - Before ingesting a file, compare `(mtime, size)` against `ingested_files`.
-  Unchanged → skip. Changed or new → re-ingest.
+  Unchanged → skip. Changed or new → re-ingest. `mtime` is **epoch
+  nanoseconds** (`adapter::harness::file_fingerprint`): whole-second
+  truncation made a same-second, same-size edit invisible, so the transcript
+  was skipped until something else moved the fingerprint. Epoch nanos fit in
+  an `INTEGER` until the year 2262.
 - Re-ingest is **replace, not append**: delete all `events` whose `source_path`
   equals this file, then re-extract from the whole file and insert. This is why
   `events.source_path` exists. Replacing avoids duplicate rows when a still-open
@@ -430,6 +434,16 @@ transcript never recorded, and the transcript it came from may be gone entirely.
 changes mtime without changing bytes triggers a harmless idempotent replace, and
 any byte change moves size or mtime. A content hash is a later hardening option
 if the cheap detector proves insufficient.
+
+The nanos unit itself is a fingerprint change: `mtime` values stamped in whole
+seconds never match an epoch-nanos reading, so the first run after the upgrade
+re-ingests every file-backed transcript once (replace, per above, so this is
+safe to repeat) and then the skip resumes. No `analyzer_version` bump is
+involved ― row-backed fingerprints (`opencode`'s `time_updated_ms` plus message
+count) keep matching, so only the file-backed paths (Claude Code transcripts,
+kilocode's two-file task fold) pay the one-time pass. The stat-before-read
+rule below is unchanged: a file that grows mid-run still shows a mismatch next
+run, because the recorded size is the bytes actually consumed.
 
 ### Reading files that grow mid-run
 

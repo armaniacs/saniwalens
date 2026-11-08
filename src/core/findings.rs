@@ -94,6 +94,13 @@ pub struct WedgeRefs {
 pub struct ScopedWedges {
     pub global: WedgeRefs,
     pub projects: HashMap<String, WedgeRefs>,
+    /// Raw `load_mode` labels no known mode parses to (PBI 07) — one entry
+    /// per skipped catalog row, so `len()` is the unknown count the CLI
+    /// warns about. These rows are excluded from wedge routing entirely:
+    /// coercing them to any known mode would file their cost under the
+    /// wrong saving (e.g. a future always-on label read as on-demand
+    /// declutter), so the explicit route is warn + count, never classify.
+    pub unknown_load_modes: Vec<String>,
 }
 
 /// Route the catalog's wedge-flagged surfaces to the config layer that owns
@@ -112,12 +119,21 @@ pub fn config_wedges(catalog: &[CatalogRow]) -> ScopedWedges {
     };
     let mut scoped = ScopedWedges::default();
     for row in catalog {
+        // No silent coercion: an unparsable label is warn + count (PBI 07),
+        // never a known mode. It is excluded from wedge routing — filing it
+        // under any default mode would misstate what removing it saves.
+        let load_mode = match LoadMode::from_label(&row.load_mode) {
+            Some(load_mode) => load_mode,
+            None => {
+                scoped.unknown_load_modes.push(row.load_mode.clone());
+                continue;
+            }
+        };
         let refs = if row.scope == "global" {
             &mut scoped.global
         } else {
             scoped.projects.entry(row.project.clone()).or_default()
         };
-        let load_mode = LoadMode::from_label(&row.load_mode).unwrap_or(LoadMode::OnDemand);
         let static_tokens = row.static_tokens.map(|t| t as u64);
         if is_usage_measurable(&row.kind) && row.uses == 0 {
             refs.unused.push(surface_ref(row, load_mode));
@@ -521,5 +537,69 @@ mod tests {
         assert_eq!(findings.config_tokens, 0);
         assert_eq!(findings.cd_pct, None);
         assert_eq!(findings.steer_pct, None);
+    }
+
+    fn wedge_row(id: &str, load_mode: &str, uses: i64, static_tokens: Option<i64>) -> CatalogRow {
+        CatalogRow {
+            kind: "skill".to_string(),
+            id: id.to_string(),
+            scope: "global".to_string(),
+            project: String::new(),
+            startup_tokens: None,
+            static_tokens,
+            load_mode: load_mode.to_string(),
+            uses,
+        }
+    }
+
+    #[test]
+    fn unknown_load_mode_is_counted_never_silently_on_demand() {
+        // PBI 07: a future label must not coerce to OnDemand (which would
+        // route this measurable-but-unused heavy row into `unused` while
+        // keeping it out of `always_on_heavy`). The explicit route is:
+        // excluded from both wedges, counted with its raw label.
+        let catalog = vec![wedge_row("x", "startup_preload", 0, Some(1500))];
+
+        let scoped = config_wedges(&catalog);
+
+        assert!(scoped.global.unused.is_empty());
+        assert!(scoped.global.always_on_heavy.is_empty());
+        assert_eq!(
+            scoped.unknown_load_modes,
+            vec!["startup_preload".to_string()]
+        );
+    }
+
+    #[test]
+    fn known_labels_keep_their_routing() {
+        // The five known labels classify exactly as before: a heavy
+        // startup_full row reaches always_on_heavy, an on_demand row does not.
+        let catalog = vec![
+            wedge_row("heavy", "startup_full", 5, Some(1500)),
+            wedge_row("lazy", "on_demand", 5, Some(1500)),
+        ];
+
+        let scoped = config_wedges(&catalog);
+
+        assert_eq!(scoped.global.always_on_heavy.len(), 1);
+        assert_eq!(scoped.global.always_on_heavy[0].id, "heavy");
+        assert!(scoped.global.unused.is_empty());
+        assert!(scoped.unknown_load_modes.is_empty());
+    }
+
+    #[test]
+    fn empty_and_case_variant_labels_are_unknown() {
+        // No normalization at the routing layer either: "" and case drift
+        // count as unknown instead of becoming a known mode.
+        let catalog = vec![
+            wedge_row("empty", "", 0, Some(1500)),
+            wedge_row("cased", "Startup_Full", 0, Some(1500)),
+        ];
+
+        let scoped = config_wedges(&catalog);
+
+        assert!(scoped.global.unused.is_empty());
+        assert!(scoped.global.always_on_heavy.is_empty());
+        assert_eq!(scoped.unknown_load_modes.len(), 2);
     }
 }

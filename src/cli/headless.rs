@@ -6,7 +6,9 @@
 //! unreaped (`Child`'s drop neither kills nor waits). The guard here makes the
 //! lifetime a scope fact: every exit, including an error return, stops the beat
 //! and reaps the child. The raw log path is carried into the error so a failed
-//! run still names its full output (`docs/specs/harness.md`).
+//! run still names its full output, while a successful run removes it (it may
+//! echo secrets) unless `SANIWALENS_KEEP_RUN_LOG=1` keeps it
+//! (`docs/specs/harness.md`).
 
 use std::fs;
 use std::io::{BufRead, Write};
@@ -220,13 +222,34 @@ pub(crate) fn parse_timeout(value: Option<&str>) -> Result<Option<Duration>> {
 /// on stderr. The `render_line` is the harness seam's choice
 /// (`Harness::run_line_renderer`), so this loop names no harness. A heartbeat
 /// covers quiet stretches (a long tool call, model thinking) so the run never
-/// looks hung. Returns the log path so the caller can point at the full
-/// detail. The raw event shapes are unversioned upstream, so rendering is
+/// looks hung. Returns the status and the log path: a failure keeps the log
+/// and the caller points at it, while a success removes it (the raw stream
+/// may echo secrets) unless `keep_log` — wired to `SANIWALENS_KEEP_RUN_LOG=1`
+/// — keeps it. The raw event shapes are unversioned upstream, so rendering is
 /// lenient: a line with no recognizable text stays in the log, and a run that
 /// renders nothing readable says so instead of leaving silence.
 /// The context prefix that carries the raw log's path. One constant so the
 /// failure path and the test-side reader cannot drift apart.
 const RAW_LOG_CONTEXT: &str = "raw output";
+
+/// The environment variable that keeps the advisor's raw run log after a
+/// successful headless run, for post-mortem inspection. Mirrors
+/// `SANIWALENS_KEEP_SCRATCH=1` (`src/scratch.rs`): the value must be exactly
+/// `1`, anything else (unset included) removes the log on success. Failures
+/// always keep the log — the error names it — so this only affects success.
+pub(crate) const KEEP_RUN_LOG_ENV: &str = "SANIWALENS_KEEP_RUN_LOG";
+
+/// Whether the KEEP opt-in is set for the run log.
+pub(crate) fn keep_run_log() -> bool {
+    std::env::var_os(KEEP_RUN_LOG_ENV).as_deref() == Some(std::ffi::OsStr::new("1"))
+}
+
+/// Whether the run log is removed: only a success without the KEEP opt-in.
+/// Every other combination keeps it — a failure's error names the path, and
+/// an opted-in success keeps it for inspection.
+fn should_remove_run_log(success: bool, keep: bool) -> bool {
+    success && !keep
+}
 
 pub(crate) fn run_headless(
     binary: &str,
@@ -235,6 +258,7 @@ pub(crate) fn run_headless(
     render_line: Option<RunLineRenderer>,
     beat: Beat,
     timeout: Option<Duration>,
+    keep_log: bool,
 ) -> Result<(ExitStatus, PathBuf)> {
     let mut run = HeadlessRun::start(beat)?;
     let log_path = run.log_path().to_path_buf();
@@ -246,7 +270,19 @@ pub(crate) fn run_headless(
         }
     };
     drop(run);
-    if status.success() && !readable {
+    if should_remove_run_log(status.success(), keep_log) {
+        // Best-effort like the briefing's `let _ = fs::remove_file(&path)`
+        // (`cli/mod.rs`): the run is done, and a removal failure must not
+        // fail the delivery. The no-readable-text note stays path-less here
+        // so it never names a file that is already gone.
+        let _ = fs::remove_file(&log_path);
+        if !readable {
+            eprintln!(
+                "{}",
+                Style::stderr().dim("the advisor produced no readable text — run log removed")
+            );
+        }
+    } else if status.success() && !readable {
         eprintln!(
             "{}",
             Style::stderr().dim(&format!(
@@ -391,6 +427,14 @@ mod tests {
     }
 
     #[test]
+    fn should_remove_run_log_only_on_success_without_the_keep_opt_in() {
+        assert!(should_remove_run_log(true, false));
+        assert!(!should_remove_run_log(true, true));
+        assert!(!should_remove_run_log(false, false));
+        assert!(!should_remove_run_log(false, true));
+    }
+
+    #[test]
     fn a_bad_utf8_line_reaps_the_child_and_names_the_log() {
         let pid_file =
             std::env::temp_dir().join(format!("saniwalens-headless-pid-{}", std::process::id()));
@@ -406,6 +450,7 @@ mod tests {
             None,
             fast_beat(),
             None,
+            false,
         )
         .expect_err("the invalid UTF-8 line fails the read");
         let log = raw_log_path(&err).expect("the failure names the raw log");
@@ -443,6 +488,7 @@ mod tests {
             None,
             fast_beat(),
             Some(Duration::from_millis(100)),
+            false,
         )
         .expect_err("the silent child times out");
         assert!(
@@ -484,6 +530,7 @@ mod tests {
             None,
             fast_beat(),
             None,
+            false,
         )
         .expect_err("a missing binary fails the spawn");
         let log = raw_log_path(&err).expect("the failure names the raw log");
@@ -495,7 +542,7 @@ mod tests {
     }
 
     #[test]
-    fn the_success_path_returns_the_status_and_the_log() {
+    fn the_headless_success_removes_the_run_log() {
         let (status, log_path) = run_headless(
             "/bin/sh",
             &["-c", "printf 'hello\\n'"],
@@ -503,11 +550,49 @@ mod tests {
             None,
             fast_beat(),
             None,
+            false,
         )
         .expect("the child succeeds");
         assert!(status.success(), "the child exit status: {status}");
-        let log = std::fs::read_to_string(&log_path).expect("the log is readable");
-        assert_eq!(log, "hello\n", "the raw line reached the log");
+        assert!(
+            !log_path.exists(),
+            "the run log survived its successful run: {log_path:?}"
+        );
+    }
+
+    #[test]
+    fn the_headless_keep_opt_in_preserves_the_run_log_on_success() {
+        let (status, log_path) = run_headless(
+            "/bin/sh",
+            &["-c", "printf 'hello\\n'"],
+            "ignored",
+            None,
+            fast_beat(),
+            None,
+            true,
+        )
+        .expect("the child succeeds");
+        assert!(status.success(), "the child exit status: {status}");
+        let log = std::fs::read_to_string(&log_path).expect("the kept log is readable");
+        assert_eq!(log, "hello\n", "the raw line reached the kept log");
+        let _ = std::fs::remove_file(&log_path);
+    }
+
+    #[test]
+    fn the_headless_failure_keeps_the_run_log_for_the_bail() {
+        let (status, log_path) = run_headless(
+            "/bin/sh",
+            &["-c", "printf 'boom\\n'; exit 3"],
+            "ignored",
+            None,
+            fast_beat(),
+            None,
+            false,
+        )
+        .expect("a non-zero exit is still a completed run");
+        assert!(!status.success(), "the child exit status: {status}");
+        let log = std::fs::read_to_string(&log_path).expect("the failed run keeps its log");
+        assert_eq!(log, "boom\n", "the raw line reached the kept log");
         let _ = std::fs::remove_file(&log_path);
     }
 
@@ -552,5 +637,78 @@ mod tests {
         assert!(parse_timeout(Some("0s")).is_err());
         assert!(parse_timeout(Some("-1s")).is_err());
         assert!(parse_timeout(Some("soon")).is_err());
+    }
+
+    // Moved from `super` (the `mod.rs` shell carries a line budget —
+    // `tests/cli_mod_line_budget.rs`): the failing-advisor delivery test lives
+    // with the headless code it exercises.
+    use super::super::{AdvisorLaunch, DeliveryMode, DeliveryPlan, deliver};
+    use crate::adapter::harness::Harness;
+
+    #[cfg(unix)]
+    fn success_status() -> std::process::ExitStatus {
+        use std::os::unix::process::ExitStatusExt;
+        std::process::ExitStatus::from_raw(0)
+    }
+
+    #[cfg(unix)]
+    struct FailingHeadlessAdvisor {
+        log: PathBuf,
+    }
+
+    #[cfg(unix)]
+    fn failure_status() -> std::process::ExitStatus {
+        use std::os::unix::process::ExitStatusExt;
+        std::process::ExitStatus::from_raw(0x100)
+    }
+
+    #[cfg(unix)]
+    impl AdvisorLaunch for FailingHeadlessAdvisor {
+        fn direct(
+            &mut self,
+            _binary: &str,
+            _leading: &[&str],
+            _prompt: &str,
+        ) -> Result<std::process::ExitStatus> {
+            Ok(success_status())
+        }
+
+        fn headless(
+            &mut self,
+            _binary: &str,
+            _leading: &[&str],
+            _prompt: &str,
+            _render: Option<RunLineRenderer>,
+            _timeout: Option<std::time::Duration>,
+        ) -> Result<(std::process::ExitStatus, PathBuf)> {
+            Ok((failure_status(), self.log.clone()))
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn headless_failure_keeps_the_run_log_and_names_it_in_the_error() {
+        let log = private_temp_path("saniwalens-headless-test", "log");
+        write_private_file(&log, "boom\n").expect("the fake run log is written");
+        let plan = DeliveryPlan::launch(
+            ("opencode", &["run", "--format", "json"]),
+            DeliveryMode::Headless,
+            "briefing".to_string(),
+            "opencode",
+            false,
+            Harness::Opencode.run_line_renderer(),
+            None,
+            |_| "pointer".to_string(),
+        );
+        let mut advisor = FailingHeadlessAdvisor { log: log.clone() };
+
+        let err = deliver(plan, &mut advisor).expect_err("a non-zero exit fails delivery");
+
+        assert!(
+            err.to_string().contains(&log.display().to_string()),
+            "the error does not name the run log: {err:#}"
+        );
+        assert!(log.exists(), "the failed run's log was removed: {log:?}");
+        let _ = fs::remove_file(&log);
     }
 }

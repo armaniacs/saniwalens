@@ -8,7 +8,8 @@ use crate::session::{Session, SessionEnv, config_file_path, env_roots, resolve_c
 
 use super::super::report::Format;
 use super::super::window::{PeriodArgs, ReadArgs, WindowedDispatch};
-use super::super::{doctor, failures, run_analyze, waste};
+use super::super::{doctor, failures, run_analyze};
+use super::waste::waste;
 
 /// What `run()` should do with this invocation, decided before clap parses.
 pub(crate) enum Entry {

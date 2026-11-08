@@ -44,7 +44,11 @@ measured global config at an absolute path into the Claude Code tree
 otherwise invisible to the catalog while costing tokens on every session —
 the exact blind spot an optimization advisor needs named. Paths resolve
 against the config file's directory at the global scope and the project root
-at the project scope; absolute paths pass through.
+at the project scope; absolute paths pass through. Entries are confined
+to that same base: the candidate is canonicalized (so `..` and symlinks
+resolve first) and an entry landing outside the root is skipped with a
+`warning:` on stderr — out-of-root files stay uncatalogued. An entry naming
+no existing file yields nothing, as before.
 
 ## Static cost and load mode
 

@@ -174,6 +174,10 @@ impl ErrorCategory {
 pub fn classify_error(text: &str) -> ErrorCategory {
     let lower = text.to_lowercase();
     let has = |needle: &str| lower.contains(needle);
+    // Short interruption-like fragments only count as a user stop when they
+    // are the whole message: embedded in a longer text they are usually
+    // project content, not the tool's own verdict.
+    let is_only = |phrase: &str| lower.trim() == phrase;
 
     if has("string to replace not found")
         || has("matches of the string to replace")
@@ -184,15 +188,6 @@ pub fn classify_error(text: &str) -> ErrorCategory {
         || has("could not find oldstring")
     {
         ErrorCategory::EditPrecondition
-    } else if has("cancelled: parallel tool call")
-        || has("request interrupted by user")
-        || has("the user doesn't want to proceed")
-        || has("tool execution aborted")
-        || has("user rejected permission")
-        || has("task cancelled")
-    {
-        // User stop or a sibling failing in a parallel batch — not a code fault.
-        ErrorCategory::Cancelled
     } else if has("permission for this action was denied")
         || has("enforce-perl")
         || has("use perl instead")
@@ -240,6 +235,19 @@ pub fn classify_error(text: &str) -> ErrorCategory {
         ErrorCategory::TestFailure
     } else if has("timed out") || has("timeout") {
         ErrorCategory::Timeout
+    } else if has("cancelled: parallel tool call")
+        || has("request interrupted by user")
+        || has("the user doesn't want to proceed")
+        || has("user rejected permission")
+        || is_only("tool execution aborted")
+        || is_only("task cancelled")
+    {
+        // User stop or a sibling failing in a parallel batch — not a code
+        // fault. Checked after every concrete cause so a real failure with an
+        // interruption-like fragment appended keeps its cause; the two short
+        // fragments additionally require the whole message, so project content
+        // merely mentioning them cannot hide a failure.
+        ErrorCategory::Cancelled
     } else if has("exit code") {
         // Generic non-zero exit, checked last so specific causes above win.
         ErrorCategory::CommandFailed
@@ -453,6 +461,42 @@ mod tests {
     fn unrecognised_is_other() {
         assert_eq!(
             classify_error("something weird happened"),
+            ErrorCategory::Other
+        );
+    }
+
+    #[test]
+    fn concrete_cause_survives_a_trailing_cancelled_fragment() {
+        // Attacker-shaped text: a concrete failure with an interruption-like
+        // fragment appended must stay a concrete cause, never Cancelled.
+        assert_eq!(
+            classify_error("cat: /tmp/report.md: No such file or directory (task cancelled)"),
+            ErrorCategory::PathNotFound
+        );
+        assert_eq!(
+            classify_error("File not found: /tmp/x -- Tool execution aborted"),
+            ErrorCategory::PathNotFound
+        );
+        assert_eq!(
+            classify_error("No such file (task cancelled); request interrupted by user"),
+            ErrorCategory::PathNotFound
+        );
+        assert_eq!(
+            classify_error("String to replace not found in file; request interrupted by user"),
+            ErrorCategory::EditPrecondition
+        );
+    }
+
+    #[test]
+    fn bare_cancelled_fragments_are_not_cancelled() {
+        // A short interruption-like fragment embedded in a longer sentence
+        // with no concrete stop evidence is not a user stop.
+        assert_eq!(
+            classify_error("the task cancelled yesterday was retried"),
+            ErrorCategory::Other
+        );
+        assert_eq!(
+            classify_error("log: tool execution aborted unexpectedly at step 3"),
             ErrorCategory::Other
         );
     }

@@ -4,6 +4,7 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
@@ -16,10 +17,7 @@ use crate::core::optimize as optimize_mod;
 use crate::core::period::TimeRange;
 use crate::core::scope::{ScopeFilter, split_friction};
 use crate::core::subagent::SplitCoverage;
-use crate::core::surface::{
-    HEAVY_TOKENS, LoadMode, StartupSavings, Wedge, classify_wedge, is_usage_measurable,
-    on_demand_tokens, startup_savings,
-};
+use crate::core::surface::{StartupSavings, Wedge, is_usage_measurable};
 use crate::core::thrash::detect_thrash;
 use crate::session::{
     AnalyzeStats, Session, SessionEnv, Style, env_roots, eprint_freshness, freshness_line,
@@ -324,7 +322,7 @@ pub fn run() -> Result<()> {
                 run_analyze,
             )?;
             let (windowed, filter) = opened.into_parts();
-            waste(&windowed.sess, &filter, windowed.window, windowed.format)
+            views::waste::waste(&windowed.sess, &filter, windowed.window, windowed.format)
         }
         Command::Overhead {
             format,
@@ -575,6 +573,7 @@ impl AdvisorLaunch for ProcessAdvisor {
             render,
             headless::Beat::default(),
             timeout,
+            headless::keep_run_log(),
         )
     }
 }
@@ -613,6 +612,8 @@ pub fn deliver(plan: DeliveryPlan<'_>, advisor: &mut impl AdvisorLaunch) -> Resu
     );
     // Headless harnesses run piped unless --verbose: the raw stream is logged
     // to a private file; text streams on stdout, verbose keeps the raw stream.
+    // A success removes the run log (`SANIWALENS_KEEP_RUN_LOG=1` keeps it) —
+    // only a failure leaves it behind for the bail below to name.
     let (result, run_log) = if mode == DeliveryMode::Headless && !verbose {
         match advisor.headless(binary, leading, &prompt, render, timeout) {
             Ok((status, log)) => (Ok(status), Some(log)),
@@ -722,10 +723,18 @@ fn optimize(
 pub(crate) fn private_temp_path(prefix: &str, ext: &str) -> PathBuf {
     // The clock is here to avoid a collision with a leftover file, not to be
     // unguessable — exclusive creation is what makes guessing the name useless.
+    // The sequence is what makes two calls unique: parallel tests share the
+    // pid and can land on the same clock tick, and without it the loser fails
+    // with `AlreadyExists`.
+    static SEQ: AtomicU64 = AtomicU64::new(0);
     let nanos = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |elapsed| elapsed.as_nanos());
-    std::env::temp_dir().join(format!("{prefix}-{}-{nanos:x}.{ext}", std::process::id()))
+    let seq = SEQ.fetch_add(1, Ordering::Relaxed);
+    std::env::temp_dir().join(format!(
+        "{prefix}-{}-{nanos:x}-{seq}.{ext}",
+        std::process::id()
+    ))
 }
 
 /// Write `contents` to a fresh file in the temp dir. Used for the optimization
@@ -2257,7 +2266,7 @@ fn inventory(
 }
 
 /// Whether a catalog row's `(scope, project)` passes the `--scope` filter.
-fn in_scope(filter: &ScopeFilter, scope: &str, project: &str) -> bool {
+pub(crate) fn in_scope(filter: &ScopeFilter, scope: &str, project: &str) -> bool {
     if scope == "global" {
         filter.includes_global()
     } else {
@@ -2266,7 +2275,7 @@ fn in_scope(filter: &ScopeFilter, scope: &str, project: &str) -> bool {
 }
 
 /// A human-readable scope cell: `global`, or `project:<slug>`.
-fn scope_cell(scope: &str, project: &str) -> String {
+pub(crate) fn scope_cell(scope: &str, project: &str) -> String {
     if scope == "project" {
         format!("project:{project}")
     } else {
@@ -2274,165 +2283,9 @@ fn scope_cell(scope: &str, project: &str) -> String {
     }
 }
 
-/// List optimization wedges, ranked by what removing each surface actually saves
-/// at session start — real always-on tokens first, then MCP schemas, then
-/// declutter-only (skills/agents, whose body is on-demand). This is the "where
-/// and how to optimize" view, honest about which removals save context.
-fn waste(sess: &Session, filter: &ScopeFilter, window: TimeRange, format: Format) -> Result<()> {
-    let store = &sess.store;
-    eprint_window(window);
-    let catalog: Vec<_> = store
-        .effective_catalog(window)?
-        .into_iter()
-        .filter(|e| in_scope(filter, &e.scope, &e.project))
-        .collect();
-
-    struct Row<'a> {
-        wedge: Wedge,
-        kind: &'a str,
-        id: &'a str,
-        scope: &'a str,
-        project: &'a str,
-        uses: i64,
-        savings: StartupSavings,
-        /// What every session pays for having it installed.
-        startup_tokens: Option<u64>,
-        /// What its body costs when loaded — an invocation cost, never a saving.
-        on_demand_tokens: Option<u64>,
-    }
-
-    let mut found: Vec<Row> = Vec::new();
-    for entry in &catalog {
-        let measurable = is_usage_measurable(&entry.kind);
-        let load_mode = LoadMode::from_label(&entry.load_mode).unwrap_or(LoadMode::OnDemand);
-        let static_tokens = entry.static_tokens.map(|tokens| tokens as u64);
-        let startup_tokens = entry.startup_tokens.map(|tokens| tokens as u64);
-        if let Some(wedge) = classify_wedge(
-            measurable,
-            load_mode,
-            static_tokens,
-            entry.uses,
-            HEAVY_TOKENS,
-        ) {
-            found.push(Row {
-                wedge,
-                kind: &entry.kind,
-                id: &entry.id,
-                scope: &entry.scope,
-                project: &entry.project,
-                uses: entry.uses,
-                savings: startup_savings(load_mode, startup_tokens),
-                startup_tokens,
-                on_demand_tokens: on_demand_tokens(load_mode, static_tokens),
-            });
-        }
-    }
-
-    found.sort_by_key(|row| savings_rank(row.savings));
-
-    if format == Format::Json {
-        let wedges: Vec<serde_json::Value> = found
-            .iter()
-            .map(|row| {
-                let (savings, savings_tokens) = match row.savings {
-                    StartupSavings::Tokens(n) => ("tokens", Some(n)),
-                    StartupSavings::UnknownSchema => ("unknown_schema", None),
-                    StartupSavings::Declutter => ("declutter", None),
-                };
-                serde_json::json!({
-                    "wedge": row.wedge.label(),
-                    "kind": row.kind,
-                    "id": row.id,
-                    "scope": row.scope,
-                    "project": if row.project.is_empty() { None } else { Some(row.project) },
-                    "savings": savings,
-                    "savings_tokens": savings_tokens,
-                    "startup_tokens": row.startup_tokens,
-                    "on_demand_tokens": row.on_demand_tokens,
-                    "uses": if is_usage_measurable(row.kind) { Some(row.uses) } else { None },
-                    "suggestion": savings_suggestion(row.wedge, row.savings, row.on_demand_tokens),
-                })
-            })
-            .collect();
-        return emit_json(&with_window(
-            serde_json::json!({ "wedges": wedges }),
-            window,
-        ));
-    }
-    if found.is_empty() {
-        println!(
-            "{}",
-            empty_in_window(
-                "nothing wasteful found — run `saniwalens analyze` first",
-                window
-            )
-        );
-        return Ok(());
-    }
-
-    preamble(
-        format,
-        &framed(
-            "Concrete cleanup opportunities in your config, ranked by what removing each\n\
-             one actually saves at session start. A \"~\" figure is declutter-only — just\n\
-             the description is loaded at startup; the body costs nothing until invoked.",
-            window,
-        ),
-    );
-    let rows: Vec<Vec<String>> = found
-        .iter()
-        .map(|row| {
-            let uses_cell = if is_usage_measurable(row.kind) {
-                row.uses.to_string()
-            } else {
-                "-".to_string()
-            };
-            vec![
-                row.wedge.label().to_string(),
-                format!("{}/{}", row.kind, row.id),
-                scope_cell(row.scope, row.project),
-                savings_cell(row.savings, row.startup_tokens),
-                uses_cell,
-                savings_suggestion(row.wedge, row.savings, row.on_demand_tokens),
-            ]
-        })
-        .collect();
-    render(
-        &[
-            "problem",
-            "surface",
-            "scope",
-            "saves@start",
-            "uses",
-            "suggestion",
-        ],
-        &[
-            Align::Left,
-            Align::Left,
-            Align::Left,
-            Align::Right,
-            Align::Right,
-            Align::Left,
-        ],
-        &rows,
-        format,
-    );
-    Ok(())
-}
-
-/// View-only (waste view): sort key — real measured savings first (largest
-/// first), then unmeasured MCP schemas, then declutter-only.
-fn savings_rank(savings: StartupSavings) -> (u8, std::cmp::Reverse<u64>) {
-    match savings {
-        StartupSavings::Tokens(n) => (0, std::cmp::Reverse(n)),
-        StartupSavings::UnknownSchema => (1, std::cmp::Reverse(0)),
-        StartupSavings::Declutter => (2, std::cmp::Reverse(0)),
-    }
-}
-
 /// View-only (waste view): the `saves@start` cell — a description-loaded surface
 /// is negligible but measured, and removing it reclaims only its description.
-fn savings_cell(savings: StartupSavings, startup_tokens: Option<u64>) -> String {
+pub(crate) fn savings_cell(savings: StartupSavings, startup_tokens: Option<u64>) -> String {
     match savings {
         StartupSavings::Tokens(n) => format!("{n}/sess"),
         StartupSavings::UnknownSchema => "schema?".to_string(),
@@ -2442,7 +2295,11 @@ fn savings_cell(savings: StartupSavings, startup_tokens: Option<u64>) -> String 
 
 /// View-only (waste view): a suggestion honest about whether removal saves context or
 /// only declutters — naming the body cost as an invocation cost so it is not read as a saving.
-fn savings_suggestion(wedge: Wedge, savings: StartupSavings, on_demand: Option<u64>) -> String {
+pub(crate) fn savings_suggestion(
+    wedge: Wedge,
+    savings: StartupSavings,
+    on_demand: Option<u64>,
+) -> String {
     let body = match on_demand {
         Some(n) => format!("body is {n} tok when invoked"),
         None => "body is on-demand".to_string(),
@@ -2921,6 +2778,32 @@ mod tests {
         deliver(verbose_plan, &mut advisor).unwrap();
         assert_eq!(advisor.direct.len(), 1);
         assert!(advisor.headless.is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn headless_delivery_removes_the_briefing_file_like_the_other_launches() {
+        use std::cell::RefCell;
+        let seen_path: RefCell<Option<PathBuf>> = RefCell::new(None);
+        let plan = DeliveryPlan::launch(
+            ("opencode", &["run", "--format", "json"]),
+            DeliveryMode::Headless,
+            "the rendered briefing".to_string(),
+            "opencode",
+            false,
+            Harness::Opencode.run_line_renderer(),
+            None,
+            |path| {
+                *seen_path.borrow_mut() = Some(path.to_path_buf());
+                "POINTER PROMPT".to_string()
+            },
+        );
+        let mut advisor = RecordingAdvisor::new();
+
+        deliver(plan, &mut advisor).unwrap();
+
+        let path = seen_path.borrow().clone().expect("pointer got the path");
+        assert!(!path.exists(), "briefing file outlived its headless run");
     }
 
     #[test]

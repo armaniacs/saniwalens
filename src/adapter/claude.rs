@@ -325,6 +325,22 @@ mod tests {
     use super::*;
     use std::path::Path;
 
+    /// Serializes the tests that point `analyze` at a synthetic config root:
+    /// they share the process-wide `CLAUDE_CONFIG_DIR`, so they must not run
+    /// concurrently.
+    static CONFIG_DIR_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    /// Stamp `path` with an exact mtime — the production equivalent is the
+    /// filesystem clock moving while a transcript is edited.
+    fn set_mtime(path: &Path, mtime: std::time::SystemTime) {
+        std::fs::File::options()
+            .write(true)
+            .open(path)
+            .unwrap()
+            .set_modified(mtime)
+            .unwrap();
+    }
+
     /// One synthetic transcript and one synthetic skill under a fixture config
     /// root — never a real transcript
     /// (`.claude/rules/session-data-privacy.md`).
@@ -361,6 +377,7 @@ mod tests {
 
     #[test]
     fn claude_analyze_keeps_the_recorded_counts_on_a_fixture() {
+        let _guard = CONFIG_DIR_LOCK.lock().unwrap();
         let dir = std::env::temp_dir().join(format!(
             "saniwalens-claude-analyze-test-{}",
             std::process::id()
@@ -369,9 +386,8 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         fixture(&dir);
         // The routine resolves its default input route and config root from
-        // the environment, exactly as before the seam existed; this is the
-        // only test that sets `CLAUDE_CONFIG_DIR`, so the env read has no
-        // parallel reader to race with.
+        // the environment, exactly as before the seam existed; the lock above
+        // is what keeps this env read free of parallel readers.
         unsafe { std::env::set_var("CLAUDE_CONFIG_DIR", &dir) };
 
         let db = dir.join("store.db");
@@ -390,6 +406,73 @@ mod tests {
             (1, 0, 1, 1, 0),
             "the counts the pre-refactor analyze produced for this fixture"
         );
+
+        unsafe { std::env::remove_var("CLAUDE_CONFIG_DIR") };
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_same_second_same_size_edit_is_reingested_while_unchanged_is_skipped() {
+        // The incremental contract (`pbi/2026-11-08-10-fix-fingerprint-stale-skip.md`):
+        // an untouched transcript stays skipped, while a same-second,
+        // same-size edit is re-ingested and the session row reflects the new
+        // content. Synthetic fixture only — never a real transcript
+        // (`.claude/rules/session-data-privacy.md`).
+        let _guard = CONFIG_DIR_LOCK.lock().unwrap();
+        let dir = std::env::temp_dir().join(format!(
+            "saniwalens-claude-incremental-test-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        fixture(&dir);
+        unsafe { std::env::set_var("CLAUDE_CONFIG_DIR", &dir) };
+
+        let transcript =
+            dir.join("projects/-tmp-example-proj/aaaaaaaa-0000-0000-0000-000000000001.jsonl");
+        // Pin the pre-ingest mtime inside one whole second so the later edit
+        // deterministically lands in that same second.
+        let base = std::time::SystemTime::UNIX_EPOCH
+            + std::time::Duration::new(1_700_000_100, 100_000_000);
+        set_mtime(&transcript, base);
+
+        let db = dir.join("store.db");
+        let first = crate::adapter::harness::Harness::Claude
+            .analyze(None, &db)
+            .unwrap();
+        assert_eq!((first.sessions, first.skipped), (1, 0));
+
+        // Untouched second run: the fast path still skips.
+        let second = crate::adapter::harness::Harness::Claude
+            .analyze(None, &db)
+            .unwrap();
+        assert_eq!((second.sessions, second.skipped), (0, 1));
+
+        // Same-size rewrite (`60` → `66`, one token count) stamped inside the
+        // same whole second: must be re-ingested, not skipped.
+        let before = std::fs::read_to_string(&transcript).unwrap();
+        let edited = before.replacen("\"output_tokens\":60", "\"output_tokens\":66", 1);
+        assert_eq!(edited.len(), before.len(), "the edit must keep the size");
+        std::fs::write(&transcript, edited).unwrap();
+        set_mtime(&transcript, base + std::time::Duration::from_millis(500));
+
+        let third = crate::adapter::harness::Harness::Claude
+            .analyze(None, &db)
+            .unwrap();
+        assert_eq!(
+            (third.sessions, third.skipped),
+            (1, 0),
+            "a same-second same-size edit must be re-ingested"
+        );
+
+        // The session row carries the new content, not the stale first pass:
+        // the span's output tokens moved from 40 + 60 to 40 + 66.
+        let store = Store::open(&db, OpenMode::ReadOnly).unwrap();
+        let (_, rows) = store
+            .query("SELECT out_tokens FROM events WHERE kind = 'skill_invocation'")
+            .unwrap();
+        assert_eq!(rows, vec![vec!["106".to_string()]]);
 
         unsafe { std::env::remove_var("CLAUDE_CONFIG_DIR") };
         let _ = std::fs::remove_dir_all(&dir);

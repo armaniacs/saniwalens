@@ -1,0 +1,209 @@
+//! Waste view: the flagged config-cleanup opportunities (unused, costly+rare,
+//! always-on heavy) with their evidence and owning scope. Landed here under the
+//! view-landing rule (`docs/specs/architecture.md`): new views live as one file
+//! under `src/cli/views/` instead of growing the `src/cli/mod.rs` shell.
+
+use anyhow::Result;
+
+use crate::core::period::TimeRange;
+use crate::core::scope::ScopeFilter;
+use crate::core::surface::{
+    HEAVY_TOKENS, LoadMode, StartupSavings, Wedge, classify_wedge, is_usage_measurable,
+    on_demand_tokens, startup_savings,
+};
+use crate::session::{Session, Style};
+
+use super::super::{
+    Align, Format, emit_json, empty_in_window, eprint_window, framed, in_scope, preamble, render,
+    savings_cell, savings_suggestion, scope_cell, with_window,
+};
+
+pub(crate) fn waste(
+    sess: &Session,
+    filter: &ScopeFilter,
+    window: TimeRange,
+    format: Format,
+) -> Result<()> {
+    let store = &sess.store;
+    eprint_window(window);
+    let catalog: Vec<_> = store
+        .effective_catalog(window)?
+        .into_iter()
+        .filter(|e| in_scope(filter, &e.scope, &e.project))
+        .collect();
+
+    struct Row<'a> {
+        wedge: Wedge,
+        kind: &'a str,
+        id: &'a str,
+        scope: &'a str,
+        project: &'a str,
+        uses: i64,
+        savings: StartupSavings,
+        /// What every session pays for having it installed.
+        startup_tokens: Option<u64>,
+        /// What its body costs when loaded — an invocation cost, never a saving.
+        on_demand_tokens: Option<u64>,
+    }
+
+    let mut found: Vec<Row> = Vec::new();
+    // PBI 07: no silent coercion — an unparsable label is warned + counted,
+    // never a known mode. Unknown rows are excluded from wedge routing:
+    // filing them under any default mode would misstate what removal saves.
+    let mut unknown_load_modes: Vec<String> = Vec::new();
+    for entry in &catalog {
+        let measurable = is_usage_measurable(&entry.kind);
+        let load_mode = match LoadMode::from_label(&entry.load_mode) {
+            Some(load_mode) => load_mode,
+            None => {
+                unknown_load_modes.push(entry.load_mode.clone());
+                continue;
+            }
+        };
+        let static_tokens = entry.static_tokens.map(|tokens| tokens as u64);
+        let startup_tokens = entry.startup_tokens.map(|tokens| tokens as u64);
+        if let Some(wedge) = classify_wedge(
+            measurable,
+            load_mode,
+            static_tokens,
+            entry.uses,
+            HEAVY_TOKENS,
+        ) {
+            found.push(Row {
+                wedge,
+                kind: &entry.kind,
+                id: &entry.id,
+                scope: &entry.scope,
+                project: &entry.project,
+                uses: entry.uses,
+                savings: startup_savings(load_mode, startup_tokens),
+                startup_tokens,
+                on_demand_tokens: on_demand_tokens(load_mode, static_tokens),
+            });
+        }
+    }
+
+    found.sort_by_key(|row| savings_rank(row.savings));
+
+    // Warn + count: the unknown rows above never reach a wedge, so the count
+    // is the visibility — stderr keeps it out of piped output (`usage` view
+    // warns the same way; see `missing_split_warning`).
+    if !unknown_load_modes.is_empty() {
+        let mut labels = unknown_load_modes.clone();
+        labels.sort();
+        labels.dedup();
+        eprintln!(
+            "{}",
+            Style::stderr().warn(&format!(
+                "warning: {} catalog row(s) with unknown load_mode ({}) excluded from wedge routing",
+                unknown_load_modes.len(),
+                labels.join(", ")
+            ))
+        );
+    }
+
+    if format == Format::Json {
+        let wedges: Vec<serde_json::Value> = found
+            .iter()
+            .map(|row| {
+                let (savings, savings_tokens) = match row.savings {
+                    StartupSavings::Tokens(n) => ("tokens", Some(n)),
+                    StartupSavings::UnknownSchema => ("unknown_schema", None),
+                    StartupSavings::Declutter => ("declutter", None),
+                };
+                serde_json::json!({
+                    "wedge": row.wedge.label(),
+                    "kind": row.kind,
+                    "id": row.id,
+                    "scope": row.scope,
+                    "project": if row.project.is_empty() { None } else { Some(row.project) },
+                    "savings": savings,
+                    "savings_tokens": savings_tokens,
+                    "startup_tokens": row.startup_tokens,
+                    "on_demand_tokens": row.on_demand_tokens,
+                    "uses": if is_usage_measurable(row.kind) { Some(row.uses) } else { None },
+                    "suggestion": savings_suggestion(row.wedge, row.savings, row.on_demand_tokens),
+                })
+            })
+            .collect();
+        return emit_json(&with_window(
+            serde_json::json!({
+                "wedges": wedges,
+                "unknown_load_modes": {
+                    "count": unknown_load_modes.len(),
+                    "labels": unknown_load_modes,
+                },
+            }),
+            window,
+        ));
+    }
+    if found.is_empty() {
+        println!(
+            "{}",
+            empty_in_window(
+                "nothing wasteful found — run `saniwalens analyze` first",
+                window
+            )
+        );
+        return Ok(());
+    }
+
+    preamble(
+        format,
+        &framed(
+            "Concrete cleanup opportunities in your config, ranked by what removing each\n\
+             one actually saves at session start. A \"~\" figure is declutter-only — just\n\
+             the description is loaded at startup; the body costs nothing until invoked.",
+            window,
+        ),
+    );
+    let rows: Vec<Vec<String>> = found
+        .iter()
+        .map(|row| {
+            let uses_cell = if is_usage_measurable(row.kind) {
+                row.uses.to_string()
+            } else {
+                "-".to_string()
+            };
+            vec![
+                row.wedge.label().to_string(),
+                format!("{}/{}", row.kind, row.id),
+                scope_cell(row.scope, row.project),
+                savings_cell(row.savings, row.startup_tokens),
+                uses_cell,
+                savings_suggestion(row.wedge, row.savings, row.on_demand_tokens),
+            ]
+        })
+        .collect();
+    render(
+        &[
+            "problem",
+            "surface",
+            "scope",
+            "saves@start",
+            "uses",
+            "suggestion",
+        ],
+        &[
+            Align::Left,
+            Align::Left,
+            Align::Left,
+            Align::Right,
+            Align::Right,
+            Align::Left,
+        ],
+        &rows,
+        format,
+    );
+    Ok(())
+}
+
+/// View-only (waste view): sort key — real measured savings first (largest
+/// first), then unmeasured MCP schemas, then declutter-only.
+fn savings_rank(savings: StartupSavings) -> (u8, std::cmp::Reverse<u64>) {
+    match savings {
+        StartupSavings::Tokens(n) => (0, std::cmp::Reverse(n)),
+        StartupSavings::UnknownSchema => (1, std::cmp::Reverse(0)),
+        StartupSavings::Declutter => (2, std::cmp::Reverse(0)),
+    }
+}

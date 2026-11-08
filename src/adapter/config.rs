@@ -294,20 +294,61 @@ pub fn add_skill_site(
 
 /// Read every `*.md` rule (recursively, so category subdirs are included) into
 /// surfaces. The id is the path relative to the rules dir, without `.md`.
+/// Symlink cycles are skipped with a warning and recursion is depth-bounded so
+/// a hostile or accidental layout cannot exhaust the stack.
 pub fn read_rule_surfaces(rules_dir: &Path, scope: &Scope) -> Vec<Surface> {
     let mut surfaces = Vec::new();
-    collect_rule_surfaces(rules_dir, rules_dir, scope, &mut surfaces);
+    let mut visited = HashSet::new();
+    collect_rule_surfaces(rules_dir, rules_dir, scope, 0, &mut visited, &mut surfaces);
     surfaces
 }
 
-fn collect_rule_surfaces(root: &Path, dir: &Path, scope: &Scope, out: &mut Vec<Surface>) {
-    let Ok(entries) = fs::read_dir(dir) else {
+/// How deep rule recursion goes below the rules dir. This is deliberately
+/// separate from [`MAX_IMPORT_HOPS`]: imports are a hop graph over `@path`
+/// references while this is directory nesting, so one limit must never gate
+/// the other.
+const MAX_RULE_DEPTH: usize = 32;
+
+fn collect_rule_surfaces(
+    root: &Path,
+    dir: &Path,
+    scope: &Scope,
+    depth: usize,
+    visited: &mut HashSet<PathBuf>,
+    out: &mut Vec<Surface>,
+) {
+    if depth > MAX_RULE_DEPTH {
+        eprintln!(
+            "warning: rule directory depth exceeds {MAX_RULE_DEPTH} at {} — deeper rules stay uncatalogued",
+            dir.display()
+        );
         return;
+    }
+    // Canonicalize so a symlinked dir resolves to the directory it names: a
+    // cycle then maps onto an already-visited entry instead of recursing.
+    let canonical = fs::canonicalize(dir).unwrap_or_else(|_| dir.to_path_buf());
+    if !visited.insert(canonical) {
+        eprintln!(
+            "warning: skipping cyclic rule directory {} — already visited",
+            dir.display()
+        );
+        return;
+    }
+    let entries = match fs::read_dir(dir) {
+        Ok(entries) => entries.flatten().collect::<Vec<_>>(),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return,
+        Err(e) => {
+            eprintln!(
+                "warning: could not read {}: {e} — config here stays uncatalogued",
+                dir.display()
+            );
+            return;
+        }
     };
-    for entry in entries.flatten() {
+    for entry in entries {
         let path = entry.path();
         if path.is_dir() {
-            collect_rule_surfaces(root, &path, scope, out);
+            collect_rule_surfaces(root, &path, scope, depth + 1, visited, out);
         } else if path.extension().is_some_and(|ext| ext == "md")
             && let Ok(content) = fs::read_to_string(&path)
         {
@@ -1035,6 +1076,104 @@ mod tests {
         assert_eq!(
             agent_surface("explorer", "/c/explorer.md", "x", &Scope::Global).load_mode,
             LoadMode::StartupDescription
+        );
+    }
+
+    #[test]
+    fn nested_rules_in_subdirs_are_all_catalogued() {
+        let dir = scratch_dir("rules-nested");
+        fs::create_dir_all(dir.join("cat-a/nested")).unwrap();
+        fs::create_dir_all(dir.join("cat-b")).unwrap();
+        fs::write(dir.join("top.md"), "# top").unwrap();
+        fs::write(dir.join("cat-a/one.md"), "# one").unwrap();
+        fs::write(dir.join("cat-a/nested/two.md"), "# two").unwrap();
+        fs::write(dir.join("cat-b/three.md"), "# three").unwrap();
+
+        let surfaces = read_rule_surfaces(&dir, &Scope::Global);
+        fs::remove_dir_all(&dir).ok();
+
+        let mut ids: Vec<_> = surfaces.iter().map(|s| s.id.as_str()).collect();
+        ids.sort();
+        assert_eq!(ids, ["cat-a/nested/two", "cat-a/one", "cat-b/three", "top"]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_cyclic_rule_symlink_is_skipped_and_analysis_finishes() {
+        let dir = scratch_dir("rules-cycle");
+        fs::create_dir_all(dir.join("real")).unwrap();
+        fs::write(dir.join("real/tdd.md"), "# tdd").unwrap();
+        std::os::unix::fs::symlink(dir.join("real"), dir.join("link-back")).unwrap();
+        std::os::unix::fs::symlink(dir.clone(), dir.join("real/loop")).unwrap();
+
+        let surfaces = read_rule_surfaces(&dir, &Scope::Global);
+        fs::remove_dir_all(&dir).ok();
+
+        // Terminating at all is the regression: before the visited-set this
+        // recursed until the stack gave out.
+        assert!(surfaces.iter().any(|s| s.id == "real/tdd"));
+    }
+
+    #[test]
+    fn rules_beyond_the_depth_limit_are_skipped_and_analysis_finishes() {
+        let dir = scratch_dir("rules-depth");
+        let mut here = dir.clone();
+        fs::write(here.join("level-0.md"), "# shallow").unwrap();
+        for n in 1..=(MAX_RULE_DEPTH + 5) {
+            here = here.join(format!("d{n}"));
+            fs::create_dir_all(&here).unwrap();
+            fs::write(here.join(format!("level-{n}.md")), "# deep").unwrap();
+        }
+
+        let surfaces = read_rule_surfaces(&dir, &Scope::Global);
+        fs::remove_dir_all(&dir).ok();
+
+        assert!(surfaces.iter().any(|s| s.id == "level-0"));
+        assert!(
+            surfaces.len() <= MAX_RULE_DEPTH + 1,
+            "deeper levels stay uncatalogued, got {}",
+            surfaces.len()
+        );
+    }
+
+    #[test]
+    fn rule_depth_limit_is_independent_of_import_hops() {
+        // The import graph cuts after MAX_IMPORT_HOPS; nesting one level
+        // deeper must still read as rules, proving the rule walk does not
+        // reuse the import limit. (A constant-vs-constant assert would say
+        // the same thing, but clippy flags it; the count below is the
+        // proof: it only holds when the rule bound sits beyond the hop
+        // limit.)
+        let dir = scratch_dir("rules-hops-independent");
+        let mut here = dir.clone();
+        for n in 0..=MAX_IMPORT_HOPS {
+            here = here.join(format!("d{n}"));
+            fs::create_dir_all(&here).unwrap();
+            fs::write(here.join("rule.md"), "# rule").unwrap();
+        }
+
+        let surfaces = read_rule_surfaces(&dir, &Scope::Global);
+        fs::remove_dir_all(&dir).ok();
+
+        assert_eq!(surfaces.len(), MAX_IMPORT_HOPS + 1);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn project_surfaces_finish_with_a_cyclic_rule_layout() {
+        let root = scratch_dir("rules-project-cycle");
+        let rules = root.join(".claude/rules");
+        fs::create_dir_all(rules.join("real")).unwrap();
+        fs::write(rules.join("real/tdd.md"), "# tdd").unwrap();
+        std::os::unix::fs::symlink(rules.clone(), rules.join("real/loop")).unwrap();
+
+        let surfaces = read_project_surfaces(&root, "alpha", None);
+        fs::remove_dir_all(&root).ok();
+
+        assert!(
+            surfaces
+                .iter()
+                .any(|s| s.kind == "rule" && s.id == "real/tdd")
         );
     }
 }

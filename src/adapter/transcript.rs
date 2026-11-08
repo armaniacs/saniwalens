@@ -33,7 +33,7 @@ pub const CLAUDE_ANALYZER_META_KEY: &str = "analyzer_version";
 /// that changes no analysis should not force everyone through a full
 /// re-analyze. opencode and kilocode carry their own keys beside their own
 /// mappings (`adapter::opencode`, `adapter::kilocode`).
-pub const CLAUDE_ANALYZER_VERSION: &str = "6";
+pub const CLAUDE_ANALYZER_VERSION: &str = "7";
 
 /// response written as several lines is charged once (`assistant_records`).
 pub fn parse_session(jsonl: &str) -> Vec<Record> {

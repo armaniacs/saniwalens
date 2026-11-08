@@ -40,7 +40,7 @@ const UNKNOWN_MODEL: &str = "unknown";
 /// lives apart from the shared `CLAUDE_ANALYZER_VERSION` (`adapter::transcript`) on purpose:
 /// a kilocode-only change must never force other harnesses through a full
 /// re-analyze. Stored under its own `meta` key.
-pub const KILOCODE_ANALYZER_VERSION: &str = "3";
+pub const KILOCODE_ANALYZER_VERSION: &str = "4";
 
 /// The `meta` key holding the kilocode analysis semantics.
 pub const KILOCODE_ANALYZER_META_KEY: &str = "kilocode_analyzer_version";
@@ -612,6 +612,11 @@ pub fn read_project_surfaces(
 /// `base_dir` (the config file's directory at the global scope, the project
 /// root at the project scope); absolute paths pass through. A missing config,
 /// a missing key, or a non-array yields nothing.
+///
+/// Entries are confined to `base_dir`: the candidate is canonicalized (so
+/// `..` and symlinks resolve first) and skipped with a warning when it lands
+/// outside the root. An entry naming no existing file keeps the old behavior
+/// (nothing catalogued, no warning).
 pub(crate) fn read_kilo_instructions(
     config_path: &Path,
     base_dir: &Path,
@@ -627,6 +632,7 @@ pub(crate) fn read_kilo_instructions(
     let Some(entries) = value.get("instructions").and_then(Value::as_array) else {
         return Vec::new();
     };
+    let root = fs::canonicalize(base_dir).unwrap_or_else(|_| base_dir.to_path_buf());
     let files: Vec<(PathBuf, String)> = entries
         .iter()
         .filter_map(|entry| entry.as_str())
@@ -636,6 +642,16 @@ pub(crate) fn read_kilo_instructions(
             } else {
                 base_dir.join(entry)
             };
+            let Ok(resolved) = fs::canonicalize(&path) else {
+                return None;
+            };
+            if !resolved.starts_with(&root) {
+                eprintln!(
+                    "warning: skipping kilo.json instructions entry outside {}: {entry} — out-of-root files stay uncatalogued",
+                    root.display()
+                );
+                return None;
+            }
             let id = path.file_name()?.to_str()?.to_string();
             Some((path, id))
         })
@@ -916,6 +932,209 @@ mod tests {
         assert!(has("claude_md", "AGENTS.md"));
         assert!(has("claude_md", ".kilorules"));
         assert!(has("claude_md", "AGENTS.local.md"));
+    }
+
+    /// BDD: プロジェクト内の instructions エントリは従来通り取り込まれる。
+    #[test]
+    fn kilo_instructions_inside_root_are_loaded() {
+        let root = unique_dir("saniwalens-test-kilo-in-root");
+        std::fs::remove_dir_all(&root).ok();
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("kilo.json"), r#"{"instructions": ["local.md"]}"#).unwrap();
+        std::fs::write(root.join("local.md"), "local instructions").unwrap();
+
+        let surfaces = read_kilo_instructions(
+            &root.join("kilo.json"),
+            &root,
+            &Scope::Project("demo".to_string()),
+            None,
+        );
+        std::fs::remove_dir_all(&root).ok();
+
+        assert!(
+            surfaces
+                .iter()
+                .any(|s| s.kind == "claude_md" && s.id == "local.md")
+        );
+    }
+
+    /// BDD: プロジェクト外を指す instructions エントリは取り込まれず警告される
+    /// （絶対パスによる脱出）。
+    #[test]
+    fn kilo_instructions_absolute_escape_is_skipped() {
+        let root = unique_dir("saniwalens-test-kilo-abs-root");
+        let outside_dir = unique_dir("saniwalens-test-kilo-abs-outside");
+        std::fs::remove_dir_all(&root).ok();
+        std::fs::remove_dir_all(&outside_dir).ok();
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::create_dir_all(&outside_dir).unwrap();
+        let outside = outside_dir.join("secret.md");
+        std::fs::write(&outside, "host secret").unwrap();
+        std::fs::write(
+            root.join("kilo.json"),
+            serde_json::json!({"instructions": [outside.to_str().unwrap(), "local.md"]})
+                .to_string(),
+        )
+        .unwrap();
+        std::fs::write(root.join("local.md"), "local instructions").unwrap();
+
+        let surfaces = read_kilo_instructions(
+            &root.join("kilo.json"),
+            &root,
+            &Scope::Project("demo".to_string()),
+            None,
+        );
+        std::fs::remove_dir_all(&root).ok();
+        std::fs::remove_dir_all(&outside_dir).ok();
+
+        assert!(
+            surfaces
+                .iter()
+                .any(|s| s.kind == "claude_md" && s.id == "local.md")
+        );
+        assert!(
+            !surfaces
+                .iter()
+                .any(|s| s.config_path == outside.display().to_string()),
+            "out-of-root absolute entry must not be catalogued: {surfaces:?}"
+        );
+    }
+
+    /// BDD: 上位ディレクトリへの脱出を狙うエントリは取り込まれない
+    /// （相対 `..` による脱出）。
+    #[test]
+    fn kilo_instructions_dotdot_escape_is_skipped() {
+        let parent = unique_dir("saniwalens-test-kilo-dotdot");
+        let root = parent.join("proj");
+        std::fs::remove_dir_all(&parent).ok();
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(parent.join("escape.md"), "host secret").unwrap();
+        std::fs::write(
+            root.join("kilo.json"),
+            r#"{"instructions": ["../escape.md", "local.md"]}"#,
+        )
+        .unwrap();
+        std::fs::write(root.join("local.md"), "local instructions").unwrap();
+
+        let surfaces = read_kilo_instructions(
+            &root.join("kilo.json"),
+            &root,
+            &Scope::Project("demo".to_string()),
+            None,
+        );
+        std::fs::remove_dir_all(&parent).ok();
+
+        assert!(
+            surfaces
+                .iter()
+                .any(|s| s.kind == "claude_md" && s.id == "local.md")
+        );
+        assert!(
+            !surfaces.iter().any(|s| s.id == "escape.md"),
+            "dotdot escape must not be catalogued: {surfaces:?}"
+        );
+    }
+
+    /// BDD: シンボリックリンク越しの脱出は取り込まれない。
+    #[cfg(unix)]
+    #[test]
+    fn kilo_instructions_symlink_escape_is_skipped() {
+        let parent = unique_dir("saniwalens-test-kilo-symlink");
+        let root = parent.join("proj");
+        std::fs::remove_dir_all(&parent).ok();
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(parent.join("secret.md"), "host secret").unwrap();
+        std::os::unix::fs::symlink(parent.join("secret.md"), root.join("link.md")).unwrap();
+        std::fs::write(
+            root.join("kilo.json"),
+            r#"{"instructions": ["link.md", "local.md"]}"#,
+        )
+        .unwrap();
+        std::fs::write(root.join("local.md"), "local instructions").unwrap();
+
+        let surfaces = read_kilo_instructions(
+            &root.join("kilo.json"),
+            &root,
+            &Scope::Project("demo".to_string()),
+            None,
+        );
+        std::fs::remove_dir_all(&parent).ok();
+
+        assert!(
+            surfaces
+                .iter()
+                .any(|s| s.kind == "claude_md" && s.id == "local.md")
+        );
+        assert!(
+            !surfaces.iter().any(|s| s.id == "link.md"),
+            "symlink escape must not be catalogued: {surfaces:?}"
+        );
+    }
+
+    /// グローバルスコープでは解決起点（設定ディレクトリ）に閉じ込める。
+    #[test]
+    fn kilo_instructions_global_scope_confines_to_config_dir() {
+        let config_dir = unique_dir("saniwalens-test-kilo-global");
+        let outside_dir = unique_dir("saniwalens-test-kilo-global-outside");
+        std::fs::remove_dir_all(&config_dir).ok();
+        std::fs::remove_dir_all(&outside_dir).ok();
+        std::fs::create_dir_all(&config_dir).unwrap();
+        std::fs::create_dir_all(&outside_dir).unwrap();
+        let outside = outside_dir.join("secret.md");
+        std::fs::write(&outside, "host secret").unwrap();
+        std::fs::write(
+            config_dir.join("kilo.json"),
+            serde_json::json!({"instructions": [outside.to_str().unwrap(), "RTK.md"]}).to_string(),
+        )
+        .unwrap();
+        std::fs::write(config_dir.join("RTK.md"), "tooling guidance").unwrap();
+
+        let mut seen = HashSet::new();
+        let surfaces = read_global_surfaces(&config_dir, None, &mut seen);
+        std::fs::remove_dir_all(&config_dir).ok();
+        std::fs::remove_dir_all(&outside_dir).ok();
+
+        assert!(
+            surfaces
+                .iter()
+                .any(|s| s.kind == "claude_md" && s.id == "RTK.md")
+        );
+        assert!(
+            !surfaces
+                .iter()
+                .any(|s| s.config_path == outside.display().to_string()),
+            "out-of-root global entry must not be catalogued: {surfaces:?}"
+        );
+    }
+
+    /// 非文字列エントリ・存在しないエントリの既存ふるまいは変わらない
+    ///（何も載せない）。
+    #[test]
+    fn kilo_instructions_ignores_non_string_and_missing_entries() {
+        let root = unique_dir("saniwalens-test-kilo-misc");
+        std::fs::remove_dir_all(&root).ok();
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(
+            root.join("kilo.json"),
+            r#"{"instructions": [42, null, {"p": "x"}, "missing.md", "local.md"]}"#,
+        )
+        .unwrap();
+        std::fs::write(root.join("local.md"), "local instructions").unwrap();
+
+        let surfaces = read_kilo_instructions(
+            &root.join("kilo.json"),
+            &root,
+            &Scope::Project("demo".to_string()),
+            None,
+        );
+        std::fs::remove_dir_all(&root).ok();
+
+        assert_eq!(surfaces.len(), 1);
+        assert!(
+            surfaces
+                .iter()
+                .any(|s| s.kind == "claude_md" && s.id == "local.md")
+        );
     }
 
     fn conversation(messages: Vec<serde_json::Value>) -> String {
@@ -1652,5 +1871,129 @@ mod tests {
             json!({"command": "cargo test"}),
         )]);
         assert_eq!(estimate_root(&conversation), None);
+    }
+
+    // ---- PBI 10: the kilocode skip rides on file_fingerprint's granularity ----
+
+    /// Stamp `path` with an exact mtime — the production equivalent is the
+    /// filesystem clock moving while a task file is edited.
+    fn set_mtime(path: &std::path::Path, mtime: std::time::SystemTime) {
+        std::fs::File::options()
+            .write(true)
+            .open(path)
+            .unwrap()
+            .set_modified(mtime)
+            .unwrap();
+    }
+
+    #[test]
+    fn task_fingerprint_moves_with_a_same_second_same_size_edit() {
+        // `task_fingerprint` folds the two task files' `file_fingerprint`s, so
+        // the PBI-10 stale skip would pin kilocode tasks too: a sub-second
+        // move in either file must move the fold. Synthetic temp files only —
+        // never real task data (`.claude/rules/session-data-privacy.md`).
+        let dir = unique_dir("saniwalens-task-fingerprint-test");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let conversation = dir.join("api_conversation_history.json");
+        let ui = dir.join("ui_messages.json");
+        std::fs::write(&conversation, r#"[{"role":"user"}]"#).unwrap();
+        std::fs::write(&ui, "[]").unwrap();
+        let base = std::time::SystemTime::UNIX_EPOCH
+            + std::time::Duration::new(1_700_000_000, 100_000_000);
+        set_mtime(&conversation, base);
+        set_mtime(&ui, base);
+        let before = task_fingerprint(&conversation, &ui).unwrap();
+        // Same sizes, same whole second, one file's mtime moved sub-second.
+        std::fs::write(&conversation, r#"[{"role":"user"}]"#).unwrap();
+        set_mtime(&conversation, base + std::time::Duration::from_millis(500));
+        let after = task_fingerprint(&conversation, &ui).unwrap();
+        assert_ne!(
+            before, after,
+            "a same-second edit in either task file must move the fold"
+        );
+        // Untouched, the fold is stable so the skip still fires.
+        assert_eq!(after, task_fingerprint(&conversation, &ui).unwrap());
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_same_second_same_size_edit_is_reingested_while_unchanged_is_skipped() {
+        // The incremental contract for the kilocode skip path
+        // (`pbi/2026-11-08-10-fix-fingerprint-stale-skip.md`): an untouched
+        // task stays skipped, while a same-second, same-size edit in one of
+        // its two files is re-ingested and the session row reflects the new
+        // content. No other test sets `XDG_CONFIG_HOME`, so the env read has
+        // no parallel reader to race with.
+        let dir = unique_dir("saniwalens-kilo-incremental-test");
+        let _ = std::fs::remove_dir_all(&dir);
+        let task = dir.join("tasks").join("task-1");
+        std::fs::create_dir_all(&task).unwrap();
+        let conversation_path = task.join("api_conversation_history.json");
+        let ui_path = task.join("ui_messages.json");
+        // A human turn plus an assistant message: the assistant record gives
+        // the session an observable start. The v2 timestamps keep the same
+        // digit count, so the edit keeps the byte size. The usage row opens
+        // the assistant message's window (the `parse_session` join shape its
+        // own tests drive); the ui file itself is never edited.
+        std::fs::write(
+            &conversation_path,
+            r#"[{"role":"user","ts":1700000000000,"content":[{"type":"text","text":"aaa"}]},{"role":"assistant","ts":1700000000000,"content":[{"type":"text","text":"ok"}]}]"#,
+        )
+        .unwrap();
+        std::fs::write(
+            &ui_path,
+            ui_file(vec![usage_row(
+                1700000000000,
+                12_000,
+                400,
+                9_000,
+                800,
+                false,
+            )]),
+        )
+        .unwrap();
+        // Pin both pre-ingest mtimes inside one whole second so the later
+        // edit deterministically lands in that same second.
+        let base = std::time::SystemTime::UNIX_EPOCH
+            + std::time::Duration::new(1_700_000_100, 100_000_000);
+        set_mtime(&conversation_path, base);
+        set_mtime(&ui_path, base);
+        unsafe { std::env::set_var("XDG_CONFIG_HOME", dir.join("config-home")) };
+
+        let db = dir.join("store.db");
+        let tasks = dir.join("tasks");
+        let first = analyze(Some(tasks.clone()), &db).unwrap();
+        assert_eq!((first.sessions, first.skipped), (1, 0));
+
+        // Untouched second run: the fast path still skips.
+        let second = analyze(Some(tasks.clone()), &db).unwrap();
+        assert_eq!((second.sessions, second.skipped), (0, 1));
+
+        // Same-size rewrite (timestamps +5000 ms, same digit count) stamped
+        // inside the same whole second: must be re-ingested, not skipped.
+        let before = std::fs::read_to_string(&conversation_path).unwrap();
+        let edited = before.replace("1700000000000", "1700000005000");
+        assert_eq!(edited.len(), before.len(), "the edit must keep the size");
+        std::fs::write(&conversation_path, edited).unwrap();
+        set_mtime(
+            &conversation_path,
+            base + std::time::Duration::from_millis(500),
+        );
+
+        let third = analyze(Some(tasks.clone()), &db).unwrap();
+        assert_eq!(
+            (third.sessions, third.skipped),
+            (1, 0),
+            "a same-second same-size edit must be re-ingested"
+        );
+
+        // The session row carries the new start, not the stale first pass.
+        let store = Store::open(&db, OpenMode::ReadOnly).unwrap();
+        let (_, rows) = store.query("SELECT started_at FROM sessions").unwrap();
+        assert_eq!(rows, vec![vec!["2023-11-14T22:13:25+00:00".to_string()]]);
+
+        unsafe { std::env::remove_var("XDG_CONFIG_HOME") };
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }

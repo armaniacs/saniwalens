@@ -157,11 +157,14 @@ The headless terminal stays quiet: saniwalens reads the JSON event stream line
 by line and surfaces only what the agent says ― text parts (narration, then
 the plan) on stdout, one-line tool markers on stderr ― while every raw line
 and the child's stderr go to a private (`0600`) log file whose path is
-printed up front. Rendering is lenient (the upstream event shapes are
+printed up front. A successful run removes the log (the raw stream may echo
+secrets); `SANIWALENS_KEEP_RUN_LOG=1` keeps it for post-mortem inspection.
+Rendering is lenient (the upstream event shapes are
 unversioned): a line with no recognizable text stays in the log, and a run
 that renders nothing readable says so instead of leaving silence. Every exit
 from the run ― success, a failed read, a failed spawn, or a failed wait ―
-stops the beat and reaps the child; a failure is reported with the raw log's
+stops the beat and reaps the child; a failure keeps the log and is reported
+with the raw log's
 path so the full output is still reachable (`cli/headless.rs`).
 `--timeout <DURATION>` bounds the wait; on expiry the child is killed and reaped
 and the error names the raw log. A grandchild that outlives the direct child can

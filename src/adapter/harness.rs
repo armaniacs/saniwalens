@@ -542,9 +542,14 @@ pub(crate) fn home_dir() -> Option<&'static str> {
     .as_deref()
 }
 
-/// A file's `(mtime epoch secs, size)` — the cheap change detector for
+/// A file's `(mtime epoch nanos, size)` — the cheap change detector for
 /// incremental ingest. `None` when the file cannot be stat'ed (it is then
 /// ingested unconditionally and not recorded).
+///
+/// Nanosecond granularity: whole-second truncation made a same-second,
+/// same-size edit invisible, so the transcript was skipped as unchanged until
+/// something else moved the fingerprint (`docs/specs/storage.md`). Epoch
+/// nanos fit in an `i64` until the year 2262.
 pub(crate) fn file_fingerprint(path: &Path) -> Option<(i64, i64)> {
     let meta = fs::metadata(path).ok()?;
     let mtime = meta
@@ -552,7 +557,7 @@ pub(crate) fn file_fingerprint(path: &Path) -> Option<(i64, i64)> {
         .ok()?
         .duration_since(std::time::UNIX_EPOCH)
         .ok()?
-        .as_secs() as i64;
+        .as_nanos() as i64;
     Some((mtime, meta.len() as i64))
 }
 #[cfg(test)]
@@ -827,5 +832,86 @@ mod tests {
         assert_eq!(surfaces.len(), 1);
         assert_eq!(surfaces[0].scope, Scope::Project("a".to_string()));
         std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    // ---- PBI 10: ingest fingerprints distinguish sub-second edits ----
+
+    /// Stamp `path` with an exact mtime — the production equivalent is the
+    /// filesystem clock moving while a transcript is edited.
+    fn set_mtime(path: &Path, mtime: std::time::SystemTime) {
+        std::fs::File::options()
+            .write(true)
+            .open(path)
+            .unwrap()
+            .set_modified(mtime)
+            .unwrap();
+    }
+
+    fn fingerprint_fixture(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "saniwalens-fingerprint-test-{name}-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn a_same_second_same_size_edit_changes_the_fingerprint() {
+        // Regression pin for the stale skip: whole-second truncation made an
+        // edit within the same second invisible when the size did not move,
+        // so the transcript was skipped until something else moved the
+        // fingerprint (`pbi/2026-11-08-10-fix-fingerprint-stale-skip.md`).
+        // Synthetic temp files only — never a real transcript
+        // (`.claude/rules/session-data-privacy.md`).
+        let dir = fingerprint_fixture("same-second");
+        let path = dir.join("transcript.jsonl");
+        std::fs::write(&path, "aaaa").unwrap();
+        let base = std::time::SystemTime::UNIX_EPOCH
+            + std::time::Duration::new(1_700_000_000, 100_000_000);
+        set_mtime(&path, base);
+        let before = file_fingerprint(&path).unwrap();
+        // Same size, same whole second, sub-second mtime moved.
+        std::fs::write(&path, "bbbb").unwrap();
+        set_mtime(&path, base + std::time::Duration::from_millis(500));
+        let after = file_fingerprint(&path).unwrap();
+        assert_ne!(
+            before, after,
+            "a same-second same-size edit must move the fingerprint"
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn an_untouched_file_keeps_its_fingerprint() {
+        // The fast incremental path depends on stability: an unchanged file
+        // must fingerprint identically so the skip still fires.
+        let dir = fingerprint_fixture("untouched");
+        let path = dir.join("transcript.jsonl");
+        std::fs::write(&path, "aaaa").unwrap();
+        let stamp = std::time::SystemTime::UNIX_EPOCH
+            + std::time::Duration::new(1_700_000_000, 100_000_000);
+        set_mtime(&path, stamp);
+        assert_eq!(
+            file_fingerprint(&path),
+            file_fingerprint(&path),
+            "an unchanged file must keep its fingerprint"
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn an_unstattable_file_has_no_fingerprint() {
+        // A file that cannot be stat'ed is ingested unconditionally and never
+        // recorded — pinning the `None` contract the skip relies on.
+        let missing = std::env::temp_dir().join(format!(
+            "saniwalens-fingerprint-test-missing-{}-{:?}.jsonl",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let _ = std::fs::remove_file(&missing);
+        assert_eq!(file_fingerprint(&missing), None);
     }
 }
