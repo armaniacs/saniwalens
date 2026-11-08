@@ -28,6 +28,7 @@ fn rule(id: &str, globs: &[&str]) -> Surface {
         startup_tokens: Some(0),
         load_mode: LoadMode::PathConditional,
         paths: globs.iter().map(|g| g.to_string()).collect(),
+        description: None,
     }
 }
 
