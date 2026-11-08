@@ -1,0 +1,26 @@
+{
+  "surfaces": [
+    {
+      "id": "idle-skill",
+      "kind": "skill",
+      "load_mode": "on_demand",
+      "project": null,
+      "scope": "global",
+      "startup_tokens": 100,
+      "static_tokens": 500,
+      "status": "unused",
+      "uses": 0
+    },
+    {
+      "id": "used-skill",
+      "kind": "skill",
+      "load_mode": "on_demand",
+      "project": null,
+      "scope": "global",
+      "startup_tokens": 100,
+      "static_tokens": 500,
+      "status": "",
+      "uses": 1
+    }
+  ]
+}

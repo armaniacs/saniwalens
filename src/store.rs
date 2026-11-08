@@ -1491,10 +1491,12 @@ impl Store {
         let (sfilter, sbinds) = range_clause_utc_text(range, "s.started_at");
         let (efilter, ebinds) = range_clause(range, "e.started_epoch");
         // Two bind types (text bounds, epoch bounds): box them into values.
-        let binds: Vec<rusqlite::types::Value> = sbinds
+        // Order follows the SQL text: the JOIN's epoch filter precedes the
+        // WHERE's text filter, so epoch binds come first.
+        let binds: Vec<rusqlite::types::Value> = ebinds
             .into_iter()
             .map(rusqlite::types::Value::from)
-            .chain(ebinds.into_iter().map(rusqlite::types::Value::from))
+            .chain(sbinds.into_iter().map(rusqlite::types::Value::from))
             .collect();
         let mut stmt = self.conn.prepare(&format!(
             "SELECT s.id, s.project, s.slug, s.started_at,
@@ -3568,6 +3570,47 @@ mod tests {
         assert_eq!(rows[1].id, "b1");
         assert_eq!(rows[1].out_tokens, 0);
         assert_eq!(rows[1].friction, 0);
+    }
+
+    #[test]
+    fn session_breakdown_window_keeps_matching_sessions() {
+        // Bind-order regression: the JOIN's epoch binds precede the WHERE's
+        // text binds in the SQL text, so they must bind first. Swapped order
+        // silently returned zero rows under any window (found during PBI C4).
+        let mut store = Store::in_memory().unwrap();
+        let meta = session("a1");
+        store
+            .ingest(
+                IngestBatch::new(&meta, &[span("git-commit", 100, 0, 60.0)], &[]).tool_errors(&[(
+                    1_700_000_100_000,
+                    "timeout",
+                    "t",
+                    "Bash",
+                    "sleep 9",
+                )]),
+            )
+            .unwrap();
+        let meta = session("b1");
+        store.ingest(IngestBatch::new(&meta, &[], &[])).unwrap();
+
+        // The span's epoch (1_700_000_000s) inside the window: the costed
+        // session matches with its tokens and friction intact.
+        let window = TimeRange {
+            start: Some(1_699_999_000),
+            end: Some(1_700_001_000),
+        };
+        let rows = store.session_breakdown(window).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].id, "a1");
+        assert_eq!(rows[0].out_tokens, 100);
+        assert_eq!(rows[0].friction, 1);
+
+        // A window with nothing in it reports nothing — never a silent zero.
+        let outside = TimeRange {
+            start: Some(1_600_000_000),
+            end: Some(1_600_001_000),
+        };
+        assert!(store.session_breakdown(outside).unwrap().is_empty());
     }
 
     #[test]

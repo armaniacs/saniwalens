@@ -14,7 +14,7 @@ use crate::core::trend::{
 };
 use crate::session::{Session, Style};
 
-use super::super::{Align, Format, emit_json, framed, note, preamble, render};
+use super::super::{Align, Format, TableSpec, ViewCtx, framed, note, render_view};
 
 /// One direction of a two-window comparison. `Unavailable` is 比較不能: no
 /// comparison was made — that row's previous side has no baseline, or the
@@ -639,18 +639,12 @@ fn eprint_trend_windows(pair: WindowPair) {
 /// A trend section: its label and table together — omitted entirely when the
 /// section has no rows, so markdown never shows bare headers (the usage
 /// view's convention: a section with no rows is omitted, not rendered empty).
-fn trend_table(
-    label: &str,
-    headers: &[&str],
-    aligns: &[Align],
-    rows: &[Vec<String>],
-    format: Format,
-) {
-    if rows.is_empty() {
+fn trend_table_spec(label: &str, spec: &TableSpec<'_>, format: Format) {
+    if spec.rows.is_empty() {
         return;
     }
     trend_section(label);
-    render(headers, aligns, rows, format);
+    spec.render(format);
 }
 
 /// A section label between a trend report's tables — printed in table and
@@ -670,97 +664,98 @@ pub(crate) fn trend(sess: &Session, pair: WindowPair, format: Format) -> Result<
     eprint_trend_windows(pair);
     let agg = store.trend_aggregates(pair)?;
     let payload = trend_payload(pair, &agg);
-    if format == Format::Json {
-        return emit_json(&payload.json());
-    }
     // Nothing in either window *and* no session on either axis: the store
     // holds nothing to compare — unlike an empty previous window, this is
     // the analyze hint's case. The payload carries both facts.
-    if payload.kinds.is_empty() && payload.sessions.previous == 0 && payload.sessions.current == 0 {
-        println!("no usage in either comparison window — run `saniwalens analyze` first");
-        return Ok(());
-    }
-    let kind_rows = trend_kind_rows(&payload);
+    let empty_msg = (payload.kinds.is_empty()
+        && payload.sessions.previous == 0
+        && payload.sessions.current == 0)
+        .then_some("no usage in either comparison window — run `saniwalens analyze` first");
     // The reason text's condition: some rendered metric has no baseline.
     // `has_no_baseline` is the payload's own judgment of the n/a rows, so the
     // preamble never states a reason the report cannot show — and an
     // inapplicable metric (omitted from the table) never turns it on.
-    preamble(
-        format,
-        &framed(
-            &trend_preamble(pair, payload.has_no_baseline()),
-            pair.current,
-        ),
+    let preamble_text = framed(
+        &trend_preamble(pair, payload.has_no_baseline()),
+        pair.current,
     );
-    if !kind_rows.is_empty() {
-        render(
-            &[
-                "kind",
-                "metric",
-                "previous",
-                "current",
-                "delta",
-                "direction",
-            ],
-            &[
-                Align::Left,
-                Align::Left,
-                Align::Right,
-                Align::Right,
-                Align::Right,
-                Align::Left,
-            ],
-            &kind_rows,
-            format,
-        );
-    }
-    trend_table(
-        "Skills (largest movement first):",
-        &["skill", "previous", "current", "delta", "direction"],
-        &[
+    let kinds_table = TableSpec {
+        headers: &[
+            "kind",
+            "metric",
+            "previous",
+            "current",
+            "delta",
+            "direction",
+        ],
+        aligns: &[
+            Align::Left,
             Align::Left,
             Align::Right,
             Align::Right,
             Align::Right,
             Align::Left,
         ],
-        &trend_skill_rows(&payload),
-        format,
-    );
-    trend_table(
-        "Surfaces (largest movement first):",
-        &["surface", "previous", "current", "delta", "direction"],
-        &[
+        rows: trend_kind_rows(&payload),
+    };
+    let skills_table = TableSpec {
+        headers: &["skill", "previous", "current", "delta", "direction"],
+        aligns: &[
             Align::Left,
             Align::Right,
             Align::Right,
             Align::Right,
             Align::Left,
         ],
-        &trend_surface_rows(&payload),
-        format,
-    );
-    trend_table(
-        "Totals:",
-        &["total", "previous", "current", "delta", "direction"],
-        &[
+        rows: trend_skill_rows(&payload),
+    };
+    let surfaces_table = TableSpec {
+        headers: &["surface", "previous", "current", "delta", "direction"],
+        aligns: &[
             Align::Left,
             Align::Right,
             Align::Right,
             Align::Right,
             Align::Left,
         ],
-        &trend_total_rows(&payload),
-        format,
-    );
-    if payload.previous_events_are_empty() {
-        note(&format!(
-            "the previous window ({}) holds no events in this store — comparisons\n\
-             marked n/a have nothing to compare against, so no change is claimed for them",
-            period::display(pair.previous, JST_OFFSET_SECS)
-        ));
-    }
-    Ok(())
+        rows: trend_surface_rows(&payload),
+    };
+    let totals_table = TableSpec {
+        headers: &["total", "previous", "current", "delta", "direction"],
+        aligns: &[
+            Align::Left,
+            Align::Right,
+            Align::Right,
+            Align::Right,
+            Align::Left,
+        ],
+        rows: trend_total_rows(&payload),
+    };
+    render_view(
+        ViewCtx::pair(format),
+        payload.json(),
+        empty_msg,
+        &preamble_text,
+        |format| {
+            if !kinds_table.rows.is_empty() {
+                kinds_table.render(format);
+            }
+            trend_table_spec("Skills (largest movement first):", &skills_table, format);
+            trend_table_spec(
+                "Surfaces (largest movement first):",
+                &surfaces_table,
+                format,
+            );
+            trend_table_spec("Totals:", &totals_table, format);
+            if payload.previous_events_are_empty() {
+                note(&format!(
+                    "the previous window ({}) holds no events in this store — comparisons\n\
+                     marked n/a have nothing to compare against, so no change is claimed for them",
+                    period::display(pair.previous, JST_OFFSET_SECS)
+                ));
+            }
+        },
+    )
 }
 
 #[cfg(test)]

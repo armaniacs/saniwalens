@@ -1,0 +1,26 @@
+{
+  "sessions": [
+    {
+      "duration_sec": 200,
+      "friction": 2,
+      "out_tokens": 130,
+      "project": "demo",
+      "session": "s1",
+      "slug": "demo",
+      "started_at": "2023-11-14T22:13:20+00:00"
+    },
+    {
+      "duration_sec": 0,
+      "friction": 0,
+      "out_tokens": 50,
+      "project": "demo",
+      "session": "s2",
+      "slug": "demo",
+      "started_at": "2023-11-14T22:13:20+00:00"
+    }
+  ],
+  "window": {
+    "since": "2023-11-01T00:00:00+09:00",
+    "until": "2023-11-30T23:59:59+09:00"
+  }
+}

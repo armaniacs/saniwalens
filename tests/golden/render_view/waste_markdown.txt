@@ -1,0 +1,4 @@
+| problem | surface | scope | saves@start | uses | suggestion |
+| --- | --- | --- | --- | --- | --- |
+| UNUSED | skill/idle-skill | global | ~100/sess | 0 | declutter only: body is 500 tok when invoked, ~no startup saving |
+| NEVER-FIRES | rule/idle-rule | global | ~0/sess | - | never fired in window [docs/**] — narrow its paths or delete its 1200-token body |

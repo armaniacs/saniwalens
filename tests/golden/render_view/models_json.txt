@@ -1,0 +1,26 @@
+{
+  "main": [
+    {
+      "events": 1,
+      "model": "opus",
+      "out_tokens": 100
+    }
+  ],
+  "subagents": [
+    {
+      "model": "opus",
+      "out_tokens": 100,
+      "runs": 1
+    },
+    {
+      "model": "sonnet",
+      "out_tokens": 40,
+      "runs": 1
+    },
+    {
+      "model": "unknown",
+      "out_tokens": 10,
+      "runs": 1
+    }
+  ]
+}

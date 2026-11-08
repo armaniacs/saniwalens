@@ -1,0 +1,22 @@
+{
+  "behaviors": [
+    {
+      "behavior": "instruct",
+      "count": 5,
+      "share_pct": 63
+    },
+    {
+      "behavior": "steer",
+      "count": 2,
+      "share_pct": 25
+    },
+    {
+      "behavior": "correct",
+      "count": 1,
+      "share_pct": 13
+    }
+  ],
+  "candidates": [],
+  "pruned_prompts": 8,
+  "total": 8
+}

@@ -1,0 +1,16 @@
+Where the tokens went, by model: main-thread usage first, then the
+subagent runs grouped by their own model. An `unknown` row is usage
+with no recorded model — bundled, never dropped.
+
+tokens: main-thread 100, subagents 150 — by model, costliest first
+note: opus holds 80% of this window's output tokens
+
+model  events  out tokens
+-------------------------
+opus        1         100
+
+model    runs  out tokens
+-------------------------
+opus        1         100
+sonnet      1          40
+unknown     1          10

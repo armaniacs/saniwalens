@@ -9,9 +9,7 @@ use crate::core::period::TimeRange;
 use crate::session::Session;
 use crate::store::SessionRow;
 
-use super::super::{
-    Align, Format, emit_json, empty_in_window, eprint_window, framed, preamble, render, with_window,
-};
+use super::super::{Align, Format, TableSpec, ViewCtx, empty_in_window, render_view};
 
 /// Sort key for the sessions table. Tokens first: cost is what the view is
 /// for; duration and friction are the alternate cuts.
@@ -62,66 +60,33 @@ pub(crate) fn sessions(
     format: Format,
 ) -> Result<()> {
     let store = &sess.store;
-    eprint_window(window);
     let mut rows = store.session_breakdown(window)?;
     sort_sessions(&mut rows, sort);
-    if format == Format::Json {
-        let sessions: Vec<serde_json::Value> = rows
-            .iter()
-            .map(|row| {
-                serde_json::json!({
-                    "session": row.id,
-                    "project": row.project,
-                    "slug": row.slug,
-                    "started_at": row.started_at,
-                    "out_tokens": row.out_tokens,
-                    "duration_sec": row.duration_sec,
-                    "friction": row.friction,
-                })
-            })
-            .collect();
-        return emit_json(&with_window(
-            serde_json::json!({ "sessions": sessions }),
-            window,
-        ));
-    }
-    if rows.is_empty() {
-        println!(
-            "{}",
-            empty_in_window(
-                "no sessions in the evaluation window — run `saniwalens analyze` first",
-                window
-            )
-        );
-        return Ok(());
-    }
-    preamble(
-        format,
-        &framed(
-            "Every session: what it spent, how long it ran, and how often tool\n\
-             calls kept failing inside it. Quiet sessions read 0 — they ran, they\n\
-             just did not stumble — rather than vanishing from the list.",
-            window,
-        ),
-    );
-    let table: Vec<Vec<String>> = rows
+    let sessions: Vec<serde_json::Value> = rows
         .iter()
         .map(|row| {
-            vec![
-                row.id.clone(),
-                session_cell(row),
-                row.started_at.clone(),
-                row.out_tokens.to_string(),
-                row.duration_sec.to_string(),
-                row.friction.to_string(),
-            ]
+            serde_json::json!({
+                "session": row.id,
+                "project": row.project,
+                "slug": row.slug,
+                "started_at": row.started_at,
+                "out_tokens": row.out_tokens,
+                "duration_sec": row.duration_sec,
+                "friction": row.friction,
+            })
         })
         .collect();
-    render(
-        &[
+    let empty_msg = rows.is_empty().then(|| {
+        empty_in_window(
+            "no sessions in the evaluation window — run `saniwalens analyze` first",
+            window,
+        )
+    });
+    let table = TableSpec {
+        headers: &[
             "session", "project", "started", "tokens", "secs", "friction",
         ],
-        &[
+        aligns: &[
             Align::Left,
             Align::Left,
             Align::Left,
@@ -129,10 +94,29 @@ pub(crate) fn sessions(
             Align::Right,
             Align::Right,
         ],
-        &table,
-        format,
-    );
-    Ok(())
+        rows: rows
+            .iter()
+            .map(|row| {
+                vec![
+                    row.id.clone(),
+                    session_cell(row),
+                    row.started_at.clone(),
+                    row.out_tokens.to_string(),
+                    row.duration_sec.to_string(),
+                    row.friction.to_string(),
+                ]
+            })
+            .collect(),
+    };
+    render_view(
+        ViewCtx::single(format, window),
+        serde_json::json!({ "sessions": sessions }),
+        empty_msg.as_deref(),
+        "Every session: what it spent, how long it ran, and how often tool\n\
+         calls kept failing inside it. Quiet sessions read 0 — they ran, they\n\
+         just did not stumble — rather than vanishing from the list.",
+        |format| table.render(format),
+    )
 }
 
 #[cfg(test)]

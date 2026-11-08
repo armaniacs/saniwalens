@@ -1,0 +1,8 @@
+Every session: what it spent, how long it ran, and how often tool
+calls kept failing inside it. Quiet sessions read 0 — they ran, they
+just did not stumble — rather than vanishing from the list.
+
+session  project  started                    tokens  secs  friction
+-------------------------------------------------------------------
+s1       demo     2023-11-14T22:13:20+00:00     130   200         2
+s2       demo     2023-11-14T22:13:20+00:00      50     0         0

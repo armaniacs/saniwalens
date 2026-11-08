@@ -1,0 +1,128 @@
+{
+  "kinds": [
+    {
+      "duration_sec": {
+        "current": 0.0,
+        "delta": null,
+        "direction": "unavailable",
+        "previous": 0.0,
+        "reason": "not_applicable"
+      },
+      "events": {
+        "current": 1,
+        "delta": 0,
+        "direction": "same",
+        "previous": 1,
+        "reason": null
+      },
+      "kind": "file_edit",
+      "out_tokens": {
+        "current": 0,
+        "delta": null,
+        "direction": "unavailable",
+        "previous": 0,
+        "reason": "not_applicable"
+      }
+    },
+    {
+      "duration_sec": {
+        "current": 0.0,
+        "delta": null,
+        "direction": "unavailable",
+        "previous": 0.0,
+        "reason": "not_applicable"
+      },
+      "events": {
+        "current": 1,
+        "delta": 0,
+        "direction": "same",
+        "previous": 1,
+        "reason": null
+      },
+      "kind": "session_start",
+      "out_tokens": {
+        "current": 0,
+        "delta": null,
+        "direction": "unavailable",
+        "previous": 0,
+        "reason": "not_applicable"
+      }
+    },
+    {
+      "duration_sec": {
+        "current": 2.0,
+        "delta": 0.0,
+        "direction": "same",
+        "previous": 2.0,
+        "reason": null
+      },
+      "events": {
+        "current": 1,
+        "delta": 0,
+        "direction": "same",
+        "previous": 1,
+        "reason": null
+      },
+      "kind": "skill_invocation",
+      "out_tokens": {
+        "current": 300,
+        "delta": 150,
+        "direction": "up",
+        "previous": 150,
+        "reason": null
+      }
+    }
+  ],
+  "sessions": {
+    "current": 1,
+    "delta": 0,
+    "direction": "same",
+    "previous": 1,
+    "reason": null
+  },
+  "skills": [
+    {
+      "current": 1,
+      "delta": 0,
+      "direction": "same",
+      "previous": 1,
+      "reason": null,
+      "skill": "commit"
+    }
+  ],
+  "sub_tokens": {
+    "current": 500,
+    "delta": 100,
+    "direction": "up",
+    "previous": 400,
+    "reason": null
+  },
+  "subagent_runs": {
+    "current": 2,
+    "delta": 1,
+    "direction": "up",
+    "previous": 1,
+    "reason": null
+  },
+  "surfaces": [
+    {
+      "current": 1,
+      "delta": 0,
+      "direction": "same",
+      "id": "commit",
+      "kind": "skill",
+      "previous": 1,
+      "reason": null
+    }
+  ],
+  "window": {
+    "current": {
+      "since": "2023-11-15T00:00:00+09:00",
+      "until": "2023-11-16T23:59:59+09:00"
+    },
+    "previous": {
+      "since": "2023-11-13T00:00:00+09:00",
+      "until": "2023-11-14T23:59:59+09:00"
+    }
+  }
+}

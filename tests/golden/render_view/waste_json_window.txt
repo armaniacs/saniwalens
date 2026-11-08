@@ -1,0 +1,38 @@
+{
+  "unknown_load_modes": {
+    "count": 0,
+    "labels": []
+  },
+  "wedges": [
+    {
+      "id": "idle-skill",
+      "kind": "skill",
+      "on_demand_tokens": 500,
+      "project": null,
+      "savings": "declutter",
+      "savings_tokens": null,
+      "scope": "global",
+      "startup_tokens": 100,
+      "suggestion": "declutter only: body is 500 tok when invoked, ~no startup saving",
+      "uses": 0,
+      "wedge": "UNUSED"
+    },
+    {
+      "id": "idle-rule",
+      "kind": "rule",
+      "on_demand_tokens": 1200,
+      "project": null,
+      "savings": "declutter",
+      "savings_tokens": null,
+      "scope": "global",
+      "startup_tokens": null,
+      "suggestion": "never fired in window [docs/**] — narrow its paths or delete its 1200-token body",
+      "uses": null,
+      "wedge": "NEVER-FIRES"
+    }
+  ],
+  "window": {
+    "since": "1970-01-01T00:00:00+09:00",
+    "until": "1970-01-03T23:59:59+09:00"
+  }
+}

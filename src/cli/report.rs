@@ -3,7 +3,10 @@
 
 use anyhow::Result;
 
+use crate::core::period::TimeRange;
 use crate::session::Style;
+
+use super::{eprint_window, framed, with_window};
 
 /// One dimmed framing block above a table: what this view shows and how to
 /// read it, so the output explains itself. Table format only — markdown is for
@@ -73,6 +76,106 @@ impl ViewFormat {
 pub(crate) fn emit_json(value: &serde_json::Value) -> Result<()> {
     println!("{}", serde_json::to_string_pretty(value)?);
     Ok(())
+}
+
+/// Which window a view renders under, for the shared spine
+/// ([`render_view`]): the format it produces, and the single window the
+/// spine discloses, attaches, and frames — or none, where the caller owns
+/// the disclosure (trend's comparison pair, whose two windows ride their
+/// own disclosure and framing).
+pub(crate) struct ViewCtx {
+    pub format: Format,
+    pub window: Option<TimeRange>,
+}
+
+impl ViewCtx {
+    /// One single-window view: the spine discloses the window on stderr,
+    /// attaches it to the JSON payload, and frames the preamble with it.
+    pub(crate) fn single(format: Format, window: TimeRange) -> Self {
+        Self {
+            format,
+            window: Some(window),
+        }
+    }
+
+    /// Trend's pair shape: no single window exists, so the spine emits the
+    /// JSON as given and renders the preamble text as given — the caller
+    /// discloses its own pair and frames its own preamble beforehand.
+    pub(crate) fn pair(format: Format) -> Self {
+        Self {
+            format,
+            window: None,
+        }
+    }
+}
+
+/// One table's data: headers, per-column alignment, and rows. Views assemble
+/// these and hand them to [`render_view`]'s body; the spine never builds a
+/// row itself, so it cannot drift a view's columns.
+pub(crate) struct TableSpec<'a> {
+    pub headers: &'a [&'a str],
+    pub aligns: &'a [Align],
+    pub rows: Vec<Vec<String>>,
+}
+
+impl TableSpec<'_> {
+    /// Render this table in the view's format. `json` never reaches here:
+    /// the spine short-circuits it before the body runs, so [`render`]'s
+    /// `unreachable` stays the single enforcement point.
+    pub(crate) fn render(&self, format: Format) {
+        render(self.headers, self.aligns, &self.rows, format);
+    }
+}
+
+/// The one ritual every windowed table view shares, in order: window
+/// disclosure on stderr, the JSON short-circuit (window-attached), the
+/// empty short-circuit, the framed preamble, then the caller's tables.
+/// Views assemble their data (the JSON value, the empty message, the
+/// preamble text, the [`TableSpec`]s) and hand the rendering to the body;
+/// the spine owns the order and the branches, never the rows.
+///
+/// The empty message arrives final (built with `empty_in_window` or the
+/// view's own wording): printing it is the spine's, wording it the view's.
+pub(crate) fn render_view(
+    ctx: ViewCtx,
+    json: serde_json::Value,
+    empty_msg: Option<&str>,
+    preamble_text: &str,
+    body: impl FnOnce(Format),
+) -> Result<()> {
+    if let Some(window) = ctx.window {
+        eprint_window(window);
+    }
+    if ctx.format == Format::Json {
+        return emit_json(&match ctx.window {
+            Some(window) => with_window(json, window),
+            None => json,
+        });
+    }
+    if let Some(message) = empty_msg {
+        println!("{message}");
+        return Ok(());
+    }
+    match ctx.window {
+        Some(window) => preamble(ctx.format, &framed(preamble_text, window)),
+        None => preamble(ctx.format, preamble_text),
+    }
+    body(ctx.format);
+    Ok(())
+}
+
+/// The inventory JSON `status` for an unused surface: `unused` without the
+/// flags, `unused-in-window` under them. The single decision point behind
+/// the call-site inline `window.is_all()` the migration removes (PBI C4) —
+/// `window.rs` is frozen, so the vocabulary lives here beside
+/// [`render_view`], not scattered at the call site. Table cells keep
+/// `unused_label` (uppercase); the JSON contract's lowercase values are
+/// this function's.
+pub(crate) fn unused_status(window: TimeRange) -> &'static str {
+    match window.is_all() {
+        true => "unused",
+        false => "unused-in-window",
+    }
 }
 
 /// Render a table as aligned text or GitHub-flavored markdown. Auto-sizes

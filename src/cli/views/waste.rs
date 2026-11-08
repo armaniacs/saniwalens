@@ -14,8 +14,8 @@ use crate::core::surface::{
 use crate::session::{Session, Style};
 
 use super::super::{
-    Align, Format, emit_json, empty_in_window, eprint_window, framed, in_scope, preamble, render,
-    savings_cell, savings_suggestion, scope_cell, with_window,
+    Align, Format, TableSpec, ViewCtx, empty_in_window, in_scope, render_view, savings_cell,
+    savings_suggestion, scope_cell,
 };
 
 pub(crate) fn waste(
@@ -25,7 +25,6 @@ pub(crate) fn waste(
     format: Format,
 ) -> Result<()> {
     let store = &sess.store;
-    eprint_window(window);
     let catalog: Vec<_> = store
         .effective_catalog(window)?
         .into_iter()
@@ -202,83 +201,44 @@ pub(crate) fn waste(
         );
     }
 
-    if format == Format::Json {
-        let wedges: Vec<serde_json::Value> = found
-            .iter()
-            .map(|row| {
-                let (savings, savings_tokens) = match row.savings {
-                    StartupSavings::Tokens(n) => ("tokens", Some(n)),
-                    StartupSavings::UnknownSchema => ("unknown_schema", None),
-                    StartupSavings::Declutter => ("declutter", None),
-                };
-                serde_json::json!({
-                    "wedge": row.wedge.label(),
-                    "kind": row.kind,
-                    "id": row.id,
-                    "scope": row.scope,
-                    "project": if row.project.is_empty() { None } else { Some(row.project) },
-                    "savings": savings,
-                    "savings_tokens": savings_tokens,
-                    "startup_tokens": row.startup_tokens,
-                    "on_demand_tokens": row.on_demand_tokens,
-                    "uses": if is_usage_measurable(row.kind) { Some(row.uses) } else { None },
-                    "suggestion": row.evidence.clone().unwrap_or_else(|| savings_suggestion(row.wedge, row.savings, row.on_demand_tokens)),
-                })
-            })
-            .collect();
-        return emit_json(&with_window(
-            serde_json::json!({
-                "wedges": wedges,
-                "unknown_load_modes": {
-                    "count": unknown_load_modes.len(),
-                    "labels": unknown_load_modes,
-                },
-            }),
-            window,
-        ));
-    }
-    if found.is_empty() {
-        println!(
-            "{}",
-            empty_in_window(
-                "nothing wasteful found — run `saniwalens analyze` first",
-                window
-            )
-        );
-        return Ok(());
-    }
-
-    preamble(
-        format,
-        &framed(
-            "Concrete cleanup opportunities in your config, ranked by what removing each\n\
-             one actually saves at session start. A \"~\" figure is declutter-only — just\n\
-             the description is loaded at startup; the body costs nothing until invoked.",
-            window,
-        ),
-    );
-    let rows: Vec<Vec<String>> = found
+    let wedges: Vec<serde_json::Value> = found
         .iter()
         .map(|row| {
-            let uses_cell = if is_usage_measurable(row.kind) {
-                row.uses.to_string()
-            } else {
-                "-".to_string()
+            let (savings, savings_tokens) = match row.savings {
+                StartupSavings::Tokens(n) => ("tokens", Some(n)),
+                StartupSavings::UnknownSchema => ("unknown_schema", None),
+                StartupSavings::Declutter => ("declutter", None),
             };
-            vec![
-                row.wedge.label().to_string(),
-                format!("{}/{}", row.kind, row.id),
-                scope_cell(row.scope, row.project),
-                savings_cell(row.savings, row.startup_tokens),
-                uses_cell,
-                row.evidence.clone().unwrap_or_else(|| {
-                    savings_suggestion(row.wedge, row.savings, row.on_demand_tokens)
-                }),
-            ]
+            serde_json::json!({
+                "wedge": row.wedge.label(),
+                "kind": row.kind,
+                "id": row.id,
+                "scope": row.scope,
+                "project": if row.project.is_empty() { None } else { Some(row.project) },
+                "savings": savings,
+                "savings_tokens": savings_tokens,
+                "startup_tokens": row.startup_tokens,
+                "on_demand_tokens": row.on_demand_tokens,
+                "uses": if is_usage_measurable(row.kind) { Some(row.uses) } else { None },
+                "suggestion": row.evidence.clone().unwrap_or_else(|| savings_suggestion(row.wedge, row.savings, row.on_demand_tokens)),
+            })
         })
         .collect();
-    render(
-        &[
+    let json = serde_json::json!({
+        "wedges": wedges,
+        "unknown_load_modes": {
+            "count": unknown_load_modes.len(),
+            "labels": unknown_load_modes,
+        },
+    });
+    let empty_msg = found.is_empty().then(|| {
+        empty_in_window(
+            "nothing wasteful found — run `saniwalens analyze` first",
+            window,
+        )
+    });
+    let table = TableSpec {
+        headers: &[
             "problem",
             "surface",
             "scope",
@@ -286,7 +246,7 @@ pub(crate) fn waste(
             "uses",
             "suggestion",
         ],
-        &[
+        aligns: &[
             Align::Left,
             Align::Left,
             Align::Left,
@@ -294,10 +254,36 @@ pub(crate) fn waste(
             Align::Right,
             Align::Left,
         ],
-        &rows,
-        format,
-    );
-    Ok(())
+        rows: found
+            .iter()
+            .map(|row| {
+                let uses_cell = if is_usage_measurable(row.kind) {
+                    row.uses.to_string()
+                } else {
+                    "-".to_string()
+                };
+                vec![
+                    row.wedge.label().to_string(),
+                    format!("{}/{}", row.kind, row.id),
+                    scope_cell(row.scope, row.project),
+                    savings_cell(row.savings, row.startup_tokens),
+                    uses_cell,
+                    row.evidence.clone().unwrap_or_else(|| {
+                        savings_suggestion(row.wedge, row.savings, row.on_demand_tokens)
+                    }),
+                ]
+            })
+            .collect(),
+    };
+    render_view(
+        ViewCtx::single(format, window),
+        json,
+        empty_msg.as_deref(),
+        "Concrete cleanup opportunities in your config, ranked by what removing each\n\
+         one actually saves at session start. A \"~\" figure is declutter-only — just\n\
+         the description is loaded at startup; the body costs nothing until invoked.",
+        |format| table.render(format),
+    )
 }
 
 /// View-only (waste view): sort key — real measured savings first (largest

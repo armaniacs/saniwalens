@@ -1,0 +1,26 @@
+{
+  "behaviors": [
+    {
+      "behavior": "instruct",
+      "count": 5,
+      "share_pct": 63
+    },
+    {
+      "behavior": "steer",
+      "count": 2,
+      "share_pct": 25
+    },
+    {
+      "behavior": "correct",
+      "count": 1,
+      "share_pct": 13
+    }
+  ],
+  "candidates": [],
+  "pruned_prompts": 8,
+  "total": 8,
+  "window": {
+    "since": "2023-11-01T00:00:00+09:00",
+    "until": "2023-11-30T23:59:59+09:00"
+  }
+}

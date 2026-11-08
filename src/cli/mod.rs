@@ -1479,73 +1479,61 @@ fn shorten_to_tilde(path: &str, home: Option<&str>) -> String {
 /// a same-named file is never presented as one agent looping (`core::thrash`).
 fn stuck(sess: &Session, window: TimeRange, format: Format) -> Result<()> {
     let store = &sess.store;
-    eprint_window(window);
     let episodes = findings::stuck_episodes(&store.file_edits(window)?);
-    if format == Format::Json {
-        let episodes: Vec<serde_json::Value> = episodes
-            .iter()
-            .map(|e| {
-                serde_json::json!({
-                    "project": e.project,
-                    "session_id": e.session_id,
-                    "file": e.file(),
-                    "path": e.path,
-                    "edits": e.edits,
-                    "span_secs": e.span_secs(),
-                })
-            })
-            .collect();
-        return emit_json(&with_window(
-            serde_json::json!({ "episodes": episodes }),
-            window,
-        ));
-    }
-    if episodes.is_empty() {
-        println!(
-            "{}",
-            empty_in_window(
-                &format!(
-                    "no thrash episodes (>= {THRASH_MIN_EDITS} rapid re-edits) — run analyze first"
-                ),
-                window
-            )
-        );
-        return Ok(());
-    }
-    preamble(
-        format,
-        &framed(
-            "Files the agent kept re-editing in rapid bursts — the signature of getting stuck\n\
-             and retrying. Worth checking what blocked it there (a rule? missing context?).",
-            window,
-        ),
-    );
-    let rows: Vec<Vec<String>> = episodes
+    let episodes_json: Vec<serde_json::Value> = episodes
         .iter()
-        .take(20)
         .map(|e| {
-            let span = e.span_secs();
-            vec![
-                e.project.clone(),
-                e.file().to_string(),
-                e.edits.to_string(),
-                format!("{}m{}s", span / 60, span % 60),
-            ]
+            serde_json::json!({
+                "project": e.project,
+                "session_id": e.session_id,
+                "file": e.file(),
+                "path": e.path,
+                "edits": e.edits,
+                "span_secs": e.span_secs(),
+            })
         })
         .collect();
-    render(
-        &["project", "file", "edits", "within"],
-        &[Align::Left, Align::Left, Align::Right, Align::Right],
-        &rows,
-        format,
-    );
-    note(&format!(
-        "bursts of >= {THRASH_MIN_EDITS} edits to one file within {}m by a single session —\n\
-         likely where the agent got stuck. `--format json` carries the session id and\n\
-         full path to investigate with.",
-        THRASH_GAP_SECS / 60
-    ));
-    Ok(())
+    let empty_msg = episodes.is_empty().then(|| {
+        empty_in_window(
+            &format!(
+                "no thrash episodes (>= {THRASH_MIN_EDITS} rapid re-edits) — run analyze first"
+            ),
+            window,
+        )
+    });
+    let table = TableSpec {
+        headers: &["project", "file", "edits", "within"],
+        aligns: &[Align::Left, Align::Left, Align::Right, Align::Right],
+        rows: episodes
+            .iter()
+            .take(20)
+            .map(|e| {
+                let span = e.span_secs();
+                vec![
+                    e.project.clone(),
+                    e.file().to_string(),
+                    e.edits.to_string(),
+                    format!("{}m{}s", span / 60, span % 60),
+                ]
+            })
+            .collect(),
+    };
+    render_view(
+        ViewCtx::single(format, window),
+        serde_json::json!({ "episodes": episodes_json }),
+        empty_msg.as_deref(),
+        "Files the agent kept re-editing in rapid bursts — the signature of getting stuck\n\
+         and retrying. Worth checking what blocked it there (a rule? missing context?).",
+        |format| {
+            table.render(format);
+            note(&format!(
+                "bursts of >= {THRASH_MIN_EDITS} edits to one file within {}m by a single session —\n\
+                 likely where the agent got stuck. `--format json` carries the session id and\n\
+                 full path to investigate with.",
+                THRASH_GAP_SECS / 60
+            ));
+        },
+    )
 }
 
 /// A dimmed footnote under a table — context, not data.
@@ -1561,7 +1549,6 @@ fn note(text: &str) {
 /// `project:<slug>` everything that happened in that one project.
 fn failures(sess: &Session, filter: &ScopeFilter, window: TimeRange, format: Format) -> Result<()> {
     let store = &sess.store;
-    eprint_window(window);
     let cells = store.error_counts_by_project(window)?;
     // The scope-blind totals feed only the `All` scope; other scopes route
     // the per-project cells, so no second query runs for them.
@@ -1598,115 +1585,107 @@ fn failures(sess: &Session, filter: &ScopeFilter, window: TimeRange, format: For
         );
     }
 
-    if format == Format::Json {
-        let failures: Vec<serde_json::Value> = counts
-            .iter()
-            .map(|row| {
-                serde_json::json!({
-                    "project": row.project,
-                    "category": row.category,
-                    "count": row.count,
-                    "spread_projects": row.spread,
-                    "suggestion": ErrorCategory::from_label(&row.category)
-                        .suggestion(sess.harness.instruction_file()),
-                })
-            })
-            .collect();
-        return emit_json(&with_window(
-            serde_json::json!({
-                "total": total,
-                "failures": failures,
-                "unknown_labels": {
-                    "count": unknown_labels.len(),
-                    "labels": unknown_labels,
-                },
-            }),
-            window,
-        ));
-    }
-    if total == 0 {
-        println!(
-            "{}",
-            empty_in_window(
-                "no tool failures found for this scope — run `saniwalens analyze` first?",
-                window
-            )
-        );
-        return Ok(());
-    }
-
-    preamble(
-        format,
-        &framed(
-            &match filter {
-                ScopeFilter::All => {
-                    "Tool calls that kept failing the same way, grouped by kind of failure.\n\
-                 Every row wastes turns and tokens; the suggestion says what usually fixes it."
-                        .to_string()
-                }
-                ScopeFilter::Global => {
-                    format!(
-                        "Failures spread across several projects — no single project owns them, so\n\
-                     they read as habits or global-config problems. Fix these in {}.",
-                        sess.harness.global_config_ref()
-                    )
-                }
-                ScopeFilter::Project(None) => {
-                    format!(
-                        "Failures each project owns (it holds the majority of that kind). Fix each\n\
-                     in that project's own {}, not globally.",
-                        sess.harness.project_config_ref()
-                    )
-                }
-                ScopeFilter::Project(Some(_)) => {
-                    format!(
-                        "Every recurring failure inside this one project, most frequent first.\n\
-                     Fix them in this project's own {}.",
-                        sess.harness.project_config_ref()
-                    )
-                }
-            },
-            window,
-        ),
-    );
-    let with_project = matches!(filter, ScopeFilter::Project(None));
-    let rows: Vec<Vec<String>> = counts
+    let failures_json: Vec<serde_json::Value> = counts
         .iter()
         .map(|row| {
-            let mut cells = Vec::new();
-            if with_project {
-                cells.push(row.project.clone().unwrap_or_default());
-            }
-            let error = match row.spread {
-                Some(spread) => format!("{} (across {spread} projects)", row.category),
-                None => row.category.clone(),
-            };
-            cells.extend([
-                error,
-                row.count.to_string(),
-                ErrorCategory::from_label(&row.category)
+            serde_json::json!({
+                "project": row.project,
+                "category": row.category,
+                "count": row.count,
+                "spread_projects": row.spread,
+                "suggestion": ErrorCategory::from_label(&row.category)
                     .suggestion(sess.harness.instruction_file()),
-            ]);
-            cells
+            })
         })
         .collect();
-    let (headers, aligns): (Vec<&str>, Vec<Align>) = if with_project {
-        (
-            vec!["project", "error", "count", "suggestion"],
-            vec![Align::Left, Align::Left, Align::Right, Align::Left],
+    let json = serde_json::json!({
+        "total": total,
+        "failures": failures_json,
+        "unknown_labels": {
+            "count": unknown_labels.len(),
+            "labels": unknown_labels,
+        },
+    });
+    let empty_msg = (total == 0).then(|| {
+        empty_in_window(
+            "no tool failures found for this scope — run `saniwalens analyze` first?",
+            window,
         )
-    } else {
-        (
-            vec!["error", "count", "suggestion"],
-            vec![Align::Left, Align::Right, Align::Left],
-        )
+    });
+    let preamble_text = match filter {
+        ScopeFilter::All => {
+            "Tool calls that kept failing the same way, grouped by kind of failure.\n\
+             Every row wastes turns and tokens; the suggestion says what usually fixes it."
+                .to_string()
+        }
+        ScopeFilter::Global => {
+            format!(
+                "Failures spread across several projects — no single project owns them, so\n\
+                 they read as habits or global-config problems. Fix these in {}.",
+                sess.harness.global_config_ref()
+            )
+        }
+        ScopeFilter::Project(None) => {
+            format!(
+                "Failures each project owns (it holds the majority of that kind). Fix each\n\
+                 in that project's own {}, not globally.",
+                sess.harness.project_config_ref()
+            )
+        }
+        ScopeFilter::Project(Some(_)) => {
+            format!(
+                "Every recurring failure inside this one project, most frequent first.\n\
+                 Fix them in this project's own {}.",
+                sess.harness.project_config_ref()
+            )
+        }
     };
-    render(&headers, &aligns, &rows, format);
-    note(&format!(
-        "{total} tool failures (denials from the transcript's own marker where present; \
-         everything else is a lexical heuristic)"
-    ));
-    Ok(())
+    let with_project = matches!(filter, ScopeFilter::Project(None));
+    let table = TableSpec {
+        headers: if with_project {
+            &["project", "error", "count", "suggestion"]
+        } else {
+            &["error", "count", "suggestion"]
+        },
+        aligns: if with_project {
+            &[Align::Left, Align::Left, Align::Right, Align::Left]
+        } else {
+            &[Align::Left, Align::Right, Align::Left]
+        },
+        rows: counts
+            .iter()
+            .map(|row| {
+                let mut cells = Vec::new();
+                if with_project {
+                    cells.push(row.project.clone().unwrap_or_default());
+                }
+                let error = match row.spread {
+                    Some(spread) => format!("{} (across {spread} projects)", row.category),
+                    None => row.category.clone(),
+                };
+                cells.extend([
+                    error,
+                    row.count.to_string(),
+                    ErrorCategory::from_label(&row.category)
+                        .suggestion(sess.harness.instruction_file()),
+                ]);
+                cells
+            })
+            .collect(),
+    };
+    render_view(
+        ViewCtx::single(format, window),
+        json,
+        empty_msg.as_deref(),
+        &preamble_text,
+        |format| {
+            table.render(format);
+            note(&format!(
+                "{total} tool failures (denials from the transcript's own marker where present; \
+                 everything else is a lexical heuristic)"
+            ));
+        },
+    )
 }
 
 /// Reconcile the empirical always-on floor against readable config. The floor is
@@ -1716,103 +1695,106 @@ fn failures(sess: &Session, filter: &ScopeFilter, window: TimeRange, format: For
 /// real cost by comparing a project that enables it against one that does not.
 fn overhead(sess: &Session, window: TimeRange, format: Format) -> Result<()> {
     let store = &sess.store;
-    eprint_window(window);
     let floor = store.baseline_floor(window)?;
     let config = store.always_on_config_tokens()?;
     let residual = floor.map(|floor| (floor - config).max(0));
     let per_project = store.baseline_floor_per_project(window)?;
 
-    if format == Format::Json {
-        let per_project: Vec<serde_json::Value> = per_project
-            .iter()
-            .map(|(project, floor, sessions)| {
-                serde_json::json!({
-                    "project": project,
-                    "floor": floor,
-                    "sessions": sessions,
-                })
-            })
-            .collect();
-        return emit_json(&with_window(
+    let per_project_json: Vec<serde_json::Value> = per_project
+        .iter()
+        .map(|(project, floor, sessions)| {
             serde_json::json!({
+                "project": project,
                 "floor": floor,
-                "config_tokens": config,
-                "residual": residual,
-                "per_project": per_project,
-            }),
-            window,
-        ));
-    }
+                "sessions": sessions,
+            })
+        })
+        .collect();
+    let json = serde_json::json!({
+        "floor": floor,
+        "config_tokens": config,
+        "residual": residual,
+        "per_project": per_project_json,
+    });
     // No session start observed — say so rather than substituting a mid-session
-    // context that would read as a startup cost.
-    let Some(floor) = floor else {
-        let (sessions, _) = store.session_stats(window)?;
-        if sessions == 0 {
+    // context that would read as a startup cost. The session count is only
+    // read on the empty path, as before.
+    let empty_msg: Option<String> = match floor {
+        Some(_) => None,
+        None => {
+            let (sessions, _) = store.session_stats(window)?;
+            Some(if sessions == 0 {
+                empty_in_window("no data — run `saniwalens analyze` first", window)
+            } else {
+                format!(
+                    "always-on floor unavailable — none of the {sessions} analyzed session(s)\n\
+                     carries an observable session start. A store written before session-start\n\
+                     tracking keeps its old rows (analyze never re-reads a closed session), so\n\
+                     the floor appears as newer sessions are analyzed. Discarding the store\n\
+                     would backfill it from the {} still on disk, at the cost of every\n\
+                     session whose {} {} has already pruned.",
+                    sess.harness.raw_source(),
+                    sess.harness.source_noun(),
+                    sess.harness.display_name()
+                )
+            })
+        }
+    };
+    let style = Style::stdout();
+    let floor_text = floor.map(|floor| {
+        let residual = (floor - config).max(0);
+        (
+            floor,
+            residual,
+            format!(
+                "Observed always-on floor (leanest session-start context): {}",
+                style.bold(&format!("{floor} tokens"))
+            ),
+        )
+    });
+    let table = TableSpec {
+        headers: &["project", "floor_tokens", "sessions"],
+        aligns: &[Align::Left, Align::Right, Align::Right],
+        rows: per_project
+            .into_iter()
+            .map(|(project, floor, sessions)| {
+                vec![project, floor.to_string(), sessions.to_string()]
+            })
+            .collect(),
+    };
+    render_view(
+        ViewCtx::single(format, window),
+        json,
+        empty_msg.as_deref(),
+        "What every session pays in context before any work starts, and how much of\n\
+         it your own config files account for.",
+        |format| {
+            let Some((_, residual, floor_line)) = floor_text else {
+                return;
+            };
+            println!("{floor_line}");
+            println!(
+                "  readable config ({}): {config} tokens",
+                sess.harness.readable_config()
+            );
+            println!(
+                "  residual (system prompt + built-in tools + MCP schemas):                {residual} tokens"
+            );
             println!(
                 "{}",
-                empty_in_window("no data — run `saniwalens analyze` first", window)
+                style.dim(
+                    "  -> the residual is what you cannot read from files; compare projects below\n\
+                     \x20    to see an MCP server's marginal cost (a project that enables it starts higher)."
+                )
             );
-        } else {
-            println!(
-                "always-on floor unavailable — none of the {sessions} analyzed session(s)\n\
-                 carries an observable session start. A store written before session-start\n\
-                 tracking keeps its old rows (analyze never re-reads a closed session), so\n\
-                 the floor appears as newer sessions are analyzed. Discarding the store\n\
-                 would backfill it from the {} still on disk, at the cost of every\n\
-                 session whose {} {} has already pruned.",
-                sess.harness.raw_source(),
-                sess.harness.source_noun(),
-                sess.harness.display_name()
+            println!();
+            table.render(format);
+            note(
+                "each floor is the leanest start across that project's sessions — a project with\n\
+                 few sessions may not have caught a fresh one, so compare like counts.",
             );
-        }
-        return Ok(());
-    };
-    let residual = (floor - config).max(0);
-
-    preamble(
-        format,
-        &framed(
-            "What every session pays in context before any work starts, and how much of\n\
-             it your own config files account for.",
-            window,
-        ),
-    );
-    let style = Style::stdout();
-    println!(
-        "Observed always-on floor (leanest session-start context): {}",
-        style.bold(&format!("{floor} tokens"))
-    );
-    println!(
-        "  readable config ({}): {config} tokens",
-        sess.harness.readable_config()
-    );
-    println!(
-        "  residual (system prompt + built-in tools + MCP schemas):                {residual} tokens"
-    );
-    println!(
-        "{}",
-        style.dim(
-            "  -> the residual is what you cannot read from files; compare projects below\n\
-             \x20    to see an MCP server's marginal cost (a project that enables it starts higher)."
-        )
-    );
-    println!();
-
-    let rows: Vec<Vec<String>> = per_project
-        .into_iter()
-        .map(|(project, floor, sessions)| vec![project, floor.to_string(), sessions.to_string()])
-        .collect();
-    render(
-        &["project", "floor_tokens", "sessions"],
-        &[Align::Left, Align::Right, Align::Right],
-        &rows,
-        format,
-    );
-    note(
-        "each floor is the leanest start across that project's sessions — a project with\n\
-         few sessions may not have caught a fresh one, so compare like counts.",
-    );
-    Ok(())
+        },
+    )
 }
 
 fn analyze(sess: &Session, projects: Option<PathBuf>, format: Format) -> Result<()> {
@@ -1906,7 +1888,6 @@ fn missing_split_warning(coverage: &SplitCoverage, window: TimeRange) -> Option<
 }
 fn usage(sess: &Session, by: Option<&str>, window: TimeRange, format: Format) -> Result<()> {
     let store = &sess.store;
-    eprint_window(window);
 
     if let Some(by) = by {
         let bucket = Bucket::parse(by)
@@ -1934,60 +1915,29 @@ fn usage(sess: &Session, by: Option<&str>, window: TimeRange, format: Format) ->
     // beside a nonzero total needs the reason as much as a human does, and it
     // goes to stderr precisely so it can be given to both.
     warn_missing_agent_split(&agent_split, window);
-    if format == Format::Json {
-        return emit_json(&with_window(
-            serde_json::json!({
-                "tokens": {
-                    "main_out": main_out,
-                    "sub_tokens": sub_tokens,
-                    "sub_agents": sub_agents,
-                },
-                "agent_split": agent_split,
-                "agents": agents,
-                "skills": skills,
-            }),
-            window,
-        ));
-    }
+    let json = serde_json::json!({
+        "tokens": {
+            "main_out": main_out,
+            "sub_tokens": sub_tokens,
+            "sub_agents": sub_agents,
+        },
+        "agent_split": agent_split,
+        "agents": agents,
+        "skills": skills,
+    });
     // A subagent total with neither table behind it is not "nothing happened" —
     // it is a store whose per-agent split has not been extracted yet, and saying
     // "no usage" there would be false.
-    if skills.is_empty() && agents.is_empty() && sub_tokens == 0 {
-        println!(
-            "{}",
-            empty_in_window(
-                "no skill usage found — run `saniwalens analyze` first",
-                window
-            )
-        );
-        return Ok(());
-    }
-    preamble(
-        format,
-        &framed(
-            "What ran and what it cost. First the subagent bill per agent type\n\
-             (costliest first), then how often each skill ran — output tokens written,\n\
-             context growth while it ran, and wall-clock seconds (most-invoked first).\n\
-             A section with nothing to show is omitted.",
+    let empty_msg = (skills.is_empty() && agents.is_empty() && sub_tokens == 0).then(|| {
+        empty_in_window(
+            "no skill usage found — run `saniwalens analyze` first",
             window,
-        ),
-    );
-    println!(
-        "tokens: main-thread skill output {main_out}, subagents {sub_tokens} ({sub_agents} agents)"
-    );
-    // Stated between the total and the table, so the table below is read as
-    // the part it is. Under a drawn window the gap is the straddle, so the
-    // note names the window rather than the pruned transcripts.
-    if let Some(note) = agent_split.partial_note_in(window) {
-        println!("{note}");
-    }
-    println!();
-
-    // The subagent figure is usually the larger one, so break it down by agent
-    // type before the per-skill table: a spawn count alone cannot tell an
-    // expensive agent from a cheap one that runs often.
-    if !agents.is_empty() {
-        let rows: Vec<Vec<String>> = agents
+        )
+    });
+    let agents_table = TableSpec {
+        headers: &["agent", "runs", "out tokens"],
+        aligns: &[Align::Left, Align::Right, Align::Right],
+        rows: agents
             .iter()
             .map(|row| {
                 vec![
@@ -1996,44 +1946,64 @@ fn usage(sess: &Session, by: Option<&str>, window: TimeRange, format: Format) ->
                     row.out_tokens.to_string(),
                 ]
             })
-            .collect();
-        render(
-            &["agent", "runs", "out tokens"],
-            &[Align::Left, Align::Right, Align::Right],
-            &rows,
-            format,
-        );
-        println!();
-    }
-
-    if skills.is_empty() {
-        return Ok(());
-    }
-    let rows: Vec<Vec<String>> = skills
-        .iter()
-        .map(|row| {
-            vec![
-                row.skill.clone(),
-                row.invocations.to_string(),
-                row.out_tokens.to_string(),
-                row.ctx_growth.to_string(),
-                format!("{:.0}", row.duration_sec),
-            ]
-        })
-        .collect();
-    render(
-        &["skill", "runs", "out tokens", "ctx growth", "seconds"],
-        &[
+            .collect(),
+    };
+    let skills_table = TableSpec {
+        headers: &["skill", "runs", "out tokens", "ctx growth", "seconds"],
+        aligns: &[
             Align::Left,
             Align::Right,
             Align::Right,
             Align::Right,
             Align::Right,
         ],
-        &rows,
-        format,
-    );
-    Ok(())
+        rows: skills
+            .iter()
+            .map(|row| {
+                vec![
+                    row.skill.clone(),
+                    row.invocations.to_string(),
+                    row.out_tokens.to_string(),
+                    row.ctx_growth.to_string(),
+                    format!("{:.0}", row.duration_sec),
+                ]
+            })
+            .collect(),
+    };
+    render_view(
+        ViewCtx::single(format, window),
+        json,
+        empty_msg.as_deref(),
+        "What ran and what it cost. First the subagent bill per agent type\n\
+         (costliest first), then how often each skill ran — output tokens written,\n\
+         context growth while it ran, and wall-clock seconds (most-invoked first).\n\
+         A section with nothing to show is omitted.",
+        |format| {
+            println!(
+                "tokens: main-thread skill output {main_out}, subagents {sub_tokens} ({sub_agents} agents)"
+            );
+            // Stated between the total and the table, so the table below is read as
+            // the part it is. Under a drawn window the gap is the straddle, so the
+            // note names the window rather than the pruned transcripts.
+            if let Some(note) = agent_split.partial_note_in(window) {
+                println!("{note}");
+            }
+            println!();
+
+            // The subagent figure is usually the larger one, so break it down by agent
+            // type before the per-skill table: a spawn count alone cannot tell an
+            // expensive agent from a cheap one that runs often.
+            if !agents_table.rows.is_empty() {
+                agents_table.render(format);
+                println!();
+            }
+
+            if skills_table.rows.is_empty() {
+                return;
+            }
+            skills_table.render(format);
+        },
+    )
 }
 
 /// Skill usage rolled up per time bucket (JST). A long span is assigned whole to
@@ -2052,68 +2022,54 @@ fn usage_by_time(store: &Store, bucket: Bucket, window: TimeRange, format: Forma
         row.3 += event.duration_sec;
     }
 
-    if format == Format::Json {
-        let buckets: Vec<serde_json::Value> = totals
-            .iter()
-            .map(|(label, (count, out_tokens, ctx_growth, duration_sec))| {
-                serde_json::json!({
-                    "bucket": label,
-                    "count": count,
-                    "out_tokens": out_tokens,
-                    "ctx_growth": ctx_growth,
-                    "duration_sec": duration_sec,
-                })
-            })
-            .collect();
-        return emit_json(&with_window(
-            serde_json::json!({ "buckets": buckets }),
-            window,
-        ));
-    }
-    if events.is_empty() {
-        println!(
-            "{}",
-            empty_in_window(
-                "no skill usage found — run `saniwalens analyze` first",
-                window
-            )
-        );
-        return Ok(());
-    }
-
-    preamble(
-        format,
-        &framed(
-            "Skill activity per time bucket (times in JST). A long-running skill counts\n\
-             whole in the bucket it started in, so fine buckets can show spikes.",
-            window,
-        ),
-    );
-    let rows: Vec<Vec<String>> = totals
-        .into_iter()
+    let buckets: Vec<serde_json::Value> = totals
+        .iter()
         .map(|(label, (count, out_tokens, ctx_growth, duration_sec))| {
-            vec![
-                label,
-                count.to_string(),
-                out_tokens.to_string(),
-                ctx_growth.to_string(),
-                format!("{duration_sec:.0}"),
-            ]
+            serde_json::json!({
+                "bucket": label,
+                "count": count,
+                "out_tokens": out_tokens,
+                "ctx_growth": ctx_growth,
+                "duration_sec": duration_sec,
+            })
         })
         .collect();
-    render(
-        &["bucket", "runs", "out tokens", "ctx growth", "seconds"],
-        &[
+    let empty_msg = events.is_empty().then(|| {
+        empty_in_window(
+            "no skill usage found — run `saniwalens analyze` first",
+            window,
+        )
+    });
+    let table = TableSpec {
+        headers: &["bucket", "runs", "out tokens", "ctx growth", "seconds"],
+        aligns: &[
             Align::Left,
             Align::Right,
             Align::Right,
             Align::Right,
             Align::Right,
         ],
-        &rows,
-        format,
-    );
-    Ok(())
+        rows: totals
+            .into_iter()
+            .map(|(label, (count, out_tokens, ctx_growth, duration_sec))| {
+                vec![
+                    label,
+                    count.to_string(),
+                    out_tokens.to_string(),
+                    ctx_growth.to_string(),
+                    format!("{duration_sec:.0}"),
+                ]
+            })
+            .collect(),
+    };
+    render_view(
+        ViewCtx::single(format, window),
+        serde_json::json!({ "buckets": buckets }),
+        empty_msg.as_deref(),
+        "Skill activity per time bucket (times in JST). A long-running skill counts\n\
+         whole in the bucket it started in, so fine buckets can show spikes.",
+        |format| table.render(format),
+    )
 }
 
 /// Join the catalogued surfaces against usage: each installed surface with its
@@ -2126,7 +2082,6 @@ fn inventory(
     format: Format,
 ) -> Result<()> {
     let store = &sess.store;
-    eprint_window(window);
     // Plain rows for the pure join: the store-row mapping is the fetch's half,
     // the join and the measurability routing live in `core::findings`.
     let catalog: Vec<findings::CatalogRow> = store
@@ -2147,95 +2102,42 @@ fn inventory(
     let usage = store.usage_counts(window)?;
     let rows = findings::inventory_rows(&catalog, &usage, filter);
 
-    if format == Format::Json {
-        let items: Vec<serde_json::Value> = rows
-            .iter()
-            .map(|row| {
-                use findings::InventoryStatus as Status;
-                match row.status {
-                    Status::Orphaned => serde_json::json!({
-                        "kind": row.kind, "id": row.id,
-                        "scope": null, "project": null,
-                        "static_tokens": null, "startup_tokens": null,
-                        "uses": row.uses, "load_mode": null,
-                        "status": "orphaned",
-                    }),
-                    _ => serde_json::json!({
-                        "kind": row.kind,
-                        "id": row.id,
-                        "scope": row.scope,
-                        "project": if row.project.is_empty() { None } else { Some(&row.project) },
-                        "static_tokens": row.static_tokens,
-                        "startup_tokens": row.startup_tokens,
-                        "uses": row.uses,
-                        "load_mode": row.load_mode,
-                        "status": match row.status {
-                            Status::Unused if window.is_all() => "unused",
-                            Status::Unused => "unused-in-window",
-                            Status::CatalogOnly => "catalog-only",
-                            _ => "",
-                        },
-                    }),
-                }
-            })
-            .collect();
-        return emit_json(&with_window(
-            serde_json::json!({ "surfaces": items }),
-            window,
-        ));
-    }
-    if catalog.is_empty() && usage.is_empty() {
-        println!("nothing catalogued — run `saniwalens analyze` first");
-        return Ok(());
-    }
+    let items: Vec<serde_json::Value> = rows
+        .iter()
+        .map(|row| {
+            use findings::InventoryStatus as Status;
+            match row.status {
+                Status::Orphaned => serde_json::json!({
+                    "kind": row.kind, "id": row.id,
+                    "scope": null, "project": null,
+                    "static_tokens": null, "startup_tokens": null,
+                    "uses": row.uses, "load_mode": null,
+                    "status": "orphaned",
+                }),
+                _ => serde_json::json!({
+                    "kind": row.kind,
+                    "id": row.id,
+                    "scope": row.scope,
+                    "project": if row.project.is_empty() { None } else { Some(&row.project) },
+                    "static_tokens": row.static_tokens,
+                    "startup_tokens": row.startup_tokens,
+                    "uses": row.uses,
+                    "load_mode": row.load_mode,
+                    "status": match row.status {
+                        Status::Unused => unused_status(window),
+                        Status::CatalogOnly => "catalog-only",
+                        _ => "",
+                    },
+                }),
+            }
+        })
+        .collect();
+    let empty_msg = (catalog.is_empty() && usage.is_empty())
+        .then_some("nothing catalogued — run `saniwalens analyze` first".to_string());
 
-    preamble(format, &framed(sess.harness.inventory_preamble(), window));
-    let mut table: Vec<Vec<String>> = Vec::new();
-    for row in &rows {
-        use findings::InventoryStatus as Status;
-        if matches!(row.status, Status::Orphaned) {
-            table.push(vec![
-                row.kind.clone(),
-                row.id.clone(),
-                "-".to_string(),
-                "-".to_string(),
-                "-".to_string(),
-                row.uses.map_or_else(|| "?".to_string(), |n| n.to_string()),
-                "-".to_string(),
-                "ORPHANED".to_string(),
-            ]);
-            continue;
-        }
-        // "unused" is only meaningful for usage-measurable kinds; catalog-only
-        // kinds (rules, hooks, CLAUDE.md) emit no events, so 0 means nothing.
-        // The pure row carries that distinction as uses/status already.
-        let (uses_cell, status) = match row.status {
-            Status::Unused => (
-                row.uses.map_or_else(|| "?".to_string(), |n| n.to_string()),
-                unused_label(window),
-            ),
-            Status::InUse => (
-                row.uses.map_or_else(|| "?".to_string(), |n| n.to_string()),
-                "",
-            ),
-            Status::CatalogOnly => ("-".to_string(), "(catalog-only)"),
-            Status::Orphaned => unreachable!("handled above"),
-        };
-        let tokens = |value: Option<i64>| value.map_or_else(|| "?".to_string(), |t| t.to_string());
-        table.push(vec![
-            row.kind.clone(),
-            row.id.clone(),
-            scope_cell(&row.scope, &row.project),
-            tokens(row.startup_tokens),
-            tokens(row.static_tokens),
-            uses_cell,
-            row.load_mode.clone().unwrap_or_default(),
-            status.to_string(),
-        ]);
-    }
-
-    render(
-        &[
+    let preamble_text = sess.harness.inventory_preamble().to_string();
+    let table = TableSpec {
+        headers: &[
             "kind",
             "id",
             "scope",
@@ -2245,7 +2147,7 @@ fn inventory(
             "load mode",
             "status",
         ],
-        &[
+        aligns: &[
             Align::Left,
             Align::Left,
             Align::Left,
@@ -2255,10 +2157,61 @@ fn inventory(
             Align::Left,
             Align::Left,
         ],
-        &table,
-        format,
-    );
-    Ok(())
+        rows: {
+            let mut table: Vec<Vec<String>> = Vec::new();
+            for row in &rows {
+                use findings::InventoryStatus as Status;
+                if matches!(row.status, Status::Orphaned) {
+                    table.push(vec![
+                        row.kind.clone(),
+                        row.id.clone(),
+                        "-".to_string(),
+                        "-".to_string(),
+                        "-".to_string(),
+                        row.uses.map_or_else(|| "?".to_string(), |n| n.to_string()),
+                        "-".to_string(),
+                        "ORPHANED".to_string(),
+                    ]);
+                    continue;
+                }
+                // "unused" is only meaningful for usage-measurable kinds; catalog-only
+                // kinds (rules, hooks, CLAUDE.md) emit no events, so 0 means nothing.
+                // The pure row carries that distinction as uses/status already.
+                let (uses_cell, status) = match row.status {
+                    Status::Unused => (
+                        row.uses.map_or_else(|| "?".to_string(), |n| n.to_string()),
+                        unused_label(window),
+                    ),
+                    Status::InUse => (
+                        row.uses.map_or_else(|| "?".to_string(), |n| n.to_string()),
+                        "",
+                    ),
+                    Status::CatalogOnly => ("-".to_string(), "(catalog-only)"),
+                    Status::Orphaned => unreachable!("handled above"),
+                };
+                let tokens =
+                    |value: Option<i64>| value.map_or_else(|| "?".to_string(), |t| t.to_string());
+                table.push(vec![
+                    row.kind.clone(),
+                    row.id.clone(),
+                    scope_cell(&row.scope, &row.project),
+                    tokens(row.startup_tokens),
+                    tokens(row.static_tokens),
+                    uses_cell,
+                    row.load_mode.clone().unwrap_or_default(),
+                    status.to_string(),
+                ]);
+            }
+            table
+        },
+    };
+    render_view(
+        ViewCtx::single(format, window),
+        serde_json::json!({ "surfaces": items }),
+        empty_msg.as_deref(),
+        &preamble_text,
+        |format| table.render(format),
+    )
 }
 
 /// Whether a catalog row's `(scope, project)` passes the `--scope` filter.

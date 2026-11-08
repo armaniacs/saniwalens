@@ -1,0 +1,12 @@
+tokens: main-thread 100, subagents 150 — by model, costliest first
+note: opus holds 80% of this window's output tokens
+
+| model | events | out tokens |
+| --- | --- | --- |
+| opus | 1 | 100 |
+
+| model | runs | out tokens |
+| --- | --- | --- |
+| opus | 1 | 100 |
+| sonnet | 1 | 40 |
+| unknown | 1 | 10 |

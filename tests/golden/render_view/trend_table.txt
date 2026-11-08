@@ -1,0 +1,28 @@
+Usage trend — this window against the equal-length window right before it.
+previous window: since 2023-11-13T00:00:00+09:00, until 2023-11-14T23:59:59+09:00
+report window: since 2023-11-15T00:00:00+09:00, until 2023-11-16T23:59:59+09:00
+
+kind              metric      previous  current  delta  direction
+-----------------------------------------------------------------
+file_edit         events             1        1     +0  same     
+session_start     events             1        1     +0  same     
+skill_invocation  events             1        1     +0  same     
+skill_invocation  out tokens       150      300   +150  up       
+skill_invocation  seconds          2.0      2.0   +0.0  same     
+
+Skills (largest movement first):
+skill   previous  current  delta  direction
+-------------------------------------------
+commit         1        1     +0  same     
+
+Surfaces (largest movement first):
+surface       previous  current  delta  direction
+-------------------------------------------------
+skill/commit         1        1     +0  same     
+
+Totals:
+total            previous  current  delta  direction
+----------------------------------------------------
+sessions                1        1     +0  same     
+subagent runs           1        2     +1  up       
+subagent tokens       400      500   +100  up       

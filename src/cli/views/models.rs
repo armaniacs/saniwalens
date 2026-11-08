@@ -9,9 +9,7 @@ use crate::core::period::TimeRange;
 use crate::core::usage::bundle_models;
 use crate::session::Session;
 
-use super::super::{
-    Align, Format, emit_json, empty_in_window, eprint_window, framed, preamble, render, with_window,
-};
+use super::super::{Align, Format, TableSpec, ViewCtx, empty_in_window, render_view};
 
 /// Per-model cost split for one window: main-thread rows (model-attributed
 /// usage events) and subagent rows (runs grouped by their own model).
@@ -20,46 +18,27 @@ use super::super::{
 /// (a dropped row would read as a smaller total).
 pub(crate) fn models(sess: &Session, window: TimeRange, format: Format) -> Result<()> {
     let store = &sess.store;
-    eprint_window(window);
     let main = bundle_models(store.model_usage_events(window)?);
     let subs = bundle_models(store.model_usage_subagents(window)?);
 
-    if format == Format::Json {
-        return emit_json(&with_window(
-            serde_json::json!({
-                "main": main.iter().map(|row| serde_json::json!({
-                    "model": row.model,
-                    "events": row.count,
-                    "out_tokens": row.out_tokens,
-                })).collect::<Vec<_>>(),
-                "subagents": subs.iter().map(|row| serde_json::json!({
-                    "model": row.model,
-                    "runs": row.count,
-                    "out_tokens": row.out_tokens,
-                })).collect::<Vec<_>>(),
-            }),
+    let json = serde_json::json!({
+        "main": main.iter().map(|row| serde_json::json!({
+            "model": row.model,
+            "events": row.count,
+            "out_tokens": row.out_tokens,
+        })).collect::<Vec<_>>(),
+        "subagents": subs.iter().map(|row| serde_json::json!({
+            "model": row.model,
+            "runs": row.count,
+            "out_tokens": row.out_tokens,
+        })).collect::<Vec<_>>(),
+    });
+    let empty_msg = (main.is_empty() && subs.is_empty()).then(|| {
+        empty_in_window(
+            "no model usage found — run `saniwalens analyze` first",
             window,
-        ));
-    }
-    if main.is_empty() && subs.is_empty() {
-        println!(
-            "{}",
-            empty_in_window(
-                "no model usage found — run `saniwalens analyze` first",
-                window
-            )
-        );
-        return Ok(());
-    }
-    preamble(
-        format,
-        &framed(
-            "Where the tokens went, by model: main-thread usage first, then the\n\
-             subagent runs grouped by their own model. An `unknown` row is usage\n\
-             with no recorded model — bundled, never dropped.",
-            window,
-        ),
-    );
+        )
+    });
     let total_main: u64 = main.iter().map(|row| row.out_tokens).sum();
     let total_sub: u64 = subs.iter().map(|row| row.out_tokens).sum();
     let mut combined: std::collections::BTreeMap<&str, u64> = std::collections::BTreeMap::new();
@@ -71,13 +50,14 @@ pub(crate) fn models(sess: &Session, window: TimeRange, format: Format) -> Resul
         .max_by_key(|(_, tokens)| *tokens)
         .map(|(model, tokens)| (*model, *tokens))
         .unwrap_or(("", 0));
-    println!("tokens: main-thread {total_main}, subagents {total_sub} — by model, costliest first");
-    if let Some(note) = concentration_note(total_main + total_sub, top_model, top_tokens) {
-        println!("{note}");
-    }
-    println!();
-    if !main.is_empty() {
-        let rows: Vec<Vec<String>> = main
+    let summary = format!(
+        "tokens: main-thread {total_main}, subagents {total_sub} — by model, costliest first"
+    );
+    let concentration = concentration_note(total_main + total_sub, top_model, top_tokens);
+    let main_table = TableSpec {
+        headers: &["model", "events", "out tokens"],
+        aligns: &[Align::Left, Align::Right, Align::Right],
+        rows: main
             .iter()
             .map(|row| {
                 vec![
@@ -86,35 +66,45 @@ pub(crate) fn models(sess: &Session, window: TimeRange, format: Format) -> Resul
                     row.out_tokens.to_string(),
                 ]
             })
-            .collect();
-        render(
-            &["model", "events", "out tokens"],
-            &[Align::Left, Align::Right, Align::Right],
-            &rows,
-            format,
-        );
-        println!();
-    }
-    if subs.is_empty() {
-        return Ok(());
-    }
-    let rows: Vec<Vec<String>> = subs
-        .iter()
-        .map(|row| {
-            vec![
-                row.model.clone(),
-                row.count.to_string(),
-                row.out_tokens.to_string(),
-            ]
-        })
-        .collect();
-    render(
-        &["model", "runs", "out tokens"],
-        &[Align::Left, Align::Right, Align::Right],
-        &rows,
-        format,
-    );
-    Ok(())
+            .collect(),
+    };
+    let subs_table = TableSpec {
+        headers: &["model", "runs", "out tokens"],
+        aligns: &[Align::Left, Align::Right, Align::Right],
+        rows: subs
+            .iter()
+            .map(|row| {
+                vec![
+                    row.model.clone(),
+                    row.count.to_string(),
+                    row.out_tokens.to_string(),
+                ]
+            })
+            .collect(),
+    };
+    render_view(
+        ViewCtx::single(format, window),
+        json,
+        empty_msg.as_deref(),
+        "Where the tokens went, by model: main-thread usage first, then the\n\
+         subagent runs grouped by their own model. An `unknown` row is usage\n\
+         with no recorded model — bundled, never dropped.",
+        |format| {
+            println!("{summary}");
+            if let Some(note) = concentration {
+                println!("{note}");
+            }
+            println!();
+            if !main_table.rows.is_empty() {
+                main_table.render(format);
+                println!();
+            }
+            if subs_table.rows.is_empty() {
+                return;
+            }
+            subs_table.render(format);
+        },
+    )
 }
 
 /// Warn when the model mix is concentrated enough to act on: one model holds

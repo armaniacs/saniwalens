@@ -1,0 +1,32 @@
+Usage trend — this window against the equal-length window right before it.
+A delta marked n/a: that row's previous side has nothing to compare — not a drop.
+previous window: since 2023-11-13T00:00:00+09:00, until 2023-11-14T23:59:59+09:00
+report window: since 2023-11-15T00:00:00+09:00, until 2023-11-16T23:59:59+09:00
+
+kind              metric      previous  current  delta  direction
+-----------------------------------------------------------------
+file_edit         events             0        1    n/a  n/a      
+session_start     events             0        1    n/a  n/a      
+skill_invocation  events             0        1    n/a  n/a      
+skill_invocation  out tokens         0      300    n/a  n/a      
+skill_invocation  seconds          0.0      2.0    n/a  n/a      
+
+Skills (largest movement first):
+skill   previous  current  delta  direction
+-------------------------------------------
+commit         0        1    n/a  n/a      
+
+Surfaces (largest movement first):
+surface       previous  current  delta  direction
+-------------------------------------------------
+skill/commit         0        1    n/a  n/a      
+
+Totals:
+total            previous  current  delta  direction
+----------------------------------------------------
+sessions                0        1    n/a  n/a      
+subagent runs           0        2    n/a  n/a      
+subagent tokens         0      500    n/a  n/a      
+
+the previous window (since 2023-11-13T00:00:00+09:00, until 2023-11-14T23:59:59+09:00) holds no events in this store — comparisons
+marked n/a have nothing to compare against, so no change is claimed for them

@@ -1,0 +1,15 @@
+How you steer Claude Code, classified per prompt: instruct (substantive asks),
+steer ("go ahead" / "yes"), correct ("no, instead…"), question. Lots of
+steering = room for more autonomy; lots of correcting = unclear upfront specs.
+
+behavior  count  share
+----------------------
+instruct      5    63%
+steer         2    25%
+correct       1    13%
+
+8 prompts (behavioral classes are lexical heuristics)
+  - 25% steering ("go ahead" / "yes" / "next"): you approve in small steps — room for more autonomy (clearer upfront scope, /loop, longer leash).
+  - 13% corrections ("no" / "instead" / "戻して"): rework after a wrong turn — tighter initial specs or rules could cut it.
+
+8 prompt(s) referenced rotated or missing transcripts — excluded from candidates, not silently dropped
