@@ -27,21 +27,21 @@ Scenario: model が空の行は unknown として束ねられる
   And   行を落としたり、別のモデル名に見立てたりはしない
 
 ## 受け入れ基準
-- [ ] 新ビューがモデル別の件数とトークン合計を降順で出す
+- [x] 新ビューがモデル別の件数とトークン合計を降順で出す（modelsビュー。core bundle_modelsで決定順）
   （トークン合計が同じなら件数か名前で決定的な順序になる）
-- [ ] 集計は model 列を持つ既存テーブル（イベント側と subagent_runs 側）で完結する。
+- [x] 集計は model 列を持つ既存テーブル（イベント側と subagent_runs 側）で完結する。（migrationなし。新規クエリ2件）
   schema の migration はしない
-- [ ] model が空（NULL）の行は unknown として束ね、行を落とさない
-- [ ] tool_error の model 列には起因ツール名が入る点に注意し、
+- [x] model が空（NULL）の行は unknown として束ね、行を落とさない
+- [x] tool_error の model 列には起因ツール名が入る点に注意し（kindフィルタで除外。回帰テスト済み）、
   ビューの対象から除外するか分けて扱う（「モデル」として数えない）
-- [ ] 他のビューと同じ規約を持つ: --frozen / --format table|markdown|json / --db、
+- [x] 他のビューと同じ規約を持つ（--frozen/format/--db/freshness/framing/JSON名前付き。golden＋E2Eで固定）: --frozen / --format table|markdown|json / --db、
   freshness（自動 refresh）と freshness 行（stderr）、framing block（table のみ）、
   JSON は名前付きオブジェクト
-- [ ] --since / --until / --last を他のビューと同様に受け付ける（Period 節の規約に揃える）
-- [ ] docs/specs/cli.md の Views 表に行を追加し、このビューが担うロジック
+- [x] --since / --until / --last を他のビューと同様に受け付ける（WindowedDispatch.open経路。E2Eで境界確認）（Period 節の規約に揃える）
+- [x] docs/specs/cli.md の Views 表に行を追加し（architecture.mdのreport行も更新。view-landing規約どおりviews/着地）、このビューが担うロジック
   （unknown 束ね、起因ツールの分離、降順の決定性）が 1 行 sql を超える根拠を書く
   （spec-sync 規約: Views の curated 規約との整合）
-- [ ] cargo fmt --check、cargo clippy --all-targets --all-features -- -D warnings、
+- [x] cargo fmt --check、cargo clippy --all-targets --all-features -- -D warnings、
   cargo test が green
 
 ## テスト戦略
@@ -81,6 +81,6 @@ Scenario: model が空の行は unknown として束ねられる
   src/store.rs（events / subagent_runs の読み出し）
 
 ## Definition of Done
-- [ ] 全BDDシナリオが自動テストとして実装されパスする
-- [ ] コードレビュー完了
-- [ ] ドキュメント更新済み
+- [x] 全BDDシナリオが自動テストとして実装されパスする（E2E 3件＋core単体＋concentration＋help golden）
+- [x] コードレビュー完了（バッチ統合レビュー: 親エージェントが全diff・spec同期・干渉を目視確認）
+- [x] ドキュメント更新済み（spec-sync: cli.md Views行＋architecture report行）

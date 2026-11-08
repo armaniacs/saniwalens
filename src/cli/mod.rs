@@ -103,6 +103,16 @@ enum Command {
         #[command(flatten)]
         read: ReadArgs,
     },
+    /// Where the tokens went, by model: main-thread usage and subagent runs
+    /// grouped per model, costliest first.
+    Models {
+        #[command(flatten)]
+        period: PeriodArgs,
+        #[command(flatten)]
+        format: FormatArgs,
+        #[command(flatten)]
+        read: ReadArgs,
+    },
     /// Everything installed in your config (skills, rules, agents, MCP
     /// servers, CLAUDE.md), what it weighs, and whether it was ever used.
     Inventory {
@@ -296,6 +306,14 @@ pub fn run() -> Result<()> {
         Command::Trend { pair, format, read } => {
             let opened = dispatch.open_pair(format.as_deref(), &pair, &read, run_analyze)?;
             trend(&opened.sess, opened.pair, opened.format)
+        }
+        Command::Models {
+            period,
+            format,
+            read,
+        } => {
+            let opened = dispatch.open(format.as_deref(), &period, &read, run_analyze)?;
+            views::models::models(&opened.sess, opened.window, opened.format)
         }
         Command::Inventory {
             scope,

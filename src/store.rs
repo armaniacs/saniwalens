@@ -1261,6 +1261,51 @@ impl Store {
         Ok(rows)
     }
 
+    /// Per-model cost attribution over model-carrying usage events
+    /// (`skill_invocation`, `agent_spawn`): count and output tokens per model.
+    /// `tool_error` rows are excluded — their `model` column carries the
+    /// originating tool, not a model (`docs/specs/events.md`). Ordering is
+    /// left to `core::usage::bundle_models` (deterministic, unit-tested).
+    /// No migration: `events.model` already exists.
+    pub fn model_usage_events(&self, range: TimeRange) -> Result<Vec<(Option<String>, i64, u64)>> {
+        let (filter, binds) = range_clause(range, "started_epoch");
+        let mut stmt = self.conn.prepare(&format!(
+            "SELECT model, COUNT(*), COALESCE(SUM(out_tokens), 0)
+             FROM events
+             WHERE kind IN ('skill_invocation', 'agent_spawn'){filter}
+             GROUP BY model"
+        ))?;
+        let rows = stmt
+            .query_map(params_from_iter(binds), |row| {
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(rows)
+    }
+
+    /// Per-model subagent cost: runs and output tokens per `model` over
+    /// `subagent_runs`. Bundled with the same `bundle_models` as the event
+    /// side, but kept separate — main-thread and subagent costs answer
+    /// different questions (`docs/specs/cli.md`).
+    pub fn model_usage_subagents(
+        &self,
+        range: TimeRange,
+    ) -> Result<Vec<(Option<String>, i64, u64)>> {
+        let (filter, binds) = range_clause(range, "started_epoch");
+        let mut stmt = self.conn.prepare(&format!(
+            "SELECT model, COUNT(*), COALESCE(SUM(out_tokens), 0)
+             FROM subagent_runs
+             WHERE 1=1{filter}
+             GROUP BY model"
+        ))?;
+        let rows = stmt
+            .query_map(params_from_iter(binds), |row| {
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(rows)
+    }
+
     /// Per-kind event rollup for the trend view: every event kind's count,
     /// output tokens, and wall-clock in the window, ordered by kind so the two
     /// windows' rows line up for a diff. Kinds with no events in the window

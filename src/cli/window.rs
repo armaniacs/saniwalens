@@ -634,6 +634,13 @@ mod tests {
                 read.frozen,
                 read.db,
             ),
+            Command::Models { period, read, .. } => (
+                period.since,
+                period.until,
+                period.last,
+                read.frozen,
+                read.db,
+            ),
             Command::Doctor { period, read, .. } => (
                 period.since,
                 period.until,

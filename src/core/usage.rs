@@ -142,6 +142,50 @@ fn mcp_server_of(tool: &str) -> Option<String> {
     (!server.is_empty()).then(|| server.to_string())
 }
 
+/// One model's share of a side (main-thread events or subagent runs): how
+/// many rows named it and what those rows cost. The `unknown` bucket is where
+/// rows with no recorded model land — dropped rows would read as a smaller
+/// total, and inventing a model would be worse.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ModelShare {
+    pub model: String,
+    pub count: i64,
+    pub out_tokens: u64,
+}
+
+/// Bundle `(model, count, tokens)` rows by model: `None` and `""` both file
+/// under `"unknown"`, and the output is deterministic — tokens descending,
+/// then count descending, then name ascending, so ties never churn between
+/// runs. Pure, so the view's ordering is unit-tested here, not in SQL.
+pub fn bundle_models(rows: Vec<(Option<String>, i64, u64)>) -> Vec<ModelShare> {
+    use std::collections::BTreeMap;
+    let mut totals: BTreeMap<String, (i64, u64)> = BTreeMap::new();
+    for (model, count, tokens) in rows {
+        let name = match model.as_deref() {
+            None | Some("") => "unknown".to_string(),
+            Some(name) => name.to_string(),
+        };
+        let entry = totals.entry(name).or_default();
+        entry.0 += count;
+        entry.1 += tokens;
+    }
+    let mut out: Vec<ModelShare> = totals
+        .into_iter()
+        .map(|(model, (count, out_tokens))| ModelShare {
+            model,
+            count,
+            out_tokens,
+        })
+        .collect();
+    out.sort_by(|a, b| {
+        b.out_tokens
+            .cmp(&a.out_tokens)
+            .then_with(|| b.count.cmp(&a.count))
+            .then_with(|| a.model.cmp(&b.model))
+    });
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -358,5 +402,42 @@ mod tests {
             ),
         ];
         assert_eq!(output_tokens(&records), 100);
+    }
+
+    #[test]
+    fn model_shares_sort_by_tokens_then_count_then_name() {
+        let rows = vec![
+            (Some("b".to_string()), 5, 100),
+            (Some("a".to_string()), 1, 100),
+            (Some("c".to_string()), 9, 50),
+        ];
+        let out = bundle_models(rows);
+        // Tokens first: a and b tie at 100, count breaks it (5 > 1).
+        assert_eq!(
+            out.iter().map(|r| r.model.as_str()).collect::<Vec<_>>(),
+            vec!["b", "a", "c"]
+        );
+        // Full ties fall back to the name, so the order never churns.
+        let out = bundle_models(vec![
+            (Some("b".to_string()), 1, 10),
+            (Some("a".to_string()), 1, 10),
+        ]);
+        assert_eq!(
+            out.iter().map(|r| r.model.as_str()).collect::<Vec<_>>(),
+            vec!["a", "b"]
+        );
+    }
+
+    #[test]
+    fn missing_and_empty_models_bundle_as_unknown() {
+        let out = bundle_models(vec![
+            (None, 2, 30),
+            (Some(String::new()), 1, 20),
+            (Some("m".to_string()), 1, 10),
+        ]);
+        assert_eq!(out[0].model, "unknown");
+        assert_eq!(out[0].count, 3);
+        assert_eq!(out[0].out_tokens, 50);
+        assert_eq!(out[1].model, "m");
     }
 }
