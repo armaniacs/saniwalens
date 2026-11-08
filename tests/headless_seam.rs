@@ -13,8 +13,7 @@ use std::sync::mpsc::RecvTimeoutError;
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
-use saniwalens::adapter::harness::{Harness, RunLineRenderer};
-use saniwalens::adapter::opencode::RunEvent;
+use saniwalens::adapter::harness::{Harness, RunLine, RunLineRenderer};
 use saniwalens::cli::heartbeat;
 use saniwalens::cli::{AdvisorLaunch, DeliveryMode, DeliveryPlan, deliver};
 
@@ -96,9 +95,10 @@ fn the_quiet_headless_delivery_hands_the_advisor_the_seam_renderer() {
         .expect("the advisor received the headless run");
     assert_eq!(leading, vec!["run", "--format", "json"]);
     // The renderer is the seam's choice, still working when it arrives: the
-    // adapter's opencode stream renderer, not a shell-local copy.
+    // adapter's shared headless-stream renderer, not a shell-local copy. The
+    // test names no `opencode::` type: the seam is harness-neutral.
     let render = render.expect("a headless harness ships a renderer");
-    assert_eq!(render(TOOL_LINE), RunEvent::Progress("read".to_string()));
+    assert_eq!(render(TOOL_LINE), RunLine::Progress("read".to_string()));
 }
 
 /// The budget for one phase of the observation, far above one poll (5ms), so a

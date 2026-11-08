@@ -23,11 +23,43 @@ use crate::core::surface::{Scope, Surface};
 use crate::core::usage::UsageEvent;
 use crate::store::{IngestBatch, OpenMode, SessionMeta, Store};
 
+/// One rendered slice of a headless run's raw stdout line — what the
+/// terminal shows while the run streams. Upstream event shapes are
+/// unversioned, so a line that carries no recognizable text yields `Silent`
+/// and the raw line goes to the run log instead (`docs/specs/harness.md`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RunLine {
+    /// Agent-visible text: the narration lines and the final plan.
+    Text(String),
+    /// A compact one-line progress marker — a tool name (`read`, `shell`) or
+    /// a part type (`step-start`) for events with no agent text.
+    Progress(String),
+    /// A line with nothing to show (not JSON, no type anywhere).
+    Silent,
+}
+
 /// A headless run-line renderer: one raw stdout line turned into the
-/// [`RunEvent`](opencode::RunEvent) the terminal shows. The signature is
-/// uniform so the shell's headless loop can run any harness's renderer
-/// without knowing its stream.
-pub type RunLineRenderer = fn(&str) -> opencode::RunEvent;
+/// [`RunLine`] the terminal shows. The signature is uniform so the shell's
+/// headless loop can run any harness's renderer without knowing its stream.
+pub type RunLineRenderer = fn(&str) -> RunLine;
+
+impl From<opencode::RunEvent> for RunLine {
+    fn from(event: opencode::RunEvent) -> Self {
+        match event {
+            opencode::RunEvent::Text(text) => RunLine::Text(text),
+            opencode::RunEvent::Progress(tool) => RunLine::Progress(tool),
+            opencode::RunEvent::Silent => RunLine::Silent,
+        }
+    }
+}
+
+/// The shared headless-stream renderer: kilo is an OpenCode fork and shares
+/// the `opencode run --format json` stream, so every headless harness renders
+/// through this one adapter-local function — the single place that names the
+/// opencode stream renderer. Callers only ever see [`RunLine`].
+fn render_run_line(line: &str) -> RunLine {
+    opencode::render_run_line(line).into()
+}
 
 /// The agent harness one store holds. One store never mixes harnesses, so
 /// this labels a whole run — never a row.
@@ -199,30 +231,40 @@ pub(crate) fn catalog_sites(
     surfaces
 }
 
+/// One harness's site rows: the global sites plus the per-project site
+/// factory. A new harness adds one tuple arm in `catalog_surfaces`.
+type SiteSet = (Vec<Site>, fn(&Path) -> Vec<Site>);
+
 /// Every installed surface for one harness across the given project roots —
 /// the single traversal entry point `analyze` uses (`docs/specs/harness.md`).
 /// Resolves this harness's config root from the environment; the roots come
 /// from the store's recorded sessions.
 pub fn catalog_surfaces(harness: Harness, roots: &[(String, String)]) -> Result<Vec<Surface>> {
     let home = home_dir().map(Path::new);
-    let global = match harness {
+    // One dispatch for the config root and both site rows: a new harness
+    // adds one arm here, and the traversal below never changes.
+    let (global, project_sites): SiteSet = match harness {
         Harness::Claude => {
             let config_dir = crate::adapter::config::claude_home()?;
-            crate::adapter::claude::global_sites(&config_dir)
+            (
+                crate::adapter::claude::global_sites(&config_dir),
+                crate::adapter::claude::project_sites,
+            )
         }
         Harness::Opencode => {
             let config_dir = crate::adapter::opencode::opencode_home()?;
-            crate::adapter::opencode::global_sites(&config_dir, home)
+            (
+                crate::adapter::opencode::global_sites(&config_dir, home),
+                crate::adapter::opencode::project_sites,
+            )
         }
         Harness::Kilocode => {
             let config_dir = crate::adapter::kilocode::kilo_home()?;
-            crate::adapter::kilocode::global_sites(&config_dir, home)
+            (
+                crate::adapter::kilocode::global_sites(&config_dir, home),
+                crate::adapter::kilocode::project_sites,
+            )
         }
-    };
-    let project_sites: fn(&Path) -> Vec<Site> = match harness {
-        Harness::Claude => crate::adapter::claude::project_sites,
-        Harness::Opencode => crate::adapter::opencode::project_sites,
-        Harness::Kilocode => crate::adapter::kilocode::project_sites,
     };
     Ok(catalog_sites(&global, project_sites, roots, home))
 }
@@ -378,6 +420,19 @@ where
 }
 
 impl Harness {
+    /// Every harness, in canonical order: the single list `parse` and the
+    /// error-hint vocabulary derive from, so a new harness lands in one place.
+    pub const ALL: [Harness; 3] = [Harness::Claude, Harness::Opencode, Harness::Kilocode];
+
+    /// Every valid `--harness` spelling, in canonical order, for error hints
+    /// (`session::parse_harness`): built from [`Harness::ALL`], never re-spelled.
+    pub fn label_list() -> String {
+        Self::ALL
+            .iter()
+            .map(|harness| harness.label())
+            .collect::<Vec<_>>()
+            .join(" | ")
+    }
     /// Analyze this harness's input into `db` — the one seam the `analyze`
     /// command and the views' auto-refresh call. The per-harness routines
     /// live beside their formats (`adapter::claude`, `adapter::opencode`,
@@ -409,14 +464,12 @@ impl Harness {
     }
 
     /// Parse `--harness`. `None` for anything else, so the caller can fail
-    /// with the valid list.
+    /// with the valid list. Single-sourced from [`Harness::ALL`]: the spelling
+    /// compared here is the same [`Harness::label`] the store and hints use.
     pub fn parse(value: &str) -> Option<Self> {
-        match value {
-            "claude" => Some(Harness::Claude),
-            "opencode" => Some(Harness::Opencode),
-            "kilocode" => Some(Harness::Kilocode),
-            _ => None,
-        }
+        Self::ALL
+            .into_iter()
+            .find(|harness| harness.label() == value)
     }
 
     /// The `meta.harness` value and the error-hint vocabulary.
@@ -554,9 +607,9 @@ impl Harness {
     }
 
     /// The renderer for a headless run's raw stdout lines: the adapter fn
-    /// turning one raw line into a [`RunEvent`](opencode::RunEvent), handed to
-    /// the shell's headless loop as seam data (`run_headless` in `cli/headless.rs`),
-    /// so the loop neither names a harness nor matches on one. `opencode run
+    /// turning one raw line into a [`RunLine`], handed to the shell's
+    /// headless loop as seam data (`run_headless` in `cli/headless.rs`), so
+    /// the loop neither names a harness nor matches on one. `opencode run
     /// --format json` streams unversioned JSON events, so the renderer is the
     /// lenient one; kilo is an OpenCode fork and shares the stream, so a
     /// headless kilo run is the same arm. Claude's launch opens the
@@ -566,7 +619,7 @@ impl Harness {
     pub fn run_line_renderer(&self) -> Option<RunLineRenderer> {
         match self {
             Harness::Claude => None,
-            Harness::Opencode | Harness::Kilocode => Some(opencode::render_run_line),
+            Harness::Opencode | Harness::Kilocode => Some(render_run_line),
         }
     }
 
@@ -833,19 +886,18 @@ mod tests {
         // seam hands the shell the adapter's lenient renderer; kilo is an
         // OpenCode fork and shares the stream, so a headless kilo run needs no
         // shell edit. Claude's launch opens the interactive TUI
-        // (`launch_command`), so it has no headless stream to render.
+        // (`launch_command`), so it has no headless stream to render. The
+        // assertions name only the harness-local event: no `opencode::` type
+        // may appear in caller-side code.
         let line = r#"{"type":"tool_use","part":{"type":"tool","tool":"read"}}"#;
         let opencode = Harness::Opencode
             .run_line_renderer()
             .expect("headless stream");
-        assert_eq!(
-            opencode(line),
-            opencode::RunEvent::Progress("read".to_string())
-        );
+        assert_eq!(opencode(line), RunLine::Progress("read".to_string()));
         let kilo = Harness::Kilocode
             .run_line_renderer()
             .expect("headless stream");
-        assert_eq!(kilo(line), opencode::RunEvent::Progress("read".to_string()));
+        assert_eq!(kilo(line), RunLine::Progress("read".to_string()));
         assert!(Harness::Claude.run_line_renderer().is_none());
     }
 

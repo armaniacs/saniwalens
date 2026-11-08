@@ -90,16 +90,6 @@ pub(crate) fn profile_name_is_valid(name: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
 }
 
-/// Canonical harness spelling for the config file. Also used by
-/// `equivalent_command` (replace its inline match with this).
-pub(crate) fn harness_name(harness: &Harness) -> &'static str {
-    match harness {
-        Harness::Claude => "claude",
-        Harness::Opencode => "opencode",
-        Harness::Kilocode => "kilocode",
-    }
-}
-
 /// The reproducible command line for a guided run: printed before the run
 /// and reprinted after it, so a guided run is always re-runnable by hand.
 /// This string is the guide's machine contract (no JSON golden: the guide
@@ -109,9 +99,12 @@ pub(crate) fn equivalent_command(
     purpose: Purpose,
     scope: ScopeChoice,
 ) -> String {
-    let harness_part = match harness {
-        Harness::Claude => String::new(),
-        _ => format!(" --harness {}", harness_name(harness)),
+    // The default harness rides bare: every other harness names itself via
+    // the single `Harness::label` spelling, so no arm re-spells it.
+    let harness_part = if *harness == Harness::Claude {
+        String::new()
+    } else {
+        format!(" --harness {}", harness.label())
     };
     let command = match purpose {
         Purpose::Doctor => "doctor",
@@ -431,7 +424,7 @@ pub(crate) fn run_guide<R: BufRead, W: Write>(
     config_path: Option<&Path>,
 ) -> anyhow::Result<()> {
     // Step 1 (design §2): confirm, not re-ask ― Enter keeps the resolved value.
-    writeln!(output, "使っているエージェント: {}", harness_name(harness))?;
+    writeln!(output, "使っているエージェント: {}", harness.label())?;
 
     let period = PeriodArgs {
         since: None,
@@ -512,13 +505,8 @@ pub(crate) fn run_guide<R: BufRead, W: Write>(
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
                 Err(e) => return Err(e.into()),
             };
-            if let Some(text) = ask_save(
-                input,
-                output,
-                existing.as_deref(),
-                harness_name(harness),
-                path,
-            )? {
+            if let Some(text) = ask_save(input, output, existing.as_deref(), harness.label(), path)?
+            {
                 persist_config(path, &text, existing.as_deref())?;
             }
         }
@@ -750,6 +738,24 @@ mod tests {
             }
         }
         assert_eq!(n, 27, "3 harnesses x 3 purposes x 3 scopes");
+    }
+
+    #[test]
+    fn equivalent_command_literal_goldens_pin_the_harness_spelling() {
+        // Byte-level pins for the harness prefix: the refactor routes this
+        // through `Harness::label`, and these literals must not move.
+        assert_eq!(
+            equivalent_command(&Harness::Claude, Purpose::Doctor, ScopeChoice::All),
+            "saniwalens doctor"
+        );
+        assert_eq!(
+            equivalent_command(&Harness::Opencode, Purpose::Waste, ScopeChoice::Global),
+            "saniwalens --harness opencode waste --scope global"
+        );
+        assert_eq!(
+            equivalent_command(&Harness::Kilocode, Purpose::Failures, ScopeChoice::Project),
+            "saniwalens --harness kilocode failures --scope project"
+        );
     }
 
     #[test]

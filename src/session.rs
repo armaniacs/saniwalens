@@ -70,12 +70,13 @@ pub fn resolve_cli(
 }
 
 /// Parse `--harness`. Absent means Claude Code — every pre-flag invocation
-/// keeps its behavior, which is what keeps the flag upstream-mergeable.
+/// keeps its behavior, which is what keeps the flag upstream-mergeable. The
+/// hint vocabulary comes from the `Harness` single source, never re-spelled.
 pub fn parse_harness(value: Option<&str>) -> Result<Harness> {
     match value {
         None => Ok(Harness::Claude),
         Some(v) => Harness::parse(v)
-            .with_context(|| format!("unknown --harness '{v}' (claude | opencode | kilocode)")),
+            .with_context(|| format!("unknown --harness '{v}' ({})", Harness::label_list())),
     }
 }
 
@@ -478,6 +479,17 @@ mod tests {
 
     fn example_dir(sub: &str) -> PathBuf {
         std::env::temp_dir().join(format!("saniwalens-session-{sub}-{}", std::process::id()))
+    }
+
+    #[test]
+    fn parse_harness_unknown_error_lists_every_harness() {
+        // The hint vocabulary is pinned byte for byte: the refactor builds it
+        // from the `Harness` single source, and this literal must not move.
+        let err = parse_harness(Some("auto")).unwrap_err();
+        assert_eq!(
+            format!("{err:#}"),
+            "unknown --harness 'auto' (claude | opencode | kilocode)"
+        );
     }
 
     #[test]

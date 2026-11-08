@@ -22,8 +22,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 
-use crate::adapter::harness::RunLineRenderer;
-use crate::adapter::opencode::RunEvent;
+use crate::adapter::harness::{RunLine, RunLineRenderer};
 use crate::session::Style;
 
 use super::heartbeat;
@@ -384,15 +383,15 @@ fn drive(
         };
         run.count_event();
         writeln!(run.log(), "{line}").context("write the run log")?;
-        match render_line.map_or(RunEvent::Silent, |render| render(&line)) {
-            RunEvent::Text(text) => {
+        match render_line.map_or(RunLine::Silent, |render| render(&line)) {
+            RunLine::Text(text) => {
                 readable = true;
                 println!("{text}");
             }
-            RunEvent::Progress(tool) => {
+            RunLine::Progress(tool) => {
                 eprintln!("{}", Style::stderr().dim(&format!("  → {tool}")));
             }
-            RunEvent::Silent => {}
+            RunLine::Silent => {}
         }
     }
     let status = run.wait_for_status(deadline)?;
