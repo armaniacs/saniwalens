@@ -91,9 +91,6 @@ fn generated_pair_is_charset_clean() {
     for name in ["charset-check.en.md", "charset-check.ja.md"] {
         let bytes = std::fs::read(root.join("docs/pr").join(name)).unwrap();
         let text = String::from_utf8(bytes).expect("generated files are UTF-8");
-        assert!(
-            !text.contains('\u{2014}'),
-            "{name} must not contain U+2014"
-        );
+        assert!(!text.contains('\u{2014}'), "{name} must not contain U+2014");
     }
 }

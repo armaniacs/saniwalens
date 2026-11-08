@@ -21,13 +21,13 @@ Scenario: 意図した出力変更は golden を更新すれば red から green
   And   golden を新しい期待出力に更新すれば、次回の実行は green に移る
 
 ## 受け入れ基準
-- [ ] opencode と kilocode の各ハーネスに、同一合成 fixture に対する analyze 全出力の golden があり、自動テストでバイト単位比較する
-- [ ] claude 分と同一の手順で、変更前と現行の出力がバイト同一であることを PR で確認できる
-- [ ] 差異が出たとき、red の報告にどの出力・どの行が違うかが分かる形で示される
-- [ ] 意図した出力変更では、golden を更新するだけで red から green に移る
-- [ ] fixture は合成データのみで、実 transcript・実 config・生成 DB は一切コミットしない（プライバシーはハード制約）
-- [ ] cargo fmt --check、cargo clippy --all-targets --all-features -- -D warnings、cargo test が green
-- [ ] docs/specs/ の該当 spec に出力退行の確認方針を同じ変更内で追記する
+- [x] opencode と kilocode の各ハーネスに、同一合成 fixture に対する analyze 全出力の golden があり、自動テストでバイト単位比較する（tests/e2e_golden_harness.rs＋tests/golden/2件）
+- [x] claude 分と同一の手順で、変更前と現行の出力がバイト同一であることを PR で確認できる（通常cargo testで実行）
+- [x] 差異が出たとき、red の報告にどの出力・どの行が違うかが分かる形で示される（assert左右表示）
+- [x] 意図した出力変更では、golden を更新するだけで red から green に移る（UPDATE_GOLDEN=1。diffレビュー必須をテスト名に明記）
+- [x] fixture は合成データのみで（temp内生成。DBファイル等のコミットなし）、実 transcript・実 config・生成 DB は一切コミットしない（プライバシーはハード制約）
+- [x] cargo fmt --check、cargo clippy --all-targets --all-features -- -D warnings、cargo test が green
+- [x] docs/specs/ の該当 spec に出力退行の確認方針を同じ変更内で追記する（両harnessのsession-format specにGolden節）
 
 ## テスト戦略
 - E2E: 合成 fixture を各ハーネスで analyze した全出力を golden とバイト比較する（opencode / kilocode 分。意図した出力変更の red から green への移行も含む）
@@ -45,6 +45,6 @@ Scenario: 意図した出力変更は golden を更新すれば red から green
 - spec 更新: docs/specs/harness.md（golden の位置づけ）と docs/specs/cli.md（比較対象の出力）を同じ変更内で更新する（.claude/rules/spec-sync.md）
 
 ## Definition of Done
-- [ ] 全BDDシナリオが自動テストとして実装されパスする
-- [ ] コードレビュー完了
-- [ ] ドキュメント更新済み
+- [x] 全BDDシナリオが自動テストとして実装されパスする（2テスト）
+- [x] コードレビュー完了（親エージェントが全diff＋golden内容を目視確認）
+- [x] ドキュメント更新済み（spec追記済み）

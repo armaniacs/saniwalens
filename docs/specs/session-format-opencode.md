@@ -153,3 +153,11 @@ optional keys. A new opencode tool appears as a generic `ToolUse` (still
 counted in usage), never as a break. `tool == "invalid"` (the model called a
 tool that does not exist) maps to `ToolUse{tool: "invalid"}` — it is a model
 mistake worth counting, not a parse failure.
+
+## Golden regression policy
+
+`tests/e2e_golden_harness.rs` pins this harness's analyze output
+(`tests/golden/opencode.txt`): the same synthetic fixture must always
+produce the same stored rows. An intentional output change re-blesses with
+`UPDATE_GOLDEN=1` ― and the diff is reviewed before committing, never
+blindly regenerated.

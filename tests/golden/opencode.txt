@@ -1,0 +1,8 @@
+id	project	slug	started_at
+ses_1	/tmp/example/proj	proj	2023-11-14T22:13:22+00:00
+---
+session_id	kind	surface_kind	surface_id	model	target	out_tokens	started_epoch
+ses_1	session_start					0	1700000002
+ses_1	skill_invocation	skill	git-commit	unknown		40	1700000002
+---
+session_id	tool	target	category	excerpt

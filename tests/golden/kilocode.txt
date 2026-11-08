@@ -1,0 +1,10 @@
+id	project	slug	started_at
+task-1		task-1	2023-11-14T22:13:22+00:00
+---
+session_id	kind	surface_kind	surface_id	model	target	out_tokens	started_epoch
+task-1	bash_cmd		cargo			0	1700000002
+task-1	session_start					0	1700000002
+task-1	tool_error		command-not-found	execute_command	cargo build --release	0	1700000003
+---
+session_id	tool	target	category	excerpt
+task-1	execute_command	cargo build --release	command-not-found	command not found: cargo

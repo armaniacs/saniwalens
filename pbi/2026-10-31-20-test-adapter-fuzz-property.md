@@ -21,11 +21,11 @@ Scenario: 未知の tool denial kind は本文テキストへのフォールバ�
   Then  その拒否は種別名に頼らず、本文テキストへのフォールバックで分類される
 
 ## 受け入れ基準
-- [ ] 未知フィールド・欠損・型違いを混ぜた合成入力で analyze がエラーにならず、既知部分だけ取り込むことを、property test または fuzz ターゲットが自動検証する
-- [ ] 未知の tool denial kind が本文テキストへのフォールバックで分類されることをテストが裏付ける
-- [ ] fuzz（cargo-fuzz）か property（proptest）の選定が discovery で行われ、選定理由が記録される
-- [ ] 失敗した場合に、どの入力で壊れたかを再現できる形で失敗メッセージが出る
-- [ ] cargo fmt --check、cargo clippy --all-targets --all-features -- -D warnings、cargo test が green
+- [x] 未知フィールド・欠損・型違いを混ぜた合成入力で analyze がエラーにならず（tests/adapter_robustness.rs。固定seedのstd決定論ループ512件×2＋既知保持）、既知部分だけ取り込むことを、property test または fuzz ターゲットが自動検証する
+- [x] 未知の tool denial kind が本文テキストへのフォールバックで分類されることをテストが裏付ける（専用テストで固定）
+- [x] fuzz（cargo-fuzz）か property（proptest）の選定が discovery で行われ、選定理由が記録される（決定: 外部依存なしのstd決定論ループ。新規クレート取得が不可の環境のためproptest/cargo-fuzz不使用）
+- [x] 失敗した場合に、どの入力で壊れたかを再現できる形で失敗メッセージが出る（固定seed＋入力先頭200字をassertionに含める）
+- [x] cargo fmt --check、cargo clippy --all-targets --all-features -- -D warnings、cargo test が green
 
 ## テスト戦略
 - E2E: 破壊的入力（unknown、欠損、型違い）を混ぜた合成 transcript と config で analyze コマンドが非ゼロで落ちないこと
@@ -45,6 +45,6 @@ Scenario: 未知の tool denial kind は本文テキストへのフォールバ�
 - 検証コマンド: cargo fmt --check、cargo clippy --all-targets --all-features -- -D warnings、cargo test。
 
 ## Definition of Done
-- [ ] 全BDDシナリオが自動テストとして実装されパスする
-- [ ] コードレビュー完了
-- [ ] ドキュメント更新済み
+- [x] 全BDDシナリオが自動テストとして実装されパスする（3テスト）
+- [x] コードレビュー完了（親エージェントが全diffを目視確認）
+- [x] ドキュメント更新済み（テスト方針のためspec更新不要。PBIに選定記録）

@@ -209,3 +209,11 @@ behind the first draft assumed no cwd-style field and `apply_diff`/
 as the real edit names. Fixing the mapping moved 86 of 92 sessions out of
 unrooted and lifted `file_edit` events from 115 to 570, so it bumped
 `KILOCODE_ANALYZER_VERSION` to `2` — the survey is the version bump's reason.
+
+## Golden regression policy
+
+`tests/e2e_golden_harness.rs` pins this harness's analyze output
+(`tests/golden/kilocode.txt`): the same synthetic fixture must always
+produce the same stored rows. An intentional output change re-blesses with
+`UPDATE_GOLDEN=1` ― and the diff is reviewed before committing, never
+blindly regenerated.
