@@ -212,7 +212,14 @@ pub(crate) fn parse_timeout(value: Option<&str>) -> Result<Option<Duration>> {
     if !amount.is_finite() || amount <= 0.0 {
         anyhow::bail!("--timeout must be positive (got '{value}')");
     }
-    Ok(Some(Duration::from_secs_f64(amount * unit_secs)))
+    let secs = amount * unit_secs;
+    // `from_secs_f64` panics past `Duration`'s range; the fallible form
+    // turns a gigantic-but-finite input into a regular error instead.
+    // (`amount` and the unit are both positive and finite, so `secs` can
+    // only be finite or +inf — never NaN — and only overflow can fail.)
+    Ok(Some(Duration::try_from_secs_f64(secs).with_context(
+        || format!("--timeout too large: '{value}'"),
+    )?))
 }
 
 /// Run the headless advisor with its raw output logged: spawn with stdout
@@ -637,6 +644,21 @@ mod tests {
         assert!(parse_timeout(Some("0s")).is_err());
         assert!(parse_timeout(Some("-1s")).is_err());
         assert!(parse_timeout(Some("soon")).is_err());
+    }
+
+    #[test]
+    fn timeout_rejects_gigantic_but_finite_values_without_panicking() {
+        // `Duration::from_secs_f64` panics past its range; a huge finite
+        // input must be a regular error, never a crash.
+        for value in ["1e308s", "1e308", "1e308m", "1e308ms", "1e20m"] {
+            let err = parse_timeout(Some(value)).expect_err(&format!("{value} must err"));
+            assert!(
+                err.to_string().contains("too large"),
+                "the error names the overflow: {err}"
+            );
+        }
+        // Just inside the range still parses.
+        assert!(parse_timeout(Some("1e18s")).is_ok());
     }
 
     // Moved from `super` (the `mod.rs` shell carries a line budget —
