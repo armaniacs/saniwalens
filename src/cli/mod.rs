@@ -452,7 +452,7 @@ pub fn run() -> Result<()> {
             let path = Session::resolve_path(&harness, db, config_db.as_deref(), &env)?;
             let filter = parse_scope(scope.as_deref())?;
             let sess = Session::open_resolved(&harness, path)?;
-            let timeout = headless::parse_timeout(timeout.as_deref())?;
+            let timeout = headless::resolve_timeout(timeout.as_deref())?;
             optimize(&sess, projects, &filter, frozen, print, verbose, timeout)
         }
         Command::Tui => {
@@ -630,12 +630,54 @@ impl AdvisorLaunch for ProcessAdvisor {
     }
 }
 
+/// Ownership of the briefing pointer file: removing it is a scope fact, not
+/// a last line, so every exit — error return, failure bail, or panic unwind —
+/// deletes the secret file. Modeled on `HeadlessRun` (`headless.rs`), which
+/// owns the run log and the child the same way.
+struct BriefingFile {
+    path: Option<PathBuf>,
+}
+
+impl BriefingFile {
+    /// Take ownership of the pointer file at `path`.
+    fn new(path: PathBuf) -> Self {
+        Self { path: Some(path) }
+    }
+
+    /// The path the argv pointer closes over. The guard must outlive the
+    /// advisor run: dropping it first would pull the file while the advisor
+    /// still needs it.
+    fn path(&self) -> &Path {
+        self.path.as_ref().expect("the briefing file is owned")
+    }
+}
+
+impl Drop for BriefingFile {
+    fn drop(&mut self) {
+        // Best-effort like the run-log removal (`headless.rs`): the run is
+        // over, so a removal failure warns instead of failing the delivery —
+        // but unlike the old `let _ = remove_file`, it is never swallowed.
+        if let Some(path) = self.path.take()
+            && let Err(err) = fs::remove_file(&path)
+            && err.kind() != std::io::ErrorKind::NotFound
+        {
+            eprintln!(
+                "{}",
+                Style::stderr().warn(&format!(
+                    "warning: could not remove briefing temp file {} ({err})",
+                    path.display()
+                ))
+            );
+        }
+    }
+}
+
 /// Deliver `plan` — the one seam between the briefing and the advisor.
-/// Launch modes write the briefing to a private (`0600`) pointer file, hand
-/// the spawn to the `advisor` adapter, and remove the file the moment the run
-/// ends whatever the outcome; `Print` writes the prompt to stdout. The
-/// briefing itself never rides argv — a process argument is world-visible
-/// (`ps`) — and only a data-free pointer does.
+/// Launch modes write the briefing to a private (`0600`) pointer file owned
+/// by a `BriefingFile` guard, hand the spawn to the `advisor` adapter, and
+/// drop the guard when the run ends whatever the outcome; `Print` writes the
+/// prompt to stdout. The briefing itself never rides argv — a process
+/// argument is world-visible (`ps`) — and only a data-free pointer does.
 pub fn deliver(plan: DeliveryPlan<'_>, advisor: &mut impl AdvisorLaunch) -> Result<()> {
     let DeliveryPlan {
         mode,
@@ -647,14 +689,16 @@ pub fn deliver(plan: DeliveryPlan<'_>, advisor: &mut impl AdvisorLaunch) -> Resu
         timeout,
         payload,
     } = plan;
-    let (prompt, path) = match payload {
+    let (prompt, _briefing) = match payload {
         DeliveryPayload::Full(prompt) => {
             println!("{prompt}");
             return Ok(());
         }
         DeliveryPayload::Launch { briefing, pointer } => {
             let path = write_private_tempfile(&briefing).context("write briefing temp file")?;
-            (pointer(&path), path)
+            let briefing = BriefingFile::new(path);
+            let prompt = pointer(briefing.path());
+            (prompt, briefing)
         }
     };
 
@@ -674,10 +718,11 @@ pub fn deliver(plan: DeliveryPlan<'_>, advisor: &mut impl AdvisorLaunch) -> Resu
     } else {
         (advisor.direct(binary, leading, &prompt), None)
     };
-    let _ = fs::remove_file(&path);
 
     // Headless errors already name the raw log and, for a spawn failure, the
     // launch hint; the interactive path keeps the launch hint as its context.
+    // The briefing guard drops here, after the run: every exit above,
+    // including an early return or a panic unwind, removes the file.
     let status = match (mode, verbose) {
         (DeliveryMode::Headless, false) => result?,
         _ => result.with_context(move || launch_note)?,

@@ -189,9 +189,15 @@ impl Drop for HeadlessRun {
     }
 }
 
+/// The headless wait when `--timeout` is absent: a hung advisor is an error,
+/// not an indefinite wait. An explicit `--timeout 0` opts back into no
+/// deadline, with a warning on stderr.
+pub(crate) const DEFAULT_BRIEFING_TIMEOUT: Duration = Duration::from_secs(60);
+
 /// Parse `--timeout`: a positive number with an optional `ms`, `s`, or `m`
-/// suffix; a bare number is seconds. Zero and negatives are refused, since a
-/// zero deadline would fail before the advisor could start.
+/// suffix; a bare number is seconds. Zero (any unit) disables the deadline —
+/// the explicit infinite opt-out. Negatives and garbage are refused, since a
+/// negative deadline would fail before the advisor could start.
 pub(crate) fn parse_timeout(value: Option<&str>) -> Result<Option<Duration>> {
     let Some(value) = value else {
         return Ok(None);
@@ -209,8 +215,11 @@ pub(crate) fn parse_timeout(value: Option<&str>) -> Result<Option<Duration>> {
     let amount: f64 = number
         .parse()
         .with_context(|| format!("invalid --timeout '{value}' (e.g. 30s, 2m, 500ms)"))?;
-    if !amount.is_finite() || amount <= 0.0 {
-        anyhow::bail!("--timeout must be positive (got '{value}')");
+    if !amount.is_finite() || amount < 0.0 {
+        anyhow::bail!("--timeout must not be negative (got '{value}')");
+    }
+    if amount == 0.0 {
+        return Ok(None);
     }
     let secs = amount * unit_secs;
     // `from_secs_f64` panics past `Duration`'s range; the fallible form
@@ -220,6 +229,24 @@ pub(crate) fn parse_timeout(value: Option<&str>) -> Result<Option<Duration>> {
     Ok(Some(Duration::try_from_secs_f64(secs).with_context(
         || format!("--timeout too large: '{value}'"),
     )?))
+}
+
+/// Resolve the `--timeout` flag to the wait the delivery uses: an absent flag
+/// means the default, an explicit zero means no deadline (with a warning — a
+/// hung advisor then waits forever), anything else parses as-is. The single
+/// choke point, so absence and infinity never share a bare `None`.
+pub(crate) fn resolve_timeout(value: Option<&str>) -> Result<Option<Duration>> {
+    let Some(raw) = value else {
+        return Ok(Some(DEFAULT_BRIEFING_TIMEOUT));
+    };
+    let parsed = parse_timeout(Some(raw))?;
+    if parsed.is_none() {
+        eprintln!(
+            "{}",
+            Style::stderr().warn("--timeout 0 disables the deadline: a hung advisor waits forever")
+        );
+    }
+    Ok(parsed)
 }
 
 /// Run the headless advisor with its raw output logged: spawn with stdout
@@ -639,11 +666,44 @@ mod tests {
     }
 
     #[test]
-    fn timeout_rejects_zero_and_garbage() {
-        assert!(parse_timeout(Some("0")).is_err());
-        assert!(parse_timeout(Some("0s")).is_err());
+    fn timeout_rejects_negatives_and_garbage() {
         assert!(parse_timeout(Some("-1s")).is_err());
         assert!(parse_timeout(Some("soon")).is_err());
+    }
+
+    #[test]
+    fn timeout_zero_disables_the_deadline() {
+        // The explicit infinite opt-out: zero in any unit parses to no
+        // deadline, while the choke point below warns about it.
+        for value in ["0", "0s", "0m", "0ms", "0.0s"] {
+            assert_eq!(
+                parse_timeout(Some(value)).unwrap(),
+                None,
+                "zero disables the deadline: {value}"
+            );
+        }
+    }
+
+    #[test]
+    fn resolve_timeout_defaults_when_the_flag_is_absent() {
+        assert_eq!(
+            resolve_timeout(None).unwrap(),
+            Some(DEFAULT_BRIEFING_TIMEOUT)
+        );
+    }
+
+    #[test]
+    fn resolve_timeout_prefers_an_explicit_value() {
+        assert_eq!(
+            resolve_timeout(Some("30s")).unwrap(),
+            Some(Duration::from_secs(30))
+        );
+    }
+
+    #[test]
+    fn resolve_timeout_zero_opts_into_no_deadline() {
+        assert_eq!(resolve_timeout(Some("0")).unwrap(), None);
+        assert_eq!(resolve_timeout(Some("0m")).unwrap(), None);
     }
 
     #[test]
