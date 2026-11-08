@@ -30,6 +30,17 @@ pub const THRASH_GAP_SECS: i64 = 5 * 60;
 /// Edits needed within the gap before a burst counts as thrash at all.
 pub const THRASH_MIN_EDITS: u32 = 4;
 
+/// Max distinct groups one briefing store read materializes (grouped counts,
+/// catalog rows, agent splits, roots). The briefing passes this to the
+/// `Store::*_briefing` readers; it bounds the *fetch*. The `TOP_*` /
+/// `HOTSPOTS_*` / `EXAMPLES_*` caps above stay what they are — *display* cuts
+/// applied after the fetch — and must never be mistaken for fetch bounds.
+pub const BRIEFING_GROUPS_LIMIT: usize = 5_000;
+/// Max per-event rows one briefing store read materializes (`file_edits`,
+/// `skill_event_costs`). Same contract as `BRIEFING_GROUPS_LIMIT`: a fetch
+/// bound, not a display cut.
+pub const BRIEFING_EVENTS_LIMIT: usize = 20_000;
+
 /// One catalog row as the assembly sees it: plain data, mapped from the
 /// store's row type by the fetch (`cli/mod.rs`), so this module stays store-free.
 #[derive(Debug, Clone)]
@@ -79,6 +90,17 @@ pub struct FindingsInput {
     /// Global always-on config tokens as fetched (applied only when the
     /// floor is known — see `collect_findings`).
     pub always_on_config_tokens: i64,
+}
+
+impl FindingsInput {
+    /// The briefing's main-thread skill output total over the fetched rows.
+    /// The store's `skill_out_tokens_sum` computes this same number in SQL;
+    /// prefer that reader for briefing fetches so a multi-year store never
+    /// materializes one row per skill just to add them up. This sums the
+    /// already-fetched rows for paths that hold them.
+    pub fn skill_out_tokens_total(&self) -> i64 {
+        self.skill_out_tokens.iter().sum()
+    }
 }
 
 /// Wedge-flagged surfaces (unused-but-measurable, always-on heavy) grouped by
@@ -333,7 +355,7 @@ pub fn collect_findings(input: &FindingsInput) -> Findings {
         agents.iter().map(|a| (a.runs, a.out_tokens)),
     );
     Findings {
-        main_out: input.skill_out_tokens.iter().sum(),
+        main_out: input.skill_out_tokens_total(),
         sub_tokens,
         sub_agents,
         agent_split,

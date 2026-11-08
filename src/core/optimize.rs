@@ -419,7 +419,7 @@ pub fn render_briefing(f: &Findings, filter: &ScopeFilter, copy: &HarnessCopy) -
         );
     }
 
-    out
+    truncate_briefing(out)
 }
 
 /// Defensive ceiling for an error excerpt rendered into the briefing, in
@@ -427,6 +427,36 @@ pub fn render_briefing(f: &Findings, filter: &ScopeFilter, copy: &HarnessCopy) -
 /// rows written before (or past) that cap. Overlong excerpts are cut with a
 /// marker rather than sprawling across the prompt.
 const EXAMPLE_EXCERPT_CHARS: usize = 300;
+
+/// Hard ceiling, in bytes, for the whole rendered briefing text. The briefing
+/// grows with the store (one line per surface, per project, per example), so
+/// without a total bound a multi-year store turns the seeded prompt into a
+/// memory and latency blowup. The single definition lives here: the shell
+/// must pass this through, never redefine it.
+pub const BRIEFING_MAX_BYTES: usize = 64 * 1024;
+
+/// Marker terminating a briefing cut at `BRIEFING_MAX_BYTES`. An over-long
+/// briefing is truncated to fit the budget with this as its last line, so a
+/// cut is always visible and never mistaken for a complete briefing.
+pub const BRIEFING_TRUNCATION_MARKER: &str = "\n\n[briefing truncated at BRIEFING_MAX_BYTES]\n";
+
+/// Enforce `BRIEFING_MAX_BYTES` on a rendered briefing: text within budget is
+/// returned unchanged (byte-identical); over-long text is cut at a character
+/// boundary with `BRIEFING_TRUNCATION_MARKER` as its last line, so the result
+/// fits the budget and the cut is marked.
+fn truncate_briefing(text: String) -> String {
+    if text.len() <= BRIEFING_MAX_BYTES {
+        return text;
+    }
+    let budget = BRIEFING_MAX_BYTES.saturating_sub(BRIEFING_TRUNCATION_MARKER.len());
+    let mut end = budget.min(text.len());
+    while !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    let mut out = text[..end].to_string();
+    out.push_str(BRIEFING_TRUNCATION_MARKER);
+    out
+}
 
 /// Render an error excerpt as data, never as briefing text: excerpts quote
 /// third-party tool output and may smuggle instructions or Markdown structure

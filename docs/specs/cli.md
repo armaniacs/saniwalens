@@ -618,7 +618,15 @@ The findings themselves split the same way: the shell fetches the store's rows
 `core::findings` ― the joins, the named caps (`TOP_COMMANDS_LIMIT`,
 `EXAMPLES_PER_CATEGORY`, `THRASH_LINES_PER_PROJECT`, …), the scope routing, and
 the ordering ― so the briefing's wiring is unit-tested over small inputs and
-only the queries and the print are I/O.
+only the queries and the print are I/O. The briefing's store reads are bounded
+at fetch time, not only at render time: `findings_input` uses the `*_briefing`
+readers (a trailing `LIMIT` over the same `WHERE`/`ORDER BY`, so a bounded result
+is the head prefix of the unbounded one) with the fetch caps owned by
+`core::findings` (`BRIEFING_GROUPS_LIMIT`, `BRIEFING_EVENTS_LIMIT`), skill
+invocation output is summed in SQL (`skill_out_tokens_sum`), and the rendered
+briefing is cut at `BRIEFING_MAX_BYTES` with a truncation marker naming the
+store query to run instead ― so a multi-year store yields a bounded briefing,
+never silent partial data.
 
 The send is one seam: `deliver` runs a `DeliveryPlan` whose mode
 (`DeliveryMode::Print | Interactive | Headless`, chosen by `--print` over the

@@ -841,13 +841,23 @@ fn findings_input(store: &Store, window: TimeRange) -> Result<findings::Findings
         // rather than guessed at — the sentinel stays the core's business.
         floor: store.baseline_floor(window)?,
         error_examples: store.error_examples(findings::EXAMPLES_PER_CATEGORY, window)?,
-        error_breakdown: store.error_tool_breakdown(window)?,
-        friction_cells: store.error_counts_by_project(window)?,
-        bash_commands: store.work_counts("bash_cmd", window)?,
-        file_edit_counts: store.work_counts("file_edit", window)?,
-        file_edits: store.file_edits(window)?,
+        error_breakdown: store
+            .error_tool_breakdown_briefing(window, findings::BRIEFING_GROUPS_LIMIT)?,
+        friction_cells: store
+            .error_counts_by_project_briefing(window, findings::BRIEFING_GROUPS_LIMIT)?,
+        bash_commands: store.work_counts_briefing(
+            "bash_cmd",
+            window,
+            findings::BRIEFING_GROUPS_LIMIT,
+        )?,
+        file_edit_counts: store.work_counts_briefing(
+            "file_edit",
+            window,
+            findings::BRIEFING_GROUPS_LIMIT,
+        )?,
+        file_edits: store.file_edits_briefing(window, findings::BRIEFING_EVENTS_LIMIT)?,
         catalog: store
-            .effective_catalog(window)?
+            .effective_catalog_briefing(window, findings::BRIEFING_GROUPS_LIMIT)?
             .into_iter()
             .map(|e| findings::CatalogRow {
                 kind: e.kind,
@@ -860,11 +870,12 @@ fn findings_input(store: &Store, window: TimeRange) -> Result<findings::Findings
                 uses: e.uses,
             })
             .collect(),
-        session_roots: store.session_roots()?,
-        prompt_behaviors: store.prompt_behavior_counts(window)?,
+        session_roots: store.session_roots_briefing(findings::BRIEFING_GROUPS_LIMIT)?,
+        prompt_behaviors: store
+            .prompt_behavior_counts_briefing(window, findings::BRIEFING_GROUPS_LIMIT)?,
         subagent_totals: store.subagent_totals(window)?,
         agents: store
-            .subagent_by_agent(window)?
+            .subagent_by_agent_briefing(window, findings::BRIEFING_GROUPS_LIMIT)?
             .into_iter()
             .map(|row| optimize_mod::AgentCost {
                 agent: row.agent,
@@ -872,11 +883,7 @@ fn findings_input(store: &Store, window: TimeRange) -> Result<findings::Findings
                 out_tokens: row.out_tokens,
             })
             .collect(),
-        skill_out_tokens: store
-            .skill_usage(window)?
-            .iter()
-            .map(|r| r.out_tokens)
-            .collect(),
+        skill_out_tokens: vec![store.skill_out_tokens_sum(window)?],
         always_on_config_tokens: store.always_on_config_tokens()?,
     })
 }
