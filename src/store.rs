@@ -611,6 +611,36 @@ impl Store {
         Ok((columns, rows))
     }
 
+    /// Like `query`, but bounded: at most `limit` rows are materialized (plus
+    /// one probe row to detect the cut). Returns the truncation flag alongside
+    /// so the caller can warn instead of silently passing a partial slice off
+    /// as complete. `None` means no bound — only the `sql` command's opt-out
+    /// uses that, since every other caller asks for aggregated (small) rows.
+    pub fn query_limited(
+        &self,
+        sql: &str,
+        limit: Option<usize>,
+    ) -> Result<(Vec<String>, Vec<Vec<String>>, bool)> {
+        let mut stmt = self.conn.prepare(sql)?;
+        let columns: Vec<String> = stmt.column_names().iter().map(|c| c.to_string()).collect();
+        let ncol = columns.len();
+        let take = limit.map_or(usize::MAX, |n| n.saturating_add(1));
+        let mut rows: Vec<Vec<String>> = Vec::new();
+        let mut mapped = stmt.query_map([], |row| {
+            (0..ncol)
+                .map(|i| Ok(value_to_string(row.get_ref(i)?)))
+                .collect::<rusqlite::Result<Vec<_>>>()
+        })?;
+        for row in mapped.by_ref().take(take) {
+            rows.push(row?);
+        }
+        let truncated = limit.is_some_and(|n| rows.len() > n);
+        if truncated {
+            rows.pop();
+        }
+        Ok((columns, rows, truncated))
+    }
+
     /// Like `query`, but with SQLite's types preserved as JSON values — the
     /// machine half of the output contract (`--format json`): integers and
     /// reals stay numbers, NULL stays null, so a consumer never re-parses
@@ -627,6 +657,34 @@ impl Store {
             })?
             .collect::<rusqlite::Result<Vec<_>>>()?;
         Ok((columns, rows))
+    }
+
+    /// Like [`Store::query_limited`], but with SQLite's types preserved as
+    /// JSON values. The machine contract keeps its bare-array shape; the
+    /// truncation flag rides stderr beside it, like the table path.
+    pub fn query_json_limited(
+        &self,
+        sql: &str,
+        limit: Option<usize>,
+    ) -> Result<(Vec<String>, Vec<Vec<serde_json::Value>>, bool)> {
+        let mut stmt = self.conn.prepare(sql)?;
+        let columns: Vec<String> = stmt.column_names().iter().map(|c| c.to_string()).collect();
+        let ncol = columns.len();
+        let take = limit.map_or(usize::MAX, |n| n.saturating_add(1));
+        let mut rows: Vec<Vec<serde_json::Value>> = Vec::new();
+        let mut mapped = stmt.query_map([], |row| {
+            (0..ncol)
+                .map(|i| Ok(value_to_json(row.get_ref(i)?)))
+                .collect::<rusqlite::Result<Vec<_>>>()
+        })?;
+        for row in mapped.by_ref().take(take) {
+            rows.push(row?);
+        }
+        let truncated = limit.is_some_and(|n| rows.len() > n);
+        if truncated {
+            rows.pop();
+        }
+        Ok((columns, rows, truncated))
     }
 
     fn from_connection(mut conn: Connection) -> Result<Self> {
@@ -1871,6 +1929,31 @@ mod tests {
             started_epoch_ms: 1_700_000_000_000,
             root_tool_use_id: Some(root.to_string()),
         }
+    }
+
+    #[test]
+    fn limited_queries_report_truncation_at_the_boundary() {
+        // Exactly-at-limit is complete; one more row flips the flag and the
+        // extra probe row is dropped. `None` stays unbounded.
+        let mut store = Store::in_memory().unwrap();
+        for id in ["s1", "s2", "s3"] {
+            store
+                .ingest(IngestBatch::new(&session(id), &[], &[]))
+                .unwrap();
+        }
+        let q = "SELECT id FROM sessions ORDER BY id";
+        let (_, rows, truncated) = store.query_limited(q, Some(3)).unwrap();
+        assert!(!truncated);
+        assert_eq!(rows.len(), 3);
+        let (_, rows, truncated) = store.query_limited(q, Some(2)).unwrap();
+        assert!(truncated);
+        assert_eq!(rows.len(), 2);
+        let (_, rows, truncated) = store.query_limited(q, None).unwrap();
+        assert!(!truncated);
+        assert_eq!(rows.len(), 3);
+        let (_, rows, truncated) = store.query_json_limited(q, Some(2)).unwrap();
+        assert!(truncated);
+        assert_eq!(rows.len(), 2);
     }
 
     #[test]

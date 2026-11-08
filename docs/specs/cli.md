@@ -494,7 +494,7 @@ spike a reader over-trusts; one combined flag says "read this number loosely".
 ## `sql` ― query the store directly
 
 ```
-saniwalens sql [<query>] [--format table|markdown|json] [--db <path>]
+saniwalens sql [<query>] [--format table|markdown|json] [--limit <N>] [--db <path>]
 ```
 
 `sql` is the one read that never auto-refreshes ― it opens the store strictly
@@ -519,6 +519,13 @@ encoding ― e.g. `SELECT target, COUNT(*) FROM tool_errors WHERE
 category='edit-precondition' GROUP BY target` answers "which files keep failing
 to edit", which the error text alone cannot. `SELECT sql FROM sqlite_master`
 lists the full schema.
+
+Result rows are bounded: at most `--limit` rows materialize (default 10000,
+`0` disables the bound). A truncated result warns on stderr with the opt-out,
+so the "any slice" contract stays reachable without ever passing a partial
+slice off as complete; the JSON payload keeps its bare-array shape. The SQL
+text itself (argument or stdin) is unbounded — it is user-supplied input, not
+an amplification: only fetched rows balloon memory, and those are capped.
 
 ## `optimize` ― act on the findings with an advisor session
 

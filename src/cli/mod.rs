@@ -198,6 +198,11 @@ enum Command {
     Sql {
         /// The SQL to run. If omitted, the query is read from stdin.
         query: Option<String>,
+        /// Max result rows (default 10000); 0 means no limit. A truncated
+        /// result warns on stderr and names this flag, so a silent partial
+        /// slice never passes as complete.
+        #[arg(long, default_value_t = 10_000)]
+        limit: u64,
         #[command(flatten)]
         format: FormatArgs,
         /// Store path (default: $XDG_STATE_HOME/saniwalens/saniwalens.db).
@@ -380,10 +385,15 @@ pub fn run() -> Result<()> {
             let (windowed, filter) = opened.into_parts();
             doctor(&windowed.sess, &filter, windowed.window, windowed.format)
         }
-        Command::Sql { query, format, db } => {
+        Command::Sql {
+            query,
+            limit,
+            format,
+            db,
+        } => {
             let fmt = parse_format(format.as_deref())?;
             let sess = Session::open_readonly(&harness, db, config_db.as_deref(), &env)?;
-            sql(&sess, query.as_deref(), fmt)
+            sql(&sess, query.as_deref(), limit, fmt)
         }
         Command::Optimize {
             projects,
@@ -833,7 +843,12 @@ fn findings_input(store: &Store, window: TimeRange) -> Result<findings::Findings
 /// comes from the argument or, when absent, from stdin — so both
 /// `saniwalens sql '…'` and `echo '…' | saniwalens sql` work. The store is
 /// opened read-only so an ad-hoc query can never mutate the derived data.
-fn sql(sess: &Session, query: Option<&str>, format: Format) -> Result<()> {
+/// `limit` bounds the materialized rows (`0` disables the bound); a truncated
+/// result warns on stderr with the opt-out, so the "any slice" contract stays
+/// reachable without silently passing a partial slice off as complete.
+/// The SQL text itself is unbounded — it is user-supplied input, not an
+/// amplification: only the fetched rows balloon memory, and those are capped.
+fn sql(sess: &Session, query: Option<&str>, limit: u64, format: Format) -> Result<()> {
     let query = match query {
         Some(q) => q.to_string(),
         None => {
@@ -859,20 +874,41 @@ fn sql(sess: &Session, query: Option<&str>, format: Format) -> Result<()> {
     }
     if format == Format::Json {
         // Typed rows as objects — SQLite integers/reals/NULLs survive as JSON
-        // numbers/null. Duplicate column names keep the last value.
-        let (columns, rows) = store.query_json(query)?;
+        // numbers/null. Duplicate column names keep the last value. The
+        // payload keeps its bare-array shape; truncation rides stderr.
+        let (columns, rows, truncated) = store.query_json_limited(query, nonzero_limit(limit))?;
         let objects: Vec<serde_json::Value> = rows
             .into_iter()
             .map(|row| serde_json::Value::Object(columns.iter().cloned().zip(row).collect()))
             .collect();
+        warn_truncated(truncated, limit, objects.len());
         return emit_json(&serde_json::Value::Array(objects));
     }
-    let (columns, rows) = store.query(query)?;
+    let (columns, rows, truncated) = store.query_limited(query, nonzero_limit(limit))?;
+    warn_truncated(truncated, limit, rows.len());
     let headers: Vec<&str> = columns.iter().map(String::as_str).collect();
     let aligns = vec![Align::Left; columns.len()];
     render(&headers, &aligns, &rows, format);
     note(&format!("{} row(s)", rows.len()));
     Ok(())
+}
+
+/// `0` disables the row bound; anything else caps the materialized rows.
+fn nonzero_limit(limit: u64) -> Option<usize> {
+    (limit > 0).then_some(limit as usize)
+}
+
+/// Name a truncated slice on stderr with the opt-out, so a silent cut never
+/// passes as complete. No output when nothing was cut.
+fn warn_truncated(truncated: bool, limit: u64, shown: usize) {
+    if truncated {
+        eprintln!(
+            "{}",
+            Style::stderr().warn(&format!(
+                "warning: result truncated at {shown} row(s) (--limit {limit} in effect; pass --limit 0 for all rows)"
+            ))
+        );
+    }
 }
 
 /// One-screen health check: the few most actionable findings from every view,
