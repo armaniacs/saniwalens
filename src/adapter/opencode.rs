@@ -12,8 +12,8 @@ use anyhow::{Context, Result};
 use serde_json::Value;
 
 use crate::adapter::harness::{
-    AnalyzeStats, Harness, ParsedSession, Site, SiteCtx, home_dir, load_claude_md,
-    load_skills_deduped,
+    AnalyzeStats, Harness, ParsedSession, Site, home_dir, load_agents, load_claude_md,
+    load_commands, load_skills_deduped, xdg_from_env,
 };
 use crate::adapter::transcript::{ToolError, WorkEvent};
 use crate::core::friction::classify_error;
@@ -481,16 +481,6 @@ pub(crate) fn global_sites(config_dir: &Path, home: Option<&Path>) -> Vec<Site> 
     sites
 }
 
-/// Loaders for opencode's own `command/` and `agent/` readers — the format is
-/// opencode's, so the row names these, not the shared config readers.
-fn load_commands(site: &Site, scope: &Scope, _ctx: &mut SiteCtx) -> Vec<Surface> {
-    read_command_surfaces(&site.path, scope)
-}
-
-fn load_agents(site: &Site, scope: &Scope, _ctx: &mut SiteCtx) -> Vec<Surface> {
-    read_agent_surfaces(&site.path, scope)
-}
-
 /// Read all installed config (global scope) into one surface list — the
 /// direct entry point the catalog tests drive; `analyze` goes through
 /// `adapter::harness::catalog_surfaces`, which loads the same rows under the
@@ -717,7 +707,7 @@ fn truncate(s: &str) -> String {
 /// The opencode database for this run: the environment read that
 /// `adapter::harness::opencode_db_path` deliberately does not do.
 fn default_opencode_db() -> Result<PathBuf> {
-    let data_home = std::env::var_os("XDG_DATA_HOME").map(PathBuf::from);
+    let data_home = xdg_from_env("XDG_DATA_HOME");
     Harness::opencode_db_path(data_home.as_deref(), home_dir().map(Path::new))
         .context("set XDG_DATA_HOME or HOME")
 }
@@ -725,7 +715,7 @@ fn default_opencode_db() -> Result<PathBuf> {
 /// The opencode config root for this run: the environment read that
 /// `adapter::harness::opencode_config_dir` deliberately does not do.
 pub(crate) fn opencode_home() -> Result<PathBuf> {
-    let config_home = std::env::var_os("XDG_CONFIG_HOME").map(PathBuf::from);
+    let config_home = xdg_from_env("XDG_CONFIG_HOME");
     Harness::opencode_config_dir(config_home.as_deref(), home_dir().map(Path::new))
         .context("set XDG_CONFIG_HOME or HOME")
 }

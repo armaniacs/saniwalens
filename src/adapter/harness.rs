@@ -691,48 +691,52 @@ impl Harness {
             .collect()
     }
 
-    /// The opencode database: `$XDG_DATA_HOME/opencode/opencode.db`, else
-    /// `~/.local/share/opencode/opencode.db`. A non-absolute data home is
-    /// invalid per the XDG spec and ignored, mirroring `store_path`.
-    pub fn opencode_db_path(data_home: Option<&Path>, home: Option<&Path>) -> Option<PathBuf> {
-        if let Some(dir) = data_home.filter(|dir| dir.is_absolute()) {
-            return Some(dir.join("opencode").join("opencode.db"));
+    /// The XDG rule, once: an absolute XDG value wins with `xdg_suffix`
+    /// appended; otherwise the home-anchored `home_suffix` wins. A relative
+    /// XDG value is invalid per the XDG spec and ignored, and a missing or
+    /// relative home has no fallback answer.
+    fn resolve_xdg(
+        xdg_dir: Option<&Path>,
+        home: Option<&Path>,
+        xdg_suffix: &str,
+        home_suffix: &str,
+    ) -> Option<PathBuf> {
+        if let Some(dir) = xdg_dir.filter(|dir| dir.is_absolute()) {
+            return Some(dir.join(xdg_suffix));
         }
-        Some(
-            home.filter(|dir| dir.is_absolute())?
-                .join(".local")
-                .join("share")
-                .join("opencode")
-                .join("opencode.db"),
+        Some(home.filter(|dir| dir.is_absolute())?.join(home_suffix))
+    }
+
+    /// The opencode database: `$XDG_DATA_HOME/opencode/opencode.db`, else
+    /// `~/.local/share/opencode/opencode.db`.
+    pub fn opencode_db_path(data_home: Option<&Path>, home: Option<&Path>) -> Option<PathBuf> {
+        Self::resolve_xdg(
+            data_home,
+            home,
+            "opencode/opencode.db",
+            ".local/share/opencode/opencode.db",
         )
     }
 
     /// The opencode config root: `$XDG_CONFIG_HOME/opencode`, else
-    /// `~/.config/opencode`. Same absolute-path rule as the database.
+    /// `~/.config/opencode`.
     pub fn opencode_config_dir(config_home: Option<&Path>, home: Option<&Path>) -> Option<PathBuf> {
-        if let Some(dir) = config_home.filter(|dir| dir.is_absolute()) {
-            return Some(dir.join("opencode"));
-        }
-        Some(
-            home.filter(|dir| dir.is_absolute())?
-                .join(".config")
-                .join("opencode"),
-        )
+        Self::resolve_xdg(config_home, home, "opencode", ".config/opencode")
     }
 
     /// The global kilo config root: `$XDG_CONFIG_HOME/kilo` when that variable
     /// names an absolute path, else `~/.config/kilo` — the XDG rule, mirroring
     /// how the store resolution treats `XDG_STATE_HOME`.
     pub fn kilocode_config_dir(config_home: Option<&Path>, home: Option<&Path>) -> Option<PathBuf> {
-        if let Some(dir) = config_home.filter(|dir| dir.is_absolute()) {
-            return Some(dir.join("kilo"));
-        }
-        Some(
-            home.filter(|dir| dir.is_absolute())?
-                .join(".config")
-                .join("kilo"),
-        )
+        Self::resolve_xdg(config_home, home, "kilo", ".config/kilo")
     }
+}
+
+/// The environment read the pure `Harness::*_path` resolvers deliberately do
+/// not do: `$VAR` as a path, so the thin per-harness readers share one
+/// preamble and the resolvers stay hermetic for tests.
+pub(crate) fn xdg_from_env(var: &str) -> Option<PathBuf> {
+    std::env::var_os(var).map(PathBuf::from)
 }
 
 /// The user's home directory, resolved once per run.

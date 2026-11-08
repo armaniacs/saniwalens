@@ -17,7 +17,7 @@ use serde_json::Value;
 
 use crate::adapter::harness::{
     AnalyzeStats, Harness, ParsedSession, Site, file_fingerprint, home_dir, load_agents,
-    load_claude_md, load_commands, load_kilo_instructions, load_skills_deduped,
+    load_claude_md, load_commands, load_kilo_instructions, load_skills_deduped, xdg_from_env,
 };
 use crate::adapter::transcript::{ToolError, WorkEvent};
 use crate::core::friction::classify_error;
@@ -850,7 +850,7 @@ pub fn analyze(input: Option<PathBuf>, db: &Path) -> Result<AnalyzeStats> {
 /// The kilo config root for this run: the environment read that
 /// `adapter::harness::kilocode_config_dir` deliberately does not do.
 pub(crate) fn kilo_home() -> Result<PathBuf> {
-    let config_home = std::env::var_os("XDG_CONFIG_HOME").map(PathBuf::from);
+    let config_home = xdg_from_env("XDG_CONFIG_HOME");
     Harness::kilocode_config_dir(config_home.as_deref(), home_dir().map(Path::new))
         .context("set XDG_CONFIG_HOME or HOME")
 }
