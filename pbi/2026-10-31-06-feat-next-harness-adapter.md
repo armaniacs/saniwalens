@@ -100,3 +100,20 @@ Scenario: 未知のハーネス指定はエラーになる
 - [ ] 全BDDシナリオが自動テストとして実装されパスする
 - [ ] コードレビュー完了
 - [ ] ドキュメント更新済み
+
+## Discovery 結果（2026-11-08）: データ無しのため着手見送り
+
+実装前の discovery（PBI 本文の指示どおり）を 2026-11-08 の作業機で実施した。
+3 候補いずれにも、そのまま計測できる実セッションデータが無かった:
+
+- codex: `~/.codex` が存在しない（セッションファイル無し）。
+- gemini-cli: `~/.gemini` には antigravity-cli の cache/summaries と設定のみ。
+  gemini-cli 本体のセッション transcript（JSONL 等）は無い。
+- copilot-cli: `~/.copilot/logs/process-*.log` はあるが daemon の process log
+  名であり、構造化セッションではない。内容の private 性を守るため中身の
+  目視確認は行わず、セッション転送の根拠が無いものとして扱う。
+
+PBI 本文の「実データが無いハーネスは合成 fixture だけで実装すると嘘の計測に
+なる恐れがある」に従い、推測での adapter 実装は行わない。
+着手条件: いずれかの CLI の実セッションデータがある環境での再 discovery。
+seam 側の準備は不要（Harness enum＋Forward compatibility 契約は現状で足りる）。

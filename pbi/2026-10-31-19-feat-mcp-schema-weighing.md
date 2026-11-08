@@ -50,3 +50,26 @@ Scenario: schema を読めない server は従来どおり unknown schema とし
 - [ ] 全BDDシナリオが自動テストとして実装されパスする
 - [ ] コードレビュー完了
 - [ ] ドキュメント更新済み
+
+## Discovery 結果（2026-11-08）: 安全な取得元が無いため計測不可を確認
+
+PBI 指示の discovery を実データで実施した。結論: 静的・安全に読める
+schema ソースは存在しない。
+
+- `.mcp.json` は launch 設定（`command`/`args`/`env`）のみ。実例 3 件は
+  いずれも `uvx ... start-mcp-server` 形式で、schema を含まない。
+- オンディスクの schema キャッシュは無い（`~/.claude/cache/` に MCP
+  関連のキャッシュ無し。`mcp-needs-auth-cache.json` は auth 状態のみ）。
+- transcript に載るのは *使われた* tool の input 値であり schema そのもの
+  では無い。未使用 server（削減検討の主対象）は transcript に痕跡を残さない。
+- ライブ問い合わせ（ListTools）は server プロセスの起動＝任意コード実行に
+  なる。静的解析ツールが分析のたびに `uvx ... start-mcp-server` を実行する
+  のはセキュリティ上不可のため、取得手段として採用しない。
+
+よって PBI の受け入れ基準 1（measured 化）は満たせない。既存の誠実な代替は
+維持する: `unknown schema` への分類（`an_mcp_server_startup_cost_is_unknown_not_found`
+相当のテストで固定済み）、`inventory` での計量不能表示、`overhead` 残差に
+よる上限推定。誤ったゼロや推定値の捏造は行わない（spec の honest limit 宣言どおり）。
+
+着手条件: 安全な静的 schema ソース（キャッシュ規約の確立、または
+transcript への schema 記録）の出現。以後の schema 取得の議論はこの記録を起点にすること。
