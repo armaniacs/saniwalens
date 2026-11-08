@@ -366,16 +366,44 @@ fn ask_profile_name<R: BufRead, W: Write>(
     }
 }
 
-/// Thin filesystem wrapper: create parents, write to a sibling temp file,
-/// then rename into place so a mid-write kill never truncates the user's
-/// config. A crash leaves the `.toml.tmp` sibling behind (deliberate,
-/// self-evident on next run).
-fn persist_config(path: &Path, text: &str) -> anyhow::Result<()> {
+/// Thin filesystem wrapper: create parents, compare against the snapshot the
+/// dialog showed, write to a pid-unique sibling temp file, then rename into
+/// place — so a mid-write kill leaves either the old or the new config, never
+/// a truncation. `expected` is the file's content when the dialog read it
+/// (`None` when absent): a mismatch means someone else wrote first, and the
+/// write aborts with a conflict error instead of silently clobbering it.
+/// A crash leaves the unique `.toml.tmp` sibling behind (deliberate residue,
+/// self-evident on next run; unique names never collide across processes).
+fn persist_config(path: &Path, text: &str, expected: Option<&str>) -> anyhow::Result<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    let tmp = path.with_extension("toml.tmp");
+    let current = match std::fs::read_to_string(path) {
+        Ok(text) => Some(text),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+        Err(e) => return Err(e.into()),
+    };
+    if current.as_deref() != expected {
+        anyhow::bail!(
+            "refusing to save {}: it changed since the dialog read it (re-run the guide to merge)",
+            path.display()
+        );
+    }
+    // Pid + clock + sequence: two guides (or two test threads in one
+    // process) never share a sibling, unlike the old fixed `.toml.tmp` name
+    // (`private_temp_path` in `super::super` is the same idea for temp dirs).
+    static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |elapsed| elapsed.as_nanos());
+    let seq = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let sibling = format!("{}.{}.{}.toml.tmp", std::process::id(), nanos, seq);
+    let tmp = path.with_extension(sibling);
     std::fs::write(&tmp, text)?;
+    // Unix rename replaces atomically, so no remove-first window exists in
+    // which a crash would leave no config at all. Windows rename cannot
+    // replace, so the remove stays there (documented platform gap).
+    #[cfg(windows)]
     let _ = std::fs::remove_file(path);
     std::fs::rename(&tmp, path)?;
     Ok(())
@@ -491,7 +519,7 @@ pub(crate) fn run_guide<R: BufRead, W: Write>(
                 harness_name(harness),
                 path,
             )? {
-                persist_config(path, &text)?;
+                persist_config(path, &text, existing.as_deref())?;
             }
         }
         writeln!(output, "もう1件見る? [y/N]")?;
@@ -972,12 +1000,17 @@ mod tests {
             std::env::temp_dir().join(format!("saniwalens-guide-test-{}", std::process::id()));
         let path = dir.join("config.toml");
         let _ = std::fs::remove_dir_all(&dir);
-        persist_config(&path, "default_harness = \"kilocode\"\n").unwrap();
+        persist_config(&path, "default_harness = \"kilocode\"\n", None).unwrap();
         assert_eq!(
             std::fs::read_to_string(&path).unwrap(),
             "default_harness = \"kilocode\"\n"
         );
-        persist_config(&path, "default_harness = \"opencode\"\n").unwrap();
+        persist_config(
+            &path,
+            "default_harness = \"opencode\"\n",
+            Some("default_harness = \"kilocode\"\n"),
+        )
+        .unwrap();
         assert_eq!(
             std::fs::read_to_string(&path).unwrap(),
             "default_harness = \"opencode\"\n"
@@ -986,6 +1019,48 @@ mod tests {
             !path.with_extension("toml.tmp").exists(),
             "no temp sibling left behind"
         );
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn persist_config_refuses_to_clobber_an_external_edit() {
+        // The dialog read v1; someone else wrote v2 meanwhile: the write
+        // aborts and v2 survives untouched.
+        let dir = std::env::temp_dir().join(format!(
+            "saniwalens-guide-test-clobber-{}",
+            std::process::id()
+        ));
+        let path = dir.join("config.toml");
+        let _ = std::fs::remove_dir_all(&dir);
+        persist_config(&path, "v1\n", None).unwrap();
+        std::fs::write(&path, "v2\n").unwrap();
+        let err = persist_config(&path, "v3\n", Some("v1\n")).expect_err("must refuse");
+        assert!(
+            err.to_string().contains("changed since the dialog read it"),
+            "{err}"
+        );
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "v2\n");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn persist_config_refuses_when_the_file_appeared_or_vanished() {
+        // Created meanwhile (expected absent) and deleted meanwhile
+        // (expected present) are both conflicts, not silent overwrites.
+        let dir = std::env::temp_dir().join(format!(
+            "saniwalens-guide-test-appear-{}",
+            std::process::id()
+        ));
+        let path = dir.join("config.toml");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(&path, "meanwhile\n").unwrap();
+        persist_config(&path, "mine\n", None).expect_err("created meanwhile must refuse");
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "meanwhile\n");
+        std::fs::remove_file(&path).unwrap();
+        persist_config(&path, "mine\n", Some("was here\n"))
+            .expect_err("deleted meanwhile must refuse");
+        assert!(!path.exists());
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }

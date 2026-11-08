@@ -244,7 +244,11 @@ After the report, the guide asks whether to save the used harness to
 `[profiles.<name>]` profile. The edit is line-preserving ― only the one line
 (or section) changes, comments and everything else stay untouched ― and the
 guide shows the path plus the changed excerpt and asks for confirmation
-before writing.
+before writing. The write re-reads the file first and aborts with a conflict
+error when it changed since the dialog read it (last-writer-wins would
+silently drop the other edit); the replacement itself is an atomic rename
+through a pid-unique sibling temp file, so a mid-write kill leaves either
+the old or the new config, never a truncation.
 
 Non-TTY behavior: the explicit `tui` subcommand without both TTYs is refused
 with an error instead of blocking on unreadable prompts; a bare no-args
