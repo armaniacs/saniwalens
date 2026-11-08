@@ -1687,6 +1687,10 @@ fn prompts(sess: &Session, window: TimeRange, format: Format) -> Result<()> {
     eprint_window(window);
     let counts = store.prompt_behavior_counts(window)?;
     let total: i64 = counts.iter().map(|(_, n)| n).sum();
+    // Skill candidates (PBI 12): repeated prompt shapes are skill material.
+    // Texts are re-read from transcripts at report time — never stored — and
+    // rotated or missing sources count as pruned, never as errors.
+    let (candidates, pruned) = skill_candidates(sess, window)?;
     if format == Format::Json {
         let behaviors: Vec<serde_json::Value> = counts
             .iter()
@@ -1702,8 +1706,24 @@ fn prompts(sess: &Session, window: TimeRange, format: Format) -> Result<()> {
                 })
             })
             .collect();
+        let candidates_json: Vec<serde_json::Value> = candidates
+            .iter()
+            .map(|c| {
+                serde_json::json!({
+                    "template": c.template,
+                    "count": c.count,
+                    "example": c.example,
+                    "sources": c.sources.iter().take(10).collect::<Vec<_>>(),
+                })
+            })
+            .collect();
         return emit_json(&with_window(
-            serde_json::json!({ "total": total, "behaviors": behaviors }),
+            serde_json::json!({
+                "total": total,
+                "behaviors": behaviors,
+                "candidates": candidates_json,
+                "pruned_prompts": pruned,
+            }),
             window,
         ));
     }
@@ -1797,7 +1817,75 @@ fn prompts(sess: &Session, window: TimeRange, format: Format) -> Result<()> {
             ))
         );
     }
+    if !candidates.is_empty() {
+        println!();
+        println!("Candidate new skills — prompts worth promoting to a skill file:");
+        let rows: Vec<Vec<String>> = candidates
+            .iter()
+            .map(|c| {
+                let example = if c.example.chars().count() > 60 {
+                    format!("{} …", c.example.chars().take(59).collect::<String>())
+                } else {
+                    c.example.clone()
+                };
+                let from = if c.sources.len() == 1 {
+                    c.sources[0].clone()
+                } else {
+                    format!("{} (+{} more)", c.sources[0], c.sources.len() - 1)
+                };
+                vec![c.template.clone(), c.count.to_string(), example, from]
+            })
+            .collect();
+        render(
+            &["candidate", "times", "e.g.", "from"],
+            &[Align::Left, Align::Right, Align::Left, Align::Left],
+            &rows,
+            format,
+        );
+    }
+    if pruned > 0 {
+        note(&format!(
+            "{pruned} prompt(s) referenced rotated or missing transcripts — excluded from candidates, not silently dropped"
+        ));
+    }
     Ok(())
+}
+
+/// Skill-candidate extraction for the prompts view (PBI 12): group the
+/// window's prompt texts by reusable shape, keep repeats, count the rest as
+/// pruned. Texts are re-read from transcripts here — never stored — one file
+/// read per transcript no matter how many pointers it holds.
+fn skill_candidates(
+    sess: &Session,
+    window: TimeRange,
+) -> Result<(Vec<crate::core::prompt::SkillCandidate>, i64)> {
+    use std::collections::BTreeMap;
+    let refs = sess.store.prompt_refs(window)?;
+    let mut by_path: BTreeMap<&str, Vec<i64>> = BTreeMap::new();
+    for (path, line) in &refs {
+        by_path.entry(path.as_str()).or_default().push(*line);
+    }
+    let mut texts: Vec<(String, String)> = Vec::new();
+    let mut pruned: i64 = 0;
+    for (path, lines) in &by_path {
+        match std::fs::read_to_string(path) {
+            Err(_) => pruned += lines.len() as i64,
+            Ok(content) => {
+                for line in lines {
+                    match crate::adapter::transcript::prompt_text_in(&content, *line) {
+                        Some(text) => texts.push((text, format!("{path}:{line}"))),
+                        None => pruned += 1,
+                    }
+                }
+            }
+        }
+    }
+    let candidates = crate::core::prompt::cluster_candidates(
+        texts
+            .iter()
+            .map(|(text, source)| (text.as_str(), source.as_str())),
+    );
+    Ok((candidates, pruned))
 }
 
 /// Reconcile the empirical always-on floor against readable config. The floor is

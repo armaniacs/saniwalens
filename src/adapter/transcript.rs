@@ -265,6 +265,37 @@ pub fn extract_prompt_pointers(jsonl: &str) -> Vec<(usize, i64, PromptBehavior)>
         .collect()
 }
 
+/// The user prompt text a stored pointer names: the `line_no`-th line
+/// (0-based, as [`extract_prompt_pointers`] numbers them) of the transcript
+/// file at `path`, when that line is a plain-text user prompt. `None` for a
+/// missing or unreadable file, a short file, an unparsable line, or a
+/// non-text prompt (command invocations, tool results, array content) — the
+/// caller counts those as pruned, never as errors. Only string content is
+/// returned: the same shape the pointers were extracted from.
+pub fn prompt_text_at(path: &std::path::Path, line_no: i64) -> Option<String> {
+    let text = std::fs::read_to_string(path).ok()?;
+    prompt_text_in(&text, line_no)
+}
+
+/// The [`prompt_text_at`] lookup over file content already read: same
+/// contract, no I/O. Lets callers that resolved many pointers into one file
+/// read it once and resolve each line against the same text.
+pub fn prompt_text_in(content: &str, line_no: i64) -> Option<String> {
+    let line = content.lines().nth(usize::try_from(line_no).ok()?)?;
+    let raw: Raw = serde_json::from_str(line).ok()?;
+    let is_prompt = raw.kind.as_deref() == Some("user")
+        && raw.is_meta != Some(true)
+        && command_content(&raw).is_none()
+        && !line.contains("tool_result");
+    if !is_prompt {
+        return None;
+    }
+    match raw.message.as_ref().and_then(|m| m.content.as_ref()) {
+        Some(serde_json::Value::String(text)) if !text.trim().is_empty() => Some(text.clone()),
+        _ => None,
+    }
+}
+
 /// One failed tool result: when it happened, its friction category, a readable
 /// excerpt of the error text, the tool that produced it, and the call's target —
 /// the file_path it edited or the command it ran, recovered from the originating
@@ -1213,5 +1244,36 @@ mod tests {
             errors[0].excerpt,
             "String to replace not found in /tmp/example/bar.rs"
         );
+    }
+
+    #[test]
+    fn prompt_text_at_reads_the_pointed_line_only() {
+        let dir = std::env::temp_dir().join(format!(
+            "saniwalens-prompt-text-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("s.jsonl");
+        std::fs::write(
+            &path,
+            concat!(
+                "{\"type\":\"user\",\"timestamp\":\"2026-01-01T00:00:00.000Z\",\"message\":{\"content\":\"fix it\"}}\n",
+                "{\"type\":\"assistant\",\"timestamp\":\"2026-01-01T00:00:01.000Z\",\"message\":{\"model\":\"m\",\"usage\":{\"output_tokens\":1}}}\n",
+                "{\"type\":\"user\",\"timestamp\":\"2026-01-01T00:00:02.000Z\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"array\"}]}}\n",
+            ),
+        )
+        .unwrap();
+        // Plain-text prompt: returned verbatim.
+        assert_eq!(prompt_text_at(&path, 0), Some("fix it".to_string()));
+        // Assistant line, array content, short file, missing file, bad line:
+        // all pruned, never an error.
+        assert_eq!(prompt_text_at(&path, 1), None);
+        assert_eq!(prompt_text_at(&path, 2), None);
+        assert_eq!(prompt_text_at(&path, 99), None);
+        assert_eq!(prompt_text_at(&dir.join("gone.jsonl"), 0), None);
+        assert_eq!(prompt_text_at(&path, -1), None);
+        std::fs::remove_dir_all(&dir).ok();
     }
 }

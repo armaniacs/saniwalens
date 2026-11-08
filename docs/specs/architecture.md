@@ -55,11 +55,14 @@ were anticipated, and shape what `analyze` must capture:
   hold.
 - **Skill extraction** ― clustering recurring user prompts into candidate new
   skills (the "synthesize a new surface" goal, distinct from pruning existing
-  ones). This needs the **raw prompt text**, which the store does not keep ― so
-  `analyze` records a pointer to it now (`events.prompt` → `(source_path,
-  source_line)`; `storage.md`). The capability is reserved, not built: transcripts
-  rotate, and the text is unrecoverable once gone, so the cheap pointer is laid
-  down today even though the consumer is later.
+  ones). The store keeps only the pointer (`events.prompt` → `(source_path,
+  source_line)`; `storage.md`); the `prompts` view re-reads the text at
+  report time, masks variable spans (quoted strings, paths, numbers) into a
+  reusable template (`core::prompt`), and lists templates repeated at least
+  three times as candidates with a count, an exemplar, and their sources.
+  Rotated or missing transcripts count as pruned, never as errors. Reworded
+  asks that no masking unifies stay unclustered ― that recall limit is
+  documented, not papered over. Proposals are presented only, never advised.
 
 ## The central model: catalog × usage
 

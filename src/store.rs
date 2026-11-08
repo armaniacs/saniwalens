@@ -1019,6 +1019,27 @@ impl Store {
         Ok(())
     }
 
+    /// Prompt pointers in the window: `(transcript path, 0-based line)` per
+    /// user prompt. The view re-reads the text through the adapter; a missing
+    /// file or line resolves to `None` there and counts as pruned, never as
+    /// an error — so the store never needs the prompt text itself.
+    pub fn prompt_refs(&self, range: TimeRange) -> Result<Vec<(String, i64)>> {
+        let (filter, binds) = range_clause(range, "e.started_epoch");
+        let sql = format!(
+            "SELECT DISTINCT e.source_path, e.source_line
+             FROM events e
+             WHERE e.kind = 'prompt' AND e.source_line IS NOT NULL{filter}
+             ORDER BY e.source_path, e.source_line"
+        );
+        let mut stmt = self.conn.prepare(&sql)?;
+        let rows = stmt
+            .query_map(params_from_iter(binds), |row| {
+                Ok((row.get(0)?, row.get(1)?))
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(rows)
+    }
+
     /// Every file edit as a `FileEdit`, time-ordered — the input to thrash
     /// detection, which needs the session and full path to tell one agent's
     /// retries apart from parallel work on a same-named file (`core::thrash`).
@@ -3172,6 +3193,24 @@ mod tests {
             .unwrap();
 
         assert_eq!(store.file_edits(TimeRange::ALL).unwrap(), vec![]);
+    }
+
+    #[test]
+    fn prompt_refs_return_distinct_transcript_lines() {
+        let mut store = Store::in_memory().unwrap();
+        let alpha = session("a1");
+        store
+            .ingest(
+                IngestBatch::new(&alpha, &[], &[])
+                    .prompts(&[(0, 1_700_000_000_000, "instruct")])
+                    .tool_errors(&[(1_000_000, "timeout", "t", "Bash", "sleep 9")]),
+            )
+            .unwrap();
+
+        assert_eq!(
+            store.prompt_refs(TimeRange::ALL).unwrap(),
+            vec![("/tmp/a1.jsonl".to_string(), 0)]
+        );
     }
 
     #[test]
