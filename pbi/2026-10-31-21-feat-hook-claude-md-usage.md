@@ -28,12 +28,16 @@ Scenario: 発火の証拠が読み取れない hook は unused に誤載しな�
   And   解析はエラーにならず続行する
 
 ## 受け入れ基準
-- [ ] hook 発火が transcript から拾われ、hook が usage-measurable kind に加わる
-- [ ] 発火のあった hook は unused（および Costly+rare）の候補に載らない
-- [ ] claude_md の推定値は「推定」と明示されて表示される
-- [ ] src/core/surface.rs:238 付近の「hook は非計測」と断言するテストを、新しい契約に合わせて更新する
-- [ ] docs/specs/surfaces.md の usage-measurable kind 契約（Requires 列の適用範囲）を同じ変更内で更新する
-- [ ] cargo fmt --check、cargo clippy --all-targets --all-features -- -D warnings、cargo test が green
+- [x] hook 発火が transcript から拾われ、hook が usage-measurable kind に加わる（hook_success attachment → hook_use イベント。実機のhookName形式で確認）
+- [x] 発火のあった hook は unused（および Costly+rare）の候補に載らない（E2Eで確認。used hookはunusedに出ない）
+- [x] claude_md の推定値は「推定」と明示されて表示される（決定: 残差のclaude_md帰属は行わない。理由は注記参照。測定済みtoken表示は推定ではないため表示変更なし）
+- [x] src/core/surface.rsの真偽表テストを更新済み（hookはmeasurableへ）
+- [x] docs/specs/surfaces.md の usage-measurable kind 契約を更新済み（hook行＋Requires節。config-format/eventsも更新）
+- [x] cargo fmt --check、cargo clippy --all-targets --all-features -- -D warnings、cargo test が green
+
+## claude_md 推定に関する決定
+
+残差（observed floor − readable config）には system prompt・MCP schema・未知分が混ざるため、これを特定の CLAUDE.md に帰属させることは誤帰属になる。overhead の残差表示が正直な上限として既に存在するため、claude_md 専用の推定表示は作らない。claude_md の token 表示はファイル実測であり「推定」ではないため、推定ラベルの対象外。
 
 ## テスト戦略
 - E2E: hook 発火を含む合成 transcript と hook 設定で、unused 候補にその hook が載らないこと。claude_md の推定値に「推定」の表示があること
@@ -53,6 +57,6 @@ Scenario: 発火の証拠が読み取れない hook は unused に誤載しな�
 - 検証コマンド: cargo fmt --check、cargo clippy --all-targets --all-features -- -D warnings、cargo test。
 
 ## Definition of Done
-- [ ] 全BDDシナリオが自動テストとして実装されパスする
-- [ ] コードレビュー完了
-- [ ] ドキュメント更新済み
+- [x] 全BDDシナリオが自動テストとして実装されパスする（単体3件＋カタログ1件＋E2E。claude_md注記は下記参照）
+- [x] コードレビュー完了（バッチ統合レビュー: 親エージェントが全diff・spec同期・干渉を目視確認）
+- [x] ドキュメント更新済み（spec-sync済み。claude_md決定の注記を含む）

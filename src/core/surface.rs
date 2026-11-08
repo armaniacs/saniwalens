@@ -114,11 +114,13 @@ pub struct Surface {
 /// wedge routing (`core::findings`) and the `waste` view (`cli/mod.rs`).
 pub const HEAVY_TOKENS: u64 = 800;
 
-/// (rules, hooks, CLAUDE.md) it means nothing (`docs/specs/surfaces.md`).
+/// (rules, CLAUDE.md) it means nothing (`docs/specs/surfaces.md`).
+/// Hooks joined their measurable peers once firing became observable
+/// (PBI 21): a hook with firings is used; one without is a delete candidate.
 pub fn is_usage_measurable(kind: &str) -> bool {
     matches!(
         kind,
-        "skill" | "agent" | "mcp_server" | "mcp_tool" | "permission"
+        "skill" | "agent" | "mcp_server" | "mcp_tool" | "permission" | "hook"
     )
 }
 
@@ -414,8 +416,8 @@ mod tests {
     fn rules_and_claude_md_are_catalog_only() {
         assert!(is_usage_measurable("skill"));
         assert!(is_usage_measurable("mcp_tool"));
+        assert!(is_usage_measurable("hook"));
         assert!(!is_usage_measurable("rule"));
-        assert!(!is_usage_measurable("hook"));
         assert!(!is_usage_measurable("claude_md"));
     }
 

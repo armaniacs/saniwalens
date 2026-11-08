@@ -833,6 +833,8 @@ impl Store {
         for event in usage {
             let kind = if event.surface_kind == "agent" {
                 "agent_spawn"
+            } else if event.surface_kind == "hook" {
+                "hook_use"
             } else {
                 "tool_use"
             };

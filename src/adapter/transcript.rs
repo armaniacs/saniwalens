@@ -15,6 +15,7 @@ use crate::core::friction::{ErrorCategory, classify_error};
 use crate::core::path::basename;
 use crate::core::prompt::{PromptBehavior, classify_prompt};
 use crate::core::span::{Record, RecordKind, Source};
+use crate::core::usage::UsageEvent;
 
 const SYNTHETIC_MODEL: &str = "<synthetic>";
 
@@ -33,7 +34,7 @@ pub const CLAUDE_ANALYZER_META_KEY: &str = "analyzer_version";
 /// that changes no analysis should not force everyone through a full
 /// re-analyze. opencode and kilocode carry their own keys beside their own
 /// mappings (`adapter::opencode`, `adapter::kilocode`).
-pub const CLAUDE_ANALYZER_VERSION: &str = "8";
+pub const CLAUDE_ANALYZER_VERSION: &str = "9";
 
 /// response written as several lines is charged once (`assistant_records`).
 pub fn parse_session(jsonl: &str) -> Vec<Record> {
@@ -66,6 +67,9 @@ struct Raw {
     #[serde(rename = "toolDenialKind")]
     denial_kind: Option<String>,
     message: Option<RawMessage>,
+    /// Top-level attachment (hook records carry theirs here rather than
+    /// under `message`).
+    attachment: Option<serde_json::Value>,
     /// Top-level content (system `local_command` records carry it here rather
     /// than under `message`).
     content: Option<Value>,
@@ -296,7 +300,43 @@ pub fn prompt_text_in(content: &str, line_no: i64) -> Option<String> {
     }
 }
 
-/// One failed tool result: when it happened, its friction category, a readable
+/// Hook firings as usage: every `attachment` record whose attachment ran a
+/// hook (`type: "hook_success"`) becomes one usage event keyed by the hook's
+/// name (`hookName`, e.g. `PreToolUse:Bash`) — the same name the catalog
+/// gives a configured hook, so firings join their surface. Context and
+/// summary attachments (`hook_additional_context`, `hook_system_message`)
+/// are not executions and never count, and a firing without a name cannot
+/// join anything, so both are skipped. An executed hook that failed (nonzero
+/// exit) still fired: outcome is not usage.
+pub fn extract_hook_usages(jsonl: &str) -> Vec<UsageEvent> {
+    jsonl
+        .lines()
+        .filter_map(|line| {
+            let raw: Raw = serde_json::from_str(line).ok()?;
+            if raw.kind.as_deref() != Some("attachment") {
+                return None;
+            }
+            let attachment = raw.attachment.as_ref()?;
+            if attachment.get("type")?.as_str()? != "hook_success" {
+                return None;
+            }
+            let name = attachment.get("hookName")?.as_str()?;
+            if name.is_empty() {
+                return None;
+            }
+            let ts = raw.timestamp.as_deref().and_then(parse_timestamp_ms)?;
+            Some(UsageEvent {
+                surface_kind: "hook".to_string(),
+                surface_id: name.to_string(),
+                started_epoch_ms: ts,
+                tool_use_id: attachment
+                    .get("toolUseID")
+                    .and_then(|v| v.as_str())
+                    .map(str::to_string),
+            })
+        })
+        .collect()
+}
 /// excerpt of the error text, the tool that produced it, and the call's target —
 /// the file_path it edited or the command it ran, recovered from the originating
 /// `tool_use` input (the error text alone often omits it, e.g. edit-precondition).
@@ -1244,6 +1284,38 @@ mod tests {
             errors[0].excerpt,
             "String to replace not found in /tmp/example/bar.rs"
         );
+    }
+
+    #[test]
+    fn hook_success_lines_become_hook_usage() {
+        // A hook firing is an attachment record, not a tool_use: the hook's
+        // name (`Event:Matcher`) is the usage identity, attributed like any
+        // other usage event.
+        let jsonl = concat!(
+            r#"{"type":"attachment","timestamp":"2026-10-14T20:06:16.756Z","attachment":{"type":"hook_success","hookName":"PreToolUse:Bash","hookEvent":"PreToolUse","toolUseID":"toolu_9"}}"#,
+            "\n",
+            r#"{"type":"user","timestamp":"2026-10-14T20:06:17.000Z","message":{"content":"ok"}}"#,
+        );
+        let usage = extract_hook_usages(jsonl);
+        assert_eq!(usage.len(), 1);
+        assert_eq!(usage[0].surface_kind, "hook");
+        assert_eq!(usage[0].surface_id, "PreToolUse:Bash");
+        assert_eq!(usage[0].started_epoch_ms, 1792008376756);
+        assert_eq!(usage[0].tool_use_id.as_deref(), Some("toolu_9"));
+    }
+
+    #[test]
+    fn non_firing_hook_records_are_not_usage() {
+        // Context/summary attachments and hook-less lines never count as
+        // firings; a firing without a name cannot join any hook.
+        let jsonl = concat!(
+            r#"{"type":"attachment","timestamp":"2026-10-14T20:06:16.756Z","attachment":{"type":"hook_additional_context","content":"x"}}"#,
+            "\n",
+            r#"{"type":"attachment","timestamp":"2026-10-14T20:06:17.000Z","attachment":{"type":"hook_success"}}"#,
+            "\n",
+            r#"{"type":"user","timestamp":"2026-10-14T20:06:18.000Z","message":{"content":"ok"}}"#,
+        );
+        assert!(extract_hook_usages(jsonl).is_empty());
     }
 
     #[test]

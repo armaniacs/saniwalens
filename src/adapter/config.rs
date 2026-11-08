@@ -95,6 +95,73 @@ pub fn read_skill_surfaces(skills_dir: &Path, scope: &Scope) -> Vec<Surface> {
         .collect()
 }
 
+/// Build a `hook` surface from one settings.json hook entry. The id joins
+/// what the transcript reports: `hookName` is `"<Event>:<matcher>"`, so an
+/// entry with a matcher catalogues as `Event:Matcher` and a matcher-less one
+/// (Stop, Notification) as the bare event. `startup_tokens` is 0: a hook body
+/// waits for its trigger like a path-conditional rule's, and firing is what
+/// the transcript measures (`docs/specs/events.md`).
+pub fn hook_surface(id: &str, config_path: &str, command: &str, scope: &Scope) -> Surface {
+    Surface {
+        kind: "hook".to_string(),
+        id: id.to_string(),
+        scope: scope.clone(),
+        config_path: config_path.to_string(),
+        static_tokens: Some(approx_tokens(command)),
+        startup_tokens: Some(0),
+        load_mode: LoadMode::PathConditional,
+        paths: Vec::new(),
+        description: None,
+    }
+}
+
+/// Read `hooks` from a `settings.json`-shaped file (global
+/// `~/.claude/settings.json`, project `.claude/settings.json` /
+/// `settings.local.json`) into one surface per hook entry. Missing files,
+/// unparsable JSON, and a missing/non-object `hooks` table all read as no
+/// hooks — the same silent-absence the other optional config files use.
+pub fn read_hook_surfaces(settings_json: &Path, scope: &Scope) -> Vec<Surface> {
+    let Ok(text) = fs::read_to_string(settings_json) else {
+        return Vec::new();
+    };
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(&text) else {
+        return Vec::new();
+    };
+    let Some(hooks) = value.get("hooks").and_then(|hooks| hooks.as_object()) else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for (event, entries) in hooks {
+        let Some(entries) = entries.as_array() else {
+            continue;
+        };
+        for entry in entries {
+            let matcher = entry.get("matcher").and_then(|m| m.as_str());
+            let id = match matcher {
+                Some(matcher) if !matcher.is_empty() => format!("{event}:{matcher}"),
+                _ => event.clone(),
+            };
+            let command = entry
+                .get("hooks")
+                .and_then(|hooks| hooks.as_array())
+                .map(|hooks| {
+                    hooks
+                        .iter()
+                        .filter_map(|hook| hook.get("command")?.as_str())
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                })
+                .unwrap_or_default();
+            out.push(hook_surface(
+                &id,
+                &settings_json.display().to_string(),
+                &command,
+                scope,
+            ));
+        }
+    }
+    out
+}
 /// Build a `rule` surface. A rule with a `paths:` frontmatter key is loaded
 /// only when a matching file is in play (`PathConditional`); one without is
 /// always loaded (`StartupFull`). See `docs/specs/config-format.md`.
@@ -903,6 +970,32 @@ mod tests {
         fs::remove_dir_all(&dir).ok();
 
         assert_eq!(surfaces[0].startup_tokens, None);
+    }
+
+    #[test]
+    fn hooks_catalogue_by_event_and_matcher() {
+        let dir = std::env::temp_dir().join(format!(
+            "saniwalens-hooks-test-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("settings.json");
+        std::fs::write(
+            &path,
+            r#"{"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"check.sh"}]},{"matcher":"","hooks":[{"type":"command","command":"always.sh"}]}],"Stop":[{"hooks":[{"type":"command","command":"bye.sh"}]}]}}"#,
+        )
+        .unwrap();
+        let surfaces = read_hook_surfaces(&path, &Scope::Global);
+        std::fs::remove_dir_all(&dir).ok();
+        let mut ids: Vec<_> = surfaces.iter().map(|s| s.id.as_str()).collect();
+        ids.sort();
+        // Matcher present: Event:Matcher (the transcript's hookName shape).
+        // Empty or missing matcher: the bare event (no invented suffix).
+        assert_eq!(ids, vec!["PreToolUse", "PreToolUse:Bash", "Stop"]);
+        assert!(surfaces.iter().all(|s| s.kind == "hook"));
+        assert!(surfaces.iter().all(|s| s.load_mode == LoadMode::PathConditional));
     }
 
     #[test]

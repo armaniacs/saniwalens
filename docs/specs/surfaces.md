@@ -59,13 +59,15 @@ fastest way to a wrong recommendation. Each kind is classified:
 | `mcp_server` / `mcp_tool` | usage-measurable | `tool_use` |
 | `permission` | usage-measurable (partly heuristic) | `permission_prompt` from the denial marker, falling back to denial text — lower confidence |
 | `rule` | **catalog-only** | none (injected context; no invocation event) |
-| `hook` | **catalog-only** | none (no structured transcript trace) |
+| `hook` | usage-measurable | `hook_use` (a fired `hook_success` attachment; its `hookName` joins the catalog id) |
 | `claude_md` | **catalog-only** | none (always-on; usage is not the question — static cost is) |
 
 For a **catalog-only** surface, absence of events is *not* evidence of disuse —
 no event could ever appear. The join still lists it (with zero usage), but the
-wedges below gate on this class so a rule or hook is never flagged "unused →
-delete" merely for emitting nothing.
+wedges below gate on this class so a rule is never flagged "unused →
+delete" merely for emitting nothing. Hooks left that class once firings became
+observable: a hook with firings is used, one without is an unused delete
+candidate like any other measurable surface.
 
 ## The join
 
@@ -125,8 +127,7 @@ invoked)`, because the seeded session acts on those figures and a single
 unlabelled number there becomes a fix proposal that frees nothing.
 
 The "Requires" column makes the coverage explicit: **Unused** and **Costly +
-rare** apply only to usage-measurable kinds — never to `rule` / `hook` /
-`claude_md`. A few wedges depend on signals the tool does not yet fully have:
+rare** apply only to usage-measurable kinds ― never to `rule` / `claude_md`. A few wedges depend on signals the tool does not yet fully have:
 
 - **Never-fires rule** needs evidence a rule's `paths:` glob *could* have fired.
   The only honest source is session activity — did any file matching the glob

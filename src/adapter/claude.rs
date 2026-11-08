@@ -15,13 +15,13 @@ use anyhow::{Context, Result};
 use crate::adapter::config::claude_home;
 use crate::adapter::harness::{
     AnalyzeStats, Harness, Site, catalog_surfaces, file_fingerprint, load_agents, load_claude_md,
-    load_mcp, load_rules, load_skills,
+    load_hooks, load_mcp, load_rules, load_skills,
 };
 use crate::adapter::transcript::{
     CLAUDE_ANALYZER_META_KEY, CLAUDE_ANALYZER_VERSION, count_permission_denials,
-    extract_prompt_pointers, extract_tool_errors, extract_work_events, parse_session,
-    parse_subagent_sidecar, session_cwd, subagent_id_from_file_name, subagent_prompt_id,
-    subagent_sidecar_path, subagents_dir,
+    extract_hook_usages, extract_prompt_pointers, extract_tool_errors, extract_work_events,
+    parse_session, parse_subagent_sidecar, session_cwd, subagent_id_from_file_name,
+    subagent_prompt_id, subagent_sidecar_path, subagents_dir,
 };
 use crate::core::span::{DEFAULT_IDLE_GAP_MS, SessionStart, extract_spans, session_start};
 use crate::core::subagent::{SubagentRun, link_runs};
@@ -101,6 +101,7 @@ pub(crate) fn global_sites(config_dir: &Path) -> Vec<Site> {
         Site::new(config_dir.join("rules"), load_rules),
         Site::new(config_dir.join("agents"), load_agents),
         Site::new(config_dir.join("mcp.json"), load_mcp),
+        Site::new(config_dir.join("settings.json"), load_hooks),
         Site::with_payload(
             config_dir.to_path_buf(),
             load_claude_md,
@@ -119,6 +120,8 @@ pub(crate) fn project_sites(root: &Path) -> Vec<Site> {
         Site::new(root.join(".claude").join("rules"), load_rules),
         Site::new(root.join(".claude").join("agents"), load_agents),
         Site::new(root.join(".mcp.json"), load_mcp),
+        Site::new(root.join(".claude").join("settings.json"), load_hooks),
+        Site::new(root.join(".claude").join("settings.local.json"), load_hooks),
         Site::with_payload(
             root.to_path_buf(),
             load_claude_md,
@@ -189,7 +192,10 @@ pub fn analyze(projects: Option<PathBuf>, db: &Path) -> Result<AnalyzeStats> {
         denials += count_permission_denials(&text);
         let records = parse_session(&text);
         let mut spans = extract_spans(&records, DEFAULT_IDLE_GAP_MS);
-        let usage = extract_usage_events(&records);
+        let mut usage = extract_usage_events(&records);
+        // Hook firings join the catalog like any other usage: the same
+        // `hookName` the settings catalogues under.
+        usage.extend(extract_hook_usages(&text));
         let runs = subagent_runs(&transcript);
         attribute_subagents(&mut spans, &runs);
         let sub_tokens: i64 = runs.iter().map(|run| run.out_tokens as i64).sum();

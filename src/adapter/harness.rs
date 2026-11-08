@@ -123,6 +123,13 @@ pub(crate) fn load_mcp(site: &Site, scope: &Scope, _ctx: &mut SiteCtx) -> Vec<Su
     read_mcp_server_surfaces(&site.path, scope)
 }
 
+/// `settings.json` hooks (global or project): one always-measurable surface
+/// per hook entry, named `Event:Matcher` like the transcript's `hookName`.
+/// Missing or unparsable files read as no hooks — hooks are optional config.
+pub(crate) fn load_hooks(site: &Site, scope: &Scope, _ctx: &mut SiteCtx) -> Vec<Surface> {
+    crate::adapter::config::read_hook_surfaces(&site.path, scope)
+}
+
 /// The `CLAUDE.md`-convention files this site names (`payload`), loaded with
 /// their `@import`s resolved through the home dir.
 pub(crate) fn load_claude_md(site: &Site, scope: &Scope, ctx: &mut SiteCtx) -> Vec<Surface> {

@@ -75,6 +75,11 @@ winning.
 
 `settings.json` carries two surface kinds at once: `permissions` (allow/deny) and
 `hooks` (matcher → command); the adapter splits one file into several surfaces.
+Each hook entry becomes a `hook` surface named `Event:Matcher` (bare event when
+no matcher is declared) ― the same name the transcript stamps on a firing
+(`hookName`), so firings join their surface. Firing is measured per window;
+a hook with no firings reads unused, which is exactly the dead-hook signal
+(`docs/specs/surfaces.md`).
 MCP servers are **not** in `settings.json` ― they live in a separate `mcp.json`
 (verified: `~/.claude/settings.json` has no `mcpServers` key; `~/.claude/mcp.json`
 holds them). If a future Claude Code version also accepts inline `mcpServers` in

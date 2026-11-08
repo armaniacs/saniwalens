@@ -24,6 +24,7 @@ identifying the configuration surface it exercises (the join key into
 | `tool_error` | — (a failed `tool_result`) | point event; friction category in `surface_id`, a short error-text excerpt in `source`, the originating tool name in `model`, the call's target (file_path / command) in `target` |
 | `file_edit` | — (an Edit/Write target) | point event; the file's **basename** in `surface_id`, its **full path** in `target` |
 | `file_read` | — (a Read target) | point event; same encoding as `file_edit`. Observed, never attributed: it feeds the never-fires wedge (`docs/specs/surfaces.md`), not thrash (which reads `file_edit` only) or hotspots |
+| `hook_use` | hook (a fired hook) | point event; the hook's `hookName` (`Event:Matcher`) in `surface_id`, joining the catalogued hook. Firings come from `attachment` records with `type: "hook_success"`; context/summary attachments are not executions |
 | `bash_cmd` | — (a Bash invocation) | point event; the command's leading word in `surface_id` |
 | `compaction` | — (a `compact_boundary`) | point marker, used by the context metric |
 | `permission_prompt` | `permission` | point event (friction signal) — partly heuristic source |
@@ -82,9 +83,10 @@ Two kinds carry caveats that downstream reports must honour:
   session. A split under-reports a real burst; a merge invents one that never
   happened, and the merge is what makes the report untrustworthy.
 
-Surfaces that emit no event at all — `rule`, `hook`, `claude_md` — never produce
+Surfaces that emit no event at all ― `rule` and `claude_md` ― never produce
 rows here. That is expected, not missing data; `surfaces.md` classifies them as
-catalog-only so their absence of events is never read as disuse.
+catalog-only so their absence of events is never read as disuse. (Hooks used
+to be on this list; firing became observable, so they emit `hook_use`.)
 
 A **span** is an event with a duration window — currently `skill_invocation`.
 The rest of this spec is mostly about spans, since that is where boundary and
