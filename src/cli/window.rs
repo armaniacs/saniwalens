@@ -59,6 +59,74 @@ pub(crate) struct PairArgs {
     pub(crate) last: Option<String>,
 }
 
+/// The unified window flags (PBI C5): the single data the period flags carry,
+/// shared by the single-window views and trend's pair. `PeriodArgs` /
+/// `PairArgs` keep their own help wording — the help capture pins every
+/// view's `--help` byte-identical, and one clap struct cannot carry two
+/// wordings — so they stay as thin clap shims converting into this via
+/// [`PeriodArgs::window`] / [`PairArgs::window`]. `src/cli/mod.rs` still names
+/// the shims, which is the only reason they are not deleted; the parse below
+/// takes only this.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct WindowArgs {
+    pub(crate) since: Option<String>,
+    pub(crate) until: Option<String>,
+    pub(crate) last: Option<String>,
+}
+
+/// Single or comparison: what the window flags resolve into.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum WindowMode {
+    Single,
+    Pair,
+}
+
+/// What one [`parse_window`] call resolves: a single window, or the comparison
+/// pair trend renders.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ResolvedWindow {
+    Single(TimeRange),
+    Pair(WindowPair),
+}
+
+impl ResolvedWindow {
+    fn single(self) -> TimeRange {
+        match self {
+            Self::Single(window) => window,
+            Self::Pair(_) => unreachable!("single mode resolves a single window"),
+        }
+    }
+
+    fn pair(self) -> WindowPair {
+        match self {
+            Self::Pair(pair) => pair,
+            Self::Single(_) => unreachable!("pair mode resolves a comparison pair"),
+        }
+    }
+}
+
+impl PeriodArgs {
+    /// The unified flags this shim carries.
+    pub(crate) fn window(&self) -> WindowArgs {
+        WindowArgs {
+            since: self.since.clone(),
+            until: self.until.clone(),
+            last: self.last.clone(),
+        }
+    }
+}
+
+impl PairArgs {
+    /// The unified flags this shim carries.
+    pub(crate) fn window(&self) -> WindowArgs {
+        WindowArgs {
+            since: self.since.clone(),
+            until: self.until.clone(),
+            last: self.last.clone(),
+        }
+    }
+}
+
 /// The one `--format` declaration for the table/markdown/json views. Flattened
 /// into every view that accepts all three, so the wording cannot drift view by
 /// view and a new view cannot omit the flag.
@@ -238,11 +306,7 @@ impl WindowedDispatch<'_> {
         analyze: impl FnOnce(&Harness, Option<PathBuf>, &Path) -> Result<AnalyzeStats>,
     ) -> Result<WindowedRead> {
         let format = view.parse(format)?;
-        let window = parse_period(
-            period.since.as_deref(),
-            period.until.as_deref(),
-            period.last.as_deref(),
-        )?;
+        let window = parse_window(&period.window(), WindowMode::Single)?.single();
         let sess = Session::open_read(
             self.harness,
             read.db.clone(),
@@ -269,11 +333,7 @@ impl WindowedDispatch<'_> {
         analyze: impl FnOnce(&Harness, Option<PathBuf>, &Path) -> Result<AnalyzeStats>,
     ) -> Result<WindowedPairRead> {
         let format = ViewFormat::TableMarkdownJson.parse(format)?;
-        let pair = parse_pair(
-            pair.since.as_deref(),
-            pair.until.as_deref(),
-            pair.last.as_deref(),
-        )?;
+        let pair = parse_window(&pair.window(), WindowMode::Pair)?.pair();
         let sess = Session::open_read(
             self.harness,
             read.db.clone(),
@@ -286,32 +346,28 @@ impl WindowedDispatch<'_> {
     }
 }
 
-/// Resolve the period flags before the session is built — the same
+/// Resolve the window flags before the session is built — the same
 /// ahead-of-store evaluation `parse_scope` and [`ViewFormat::parse`] have, so
-/// an unparseable date fails on its own. The clock is read here: this is the
-/// thin shell around the pure transform in `core::period`.
-pub(crate) fn parse_period(
-    since: Option<&str>,
-    until: Option<&str>,
-    last: Option<&str>,
-) -> Result<TimeRange> {
+/// an unparseable date fails on its own. Single mode resolves the one window
+/// the single-window views render; pair mode resolves trend's comparison
+/// pair, rejecting a `--until` without a `--since` whose previous window
+/// would be undefined. The clock is read here: this is the thin shell around
+/// the pure transforms in `core::period`.
+pub(crate) fn parse_window(args: &WindowArgs, mode: WindowMode) -> Result<ResolvedWindow> {
     let now = chrono::Utc::now().timestamp();
-    period::resolve(since, until, last, now, JST_OFFSET_SECS).map_err(anyhow::Error::msg)
-}
-
-/// Resolve the trend's period flags into the two comparison windows before
-/// the session is built — the same ahead-of-store evaluation `parse_period`
-/// gives the other views, so an unparseable date, a `--until` without a
-/// `--since`, or an inverted window fails as a period error before any store
-/// work or freshness line. The clock is read here: the thin shell around the
-/// pure transform in `core::period`.
-pub(crate) fn parse_pair(
-    since: Option<&str>,
-    until: Option<&str>,
-    last: Option<&str>,
-) -> Result<WindowPair> {
-    let now = chrono::Utc::now().timestamp();
-    period::resolve_pair(since, until, last, now, JST_OFFSET_SECS).map_err(anyhow::Error::msg)
+    let (since, until, last) = (
+        args.since.as_deref(),
+        args.until.as_deref(),
+        args.last.as_deref(),
+    );
+    match mode {
+        WindowMode::Single => period::resolve(since, until, last, now, JST_OFFSET_SECS)
+            .map(ResolvedWindow::Single)
+            .map_err(anyhow::Error::msg),
+        WindowMode::Pair => period::resolve_pair(since, until, last, now, JST_OFFSET_SECS)
+            .map(ResolvedWindow::Pair)
+            .map_err(anyhow::Error::msg),
+    }
 }
 
 /// The evaluation-window disclosure — stderr (every format) and the framing
@@ -478,14 +534,12 @@ mod tests {
         // No flags: 7d against the 7d right before it, the two tiling the
         // timeline with no shared second.
         let cli = Cli::try_parse_from(["saniwalens", "trend"]).unwrap();
-        let Command::Trend {
-            pair: PairArgs { since, until, last },
-            ..
-        } = cli.command
-        else {
+        let Command::Trend { pair, .. } = cli.command else {
             panic!("expected the trend command");
         };
-        let pair = parse_pair(since.as_deref(), until.as_deref(), last.as_deref()).unwrap();
+        let pair = parse_window(&pair.window(), WindowMode::Pair)
+            .unwrap()
+            .pair();
         let day = 86_400;
         assert_eq!(
             pair.current.end.unwrap() - pair.current.start.unwrap() + 1,
@@ -499,14 +553,12 @@ mod tests {
 
         // --last 24h: the same shape at 24h (86_400 seconds).
         let cli = Cli::try_parse_from(["saniwalens", "trend", "--last", "24h"]).unwrap();
-        let Command::Trend {
-            pair: PairArgs { last, .. },
-            ..
-        } = cli.command
-        else {
+        let Command::Trend { pair, .. } = cli.command else {
             panic!("expected the trend command");
         };
-        let pair = parse_pair(None, None, last.as_deref()).unwrap();
+        let pair = parse_window(&pair.window(), WindowMode::Pair)
+            .unwrap()
+            .pair();
         assert_eq!(
             pair.current.end.unwrap() - pair.current.start.unwrap() + 1,
             24 * 3_600
@@ -518,7 +570,7 @@ mod tests {
     fn trend_period_errors_fail_before_the_store_opens() {
         // The dispatch resolves the pair before Session::open_read, so these
         // fail as period errors — non-zero, before any store work or
-        // freshness line. The clock is read inside parse_pair; none of the
+        // freshness line. The clock is read inside parse_window; none of the
         // errors depend on it.
         let cases: [(&[&str], &str); 4] = [
             (
@@ -550,15 +602,11 @@ mod tests {
         ];
         for (args, expected) in cases {
             let cli = Cli::try_parse_from(args).unwrap();
-            let Command::Trend {
-                pair: PairArgs { since, until, last },
-                ..
-            } = cli.command
-            else {
+            let Command::Trend { pair, .. } = cli.command else {
                 panic!("expected the trend command for {args:?}");
             };
-            let err = parse_pair(since.as_deref(), until.as_deref(), last.as_deref())
-                .expect_err("a bad period must fail");
+            let err =
+                parse_window(&pair.window(), WindowMode::Pair).expect_err("a bad period must fail");
             assert!(
                 err.to_string().contains(expected),
                 "expected {expected:?} in {err:?}"
@@ -566,12 +614,145 @@ mod tests {
         }
     }
 
+    // ---- PBI C5: the unified window parse ----
+
+    fn window_args(since: Option<&str>, until: Option<&str>, last: Option<&str>) -> WindowArgs {
+        WindowArgs {
+            since: since.map(str::to_string),
+            until: until.map(str::to_string),
+            last: last.map(str::to_string),
+        }
+    }
+
+    #[test]
+    fn parse_window_single_matches_the_core_single_resolution() {
+        // BDD scenario 1: single mode resolves exactly what the core's
+        // `resolve` gives for the same flags. The inputs below never consult
+        // the clock, so the comparison runs `resolve` at an arbitrary fixed
+        // now — any clock dependence would show as a diff.
+        for (since, until, last) in [
+            (None, None, None),
+            (Some("2026-10-01"), None, None),
+            (None, Some("2026-10-07"), None),
+            (Some("2026-10-01"), Some("2026-10-07"), None),
+        ] {
+            let args = window_args(since, until, last);
+            let ResolvedWindow::Single(window) = parse_window(&args, WindowMode::Single).unwrap()
+            else {
+                panic!("single mode resolves a single window");
+            };
+            assert_eq!(
+                window,
+                period::resolve(since, until, last, 0, JST_OFFSET_SECS).unwrap(),
+                "single mode drifted for {since:?} {until:?} {last:?}"
+            );
+        }
+        // Rolling inputs consult the clock: the shape is pinned instead — a
+        // `<N><unit>` rolling window ending now. `resolve`'s rolling window
+        // is inclusive at both ends, so it spans one second more than the
+        // span names (the pair shifts its current start one second in to make
+        // it exactly the span).
+        for (last, secs) in [("7d", 7 * 86_400), ("24h", 24 * 3_600), ("2w", 14 * 86_400)] {
+            let args = window_args(None, None, Some(last));
+            let ResolvedWindow::Single(window) = parse_window(&args, WindowMode::Single).unwrap()
+            else {
+                panic!("single mode resolves a single window");
+            };
+            assert_eq!(window.end.unwrap() - window.start.unwrap() + 1, secs + 1);
+            let skew = chrono::Utc::now().timestamp() - window.end.unwrap();
+            assert!((0..=60).contains(&skew), "the window ends now: {skew}");
+        }
+        // Error strings carry no clock either: byte parity with the core.
+        for (since, until, last) in [
+            (Some("2026/10/01"), None, None),
+            (Some("2026-10-01"), None, Some("7d")),
+            (Some("2026-10-07"), Some("2026-10-01"), None),
+            (None, None, Some("7")),
+        ] {
+            let args = window_args(since, until, last);
+            let err = parse_window(&args, WindowMode::Single)
+                .expect_err("a bad period must fail")
+                .to_string();
+            assert_eq!(
+                err,
+                period::resolve(since, until, last, 0, JST_OFFSET_SECS).unwrap_err(),
+                "single mode error drifted for {since:?} {until:?} {last:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn parse_window_pair_matches_the_core_pair_resolution() {
+        // BDD scenario 2: pair mode resolves exactly what the core's
+        // `resolve_pair` gives — the same fixed-now comparison, then the
+        // tiling shape for the clock-dependent inputs.
+        let args = window_args(Some("2026-10-01"), Some("2026-10-07"), None);
+        let ResolvedWindow::Pair(pair) = parse_window(&args, WindowMode::Pair).unwrap() else {
+            panic!("pair mode resolves a comparison pair");
+        };
+        assert_eq!(
+            pair,
+            period::resolve_pair(
+                Some("2026-10-01"),
+                Some("2026-10-07"),
+                None,
+                0,
+                JST_OFFSET_SECS
+            )
+            .unwrap()
+        );
+        assert_eq!(
+            pair.previous.end.unwrap() + 1,
+            pair.current.start.unwrap(),
+            "the pair must tile with no shared second"
+        );
+        // Rolling and default pairs consult the clock: equal lengths,
+        // adjacent, ending now.
+        for (last, secs) in [(None, 7 * 86_400), (Some("24h"), 24 * 3_600)] {
+            let args = window_args(None, None, last);
+            let ResolvedWindow::Pair(pair) = parse_window(&args, WindowMode::Pair).unwrap() else {
+                panic!("pair mode resolves a comparison pair");
+            };
+            assert_eq!(
+                pair.current.end.unwrap() - pair.current.start.unwrap() + 1,
+                secs
+            );
+            assert_eq!(
+                pair.previous.end.unwrap() - pair.previous.start.unwrap() + 1,
+                secs
+            );
+            assert_eq!(pair.previous.end.unwrap() + 1, pair.current.start.unwrap());
+            let skew = chrono::Utc::now().timestamp() - pair.current.end.unwrap();
+            assert!((0..=60).contains(&skew), "the pair ends now: {skew}");
+        }
+        // Error strings carry no clock either: byte parity with the core.
+        for (since, until, last) in [
+            (Some("2026/10/01"), None, None),
+            (None, Some("2026-10-01"), None),
+            (Some("2026-10-07"), Some("2026-10-01"), None),
+            (None, None, Some("92233720368547d")),
+        ] {
+            let args = window_args(since, until, last);
+            let err = parse_window(&args, WindowMode::Pair)
+                .expect_err("a bad pair must fail")
+                .to_string();
+            assert_eq!(
+                err,
+                period::resolve_pair(since, until, last, 0, JST_OFFSET_SECS).unwrap_err(),
+                "pair mode error drifted for {since:?} {until:?} {last:?}"
+            );
+        }
+    }
+
     // ---- PBI 2026-11-01-40: the consolidated windowed flag surface ----
 
     /// The windowed and read-path flags one parsed command holds, extracted
-    /// per view: (since, until, last, frozen, db). The match is the flatten
-    /// demonstration — every view carries the shared groups as plain fields,
-    /// trend's pair included.
+    /// per view: (since, until, last, frozen, db). The ten single-window
+    /// views share one arm — their `period` fields are the same shim, so one
+    /// `|` pattern binds them all — trend's pair keeps its own, and the
+    /// whole-history commands share the unreachable one. Grouped, not listed:
+    /// a windowed view added to `Command` fails here until its arm joins the
+    /// group.
     fn windowed_flags(
         command: Command,
     ) -> (
@@ -582,7 +763,16 @@ mod tests {
         Option<std::path::PathBuf>,
     ) {
         match command {
-            Command::Usage { period, read, .. } => (
+            Command::Usage { period, read, .. }
+            | Command::Inventory { period, read, .. }
+            | Command::Waste { period, read, .. }
+            | Command::Overhead { period, read, .. }
+            | Command::Prompts { period, read, .. }
+            | Command::Failures { period, read, .. }
+            | Command::Stuck { period, read, .. }
+            | Command::Models { period, read, .. }
+            | Command::Sessions { period, read, .. }
+            | Command::Doctor { period, read, .. } => (
                 period.since,
                 period.until,
                 period.last,
@@ -592,69 +782,6 @@ mod tests {
             Command::Trend { pair, read, .. } => {
                 (pair.since, pair.until, pair.last, read.frozen, read.db)
             }
-            Command::Inventory { period, read, .. } => (
-                period.since,
-                period.until,
-                period.last,
-                read.frozen,
-                read.db,
-            ),
-            Command::Waste { period, read, .. } => (
-                period.since,
-                period.until,
-                period.last,
-                read.frozen,
-                read.db,
-            ),
-            Command::Overhead { period, read, .. } => (
-                period.since,
-                period.until,
-                period.last,
-                read.frozen,
-                read.db,
-            ),
-            Command::Prompts { period, read, .. } => (
-                period.since,
-                period.until,
-                period.last,
-                read.frozen,
-                read.db,
-            ),
-            Command::Failures { period, read, .. } => (
-                period.since,
-                period.until,
-                period.last,
-                read.frozen,
-                read.db,
-            ),
-            Command::Stuck { period, read, .. } => (
-                period.since,
-                period.until,
-                period.last,
-                read.frozen,
-                read.db,
-            ),
-            Command::Models { period, read, .. } => (
-                period.since,
-                period.until,
-                period.last,
-                read.frozen,
-                read.db,
-            ),
-            Command::Sessions { period, read, .. } => (
-                period.since,
-                period.until,
-                period.last,
-                read.frozen,
-                read.db,
-            ),
-            Command::Doctor { period, read, .. } => (
-                period.since,
-                period.until,
-                period.last,
-                read.frozen,
-                read.db,
-            ),
             Command::Analyze { .. }
             | Command::Sql { .. }
             | Command::Optimize { .. }

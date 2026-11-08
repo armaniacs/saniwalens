@@ -661,7 +661,7 @@ fn trend_section(label: &str) {
 
 /// The usage trend: what each kind of event, each skill, and the session and
 /// subagent totals did this window against the equal-length window right
-/// before it. The pair is resolved before the store opens (`parse_pair`), so
+/// before it. The pair is resolved before the store opens (`parse_window`), so
 /// a bad date fails like every other period error, and the store's numbers
 /// are the same windowed queries the single-window views read. One typed
 /// payload is built and both of the view's forms derive from it.

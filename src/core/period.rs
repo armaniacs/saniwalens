@@ -113,8 +113,80 @@ pub struct WindowPair {
     pub previous: TimeRange,
 }
 
+/// What the equal-length previous window is derived from: a rolling span —
+/// where a window that cannot be derived fails as the invalid-span error — or
+/// named dates — where it fails as the empty-window error naming `--since`.
+/// The two error families are why the derivation takes its source, not just
+/// the current window.
+pub enum PreviousSource<'a> {
+    Span { span: &'a str, secs: i64 },
+    Dates { since: &'a str },
+}
+
+/// Derive the equal-length window immediately before `current`: the pair tiles
+/// the timeline — the previous window ends one second before the current one
+/// starts — so no event is counted in both windows of a comparison.
+///
+/// `current` must be closed (both ends `Some`): the date path's `--since`
+/// without `--until`, which runs to the injected now, is clamped by
+/// [`resolve_pair`] before this runs.
+pub fn derive_previous(
+    current: TimeRange,
+    source: PreviousSource<'_>,
+) -> Result<WindowPair, String> {
+    let start = current
+        .start
+        .expect("derive_previous needs a closed current window");
+    let end = current
+        .end
+        .expect("derive_previous needs a closed current window");
+    let previous_start = match source {
+        // A span whose doubled window leaves i64 — or, before that, names a
+        // date the calendar cannot express: the derived previous window
+        // doubles the reach back, so a span whose current window still
+        // resolves can start it below chrono's floor (e.g. `--last
+        // 50000000d`), where the disclosure would render an empty `since`.
+        // The same invalid-span error as every other bad `--last`, not an
+        // overflow panic or an empty previous window.
+        PreviousSource::Span { span, secs } => start
+            .checked_sub(secs)
+            .filter(|previous| in_calendar(*previous))
+            .ok_or_else(|| invalid_span_error(span))?,
+        // `start` and `length` are date-derived — `--since`/`--until` parse
+        // as NaiveDate, bounded to the calendar's range — so this subtraction
+        // cannot leave i64 the way a huge `--last` span's doubled window can.
+        // The equal-length window derived before the current one can still
+        // reach past the calendar's floor when the current window itself
+        // spans most of it (e.g. `--since=-200000-01-01`): its start would
+        // name a date that does not exist, so the disclosure would render an
+        // empty `since`. The input is the date, so the error names `--since`
+        // — the empty-window family, never the invalid-`--last` wording a
+        // date did not earn. The previous window's end needs no check of its
+        // own: it is the current start minus one, inside the calendar
+        // whenever that start is.
+        PreviousSource::Dates { since } => {
+            let length = end - start + 1;
+            let previous = start - length;
+            if !in_calendar(previous) {
+                return Err(format!(
+                    "empty window: --since {since} — the equal-length window before it reaches outside the calendar chrono can express"
+                ));
+            }
+            previous
+        }
+    };
+    Ok(WindowPair {
+        current,
+        previous: TimeRange {
+            start: Some(previous_start),
+            end: Some(start - 1),
+        },
+    })
+}
+
 /// Resolve the trend flags into the current window and the same-length window
-/// immediately before it.
+/// immediately before it: [`resolve`] fixes the current window,
+/// [`derive_previous`] tiles the previous one against it.
 ///
 /// With no flags at all the current window is the last 7 days and the previous
 /// one the 7 days before them. `--last <N>d | <N>h | <N>w` is a rolling pair
@@ -156,27 +228,13 @@ pub fn resolve_pair(
         // moved one second in — so the previous window, the same length
         // ending one second earlier, shares no event with it.
         let start = resolved.start.expect("a rolling window has a start") + 1;
-        // A span whose doubled window leaves i64 — or, before that, names a
-        // date the calendar cannot express: the derived previous window
-        // doubles the reach back, so a span whose current window still
-        // resolves can start it below chrono's floor (e.g. `--last
-        // 50000000d`), where the disclosure would render an empty `since`.
-        // The same invalid-span error as every other bad `--last`, not an
-        // overflow panic or an empty previous window.
-        let previous_start = start
-            .checked_sub(secs)
-            .filter(|previous| in_calendar(*previous))
-            .ok_or_else(|| invalid_span_error(span))?;
-        return Ok(WindowPair {
-            current: TimeRange {
+        return derive_previous(
+            TimeRange {
                 start: Some(start),
                 end: Some(now),
             },
-            previous: TimeRange {
-                start: Some(previous_start),
-                end: Some(start - 1),
-            },
-        });
+            PreviousSource::Span { span, secs },
+        );
     }
     let mut current = resolve(since, until, None, now, tz_offset_secs)?;
     if current.end.is_none() {
@@ -190,32 +248,12 @@ pub fn resolve_pair(
         let since = since.unwrap_or_default();
         return Err(format!("empty window: --since {since} is after now"));
     }
-    let length = end - start + 1;
-    // `start` and `length` are date-derived — `--since`/`--until` parse as
-    // NaiveDate, bounded to the calendar's range — so this subtraction cannot
-    // leave i64 the way a huge `--last` span's doubled window can. The
-    // equal-length window derived before the current one can still reach
-    // past the calendar's floor when the current window itself spans most of
-    // it (e.g. `--since=-200000-01-01`): its start would name a date that
-    // does not exist, so the disclosure would render an empty `since`. The
-    // input is the date, so the error names `--since` — the empty-window
-    // family, never the invalid-`--last` wording a date did not earn. The
-    // previous window's end needs no check of its own: it is the current
-    // start minus one, inside the calendar whenever that start is.
-    let previous_start = start - length;
-    if !in_calendar(previous_start) {
-        let since = since.unwrap_or_default();
-        return Err(format!(
-            "empty window: --since {since} — the equal-length window before it reaches outside the calendar chrono can express"
-        ));
-    }
-    Ok(WindowPair {
+    derive_previous(
         current,
-        previous: TimeRange {
-            start: Some(previous_start),
-            end: Some(start - 1),
+        PreviousSource::Dates {
+            since: since.unwrap_or_default(),
         },
-    })
+    )
 }
 
 /// The whole day `--until` names, inclusive: the day's last local second.
