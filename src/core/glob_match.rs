@@ -20,7 +20,7 @@ pub fn matches_one(pattern: &str, path: &str) -> bool {
 /// (`/repo/src/main.rs`); suffix matching lets a repo-rooted glob meet the
 /// absolute record without knowing the root. An empty pattern list matches
 /// nothing: a rule that declares no globs can never claim a target.
-pub fn matches_any(patterns: &[&str], path: &str) -> bool {
+pub fn matches_any<S: AsRef<str>>(patterns: &[S], path: &str) -> bool {
     let path = path.replace('\\', "/");
     let stripped = path.strip_prefix('/').unwrap_or(&path);
     if stripped.is_empty() {
@@ -30,7 +30,7 @@ pub fn matches_any(patterns: &[&str], path: &str) -> bool {
     (0..segs.len()).any(|start| {
         let suffix = segs[start..].join("/");
         patterns.iter().any(|p| {
-            let pattern = p.replace('\\', "/");
+            let pattern = p.as_ref().replace('\\', "/");
             match_segments(&pattern, &suffix)
         })
     })
@@ -132,7 +132,7 @@ mod tests {
     fn any_match_wins_and_empty_matches_nothing() {
         assert!(matches_any(&["docs/**", "src/*.rs"], "src/main.rs"));
         assert!(!matches_any(&["docs/**", "src/*.rs"], "test/main.rs"));
-        assert!(!matches_any(&[], "src/main.rs"));
+        assert!(!matches_any::<&str>(&[], "src/main.rs"));
     }
 
     #[test]

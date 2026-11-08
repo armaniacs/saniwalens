@@ -338,6 +338,7 @@ pub fn command_surface(id: &str, config_path: &str, content: &str, scope: &Scope
         static_tokens: Some(crate::adapter::config::approx_tokens(content)),
         startup_tokens: Some(description_tokens(content)),
         load_mode: LoadMode::StartupDescription,
+        paths: Vec::new(),
     }
 }
 
@@ -352,6 +353,7 @@ pub fn agent_surface(id: &str, config_path: &str, content: &str, scope: &Scope) 
         static_tokens: Some(crate::adapter::config::approx_tokens(content)),
         startup_tokens: Some(description_tokens(content)),
         load_mode: LoadMode::StartupDescription,
+        paths: Vec::new(),
     }
 }
 

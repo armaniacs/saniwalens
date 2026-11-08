@@ -275,10 +275,9 @@ pub fn never_fires(rules: &[RuleGlobs], targets: &[String]) -> Vec<NeverFireHit>
         .iter()
         .filter(|rule| !rule.globs.is_empty())
         .filter(|rule| {
-            let globs: Vec<&str> = rule.globs.iter().map(String::as_str).collect();
             !targets
                 .iter()
-                .any(|t| crate::core::glob_match::matches_any(&globs, t))
+                .any(|t| crate::core::glob_match::matches_any(&rule.globs, t))
         })
         .map(|rule| NeverFireHit {
             id: rule.id.clone(),
