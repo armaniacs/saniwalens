@@ -22,11 +22,11 @@ Scenario: メタデータが無いタスクは通常の取り扱いのまま表�
   And   解析はエラーにならず続行する
 
 ## 受け入れ基準
-- [ ] task_metadata.json の files_in_context[] を読み、タスク単位の files-in-context が提示される
-- [ ] メタデータが無いタスク、files_in_context が空・欠損のタスクは通常の取り扱いのまま、エラーにならない
-- [ ] docs/specs/session-format-kilocode.md 182 行付近（files_in_context[] は future material として v1 未読）を同じ変更内で更新する
-- [ ] claude / opencode ハーネスの解析動作とストアは一切変わらない（kilocode 専用の変更）
-- [ ] cargo fmt --check、cargo clippy --all-targets --all-features -- -D warnings、cargo test が green
+- [x] task_metadata.json の files_in_context[] を読み、タスク単位の files-in-context が提示される（file_readイベント化。sqlで提示を確認）
+- [x] メタデータが無いタスク、files_in_context が空・欠損のタスクは通常の取り扱いのまま、エラーにならない（単体境界テスト＋E2Eのtask-2で確認）
+- [x] docs/specs/session-format-kilocode.md のfuture material記述を実装済みに更新（fingerprint・timestamp規約を含む）
+- [x] claude / opencode ハーネスの解析動作とストアは一切変わらない（kilocode.rs＋共通WorkEventのみ。version bumpはkilocode専用キー）
+- [x] cargo fmt --check、cargo clippy --all-targets --all-features -- -D warnings、cargo test が green
 
 ## テスト戦略
 - E2E: --harness kilocode で合成タスク（メタデータあり / なし）を解析し、files-in-context の提示と通常取り扱いを確認する
@@ -45,6 +45,6 @@ Scenario: メタデータが無いタスクは通常の取り扱いのまま表�
 - 検証コマンド: cargo fmt --check、cargo clippy --all-targets --all-features -- -D warnings、cargo test。
 
 ## Definition of Done
-- [ ] 全BDDシナリオが自動テストとして実装されパスする
-- [ ] コードレビュー完了
-- [ ] ドキュメント更新済み
+- [x] 全BDDシナリオが自動テストとして実装されパスする（単体2件＋E2E。analalyzer version 5へ）
+- [x] コードレビュー完了（バッチ統合レビュー: 親エージェントが全diff・spec同期・干渉を目視確認）
+- [x] ドキュメント更新済み（spec-sync済み。never-fires結合の用途を明記）

@@ -179,8 +179,13 @@ than a guess.
 - `cost` (per request) — billing-adjacent and provider-specific; counts are
   usage signals for ranking, not a ledger (`architecture.md`).
 - `apiProtocol` / `inferenceProvider` — protocol metadata, not usage.
-- `task_metadata.json` (`files_in_context[]`) — future material for the
-  never-fires rule; unread until a usage join exists for it.
+- `task_metadata.json` (`files_in_context[]`) ― read since PBI 23 as
+  `file_read` events stamped with the task's start (the metadata carries no
+  timestamps), so the never-fires wedge can match them against rule globs ―
+  the same join the Claude Code `Read` calls feed. A missing or unreadable
+  metadata file reads as no files; non-string entries are dropped, never
+  stringified into fake paths. The metadata moves the task fingerprint, so a
+  later metadata edit re-ingests its task once.
 - `checkpoints/` and the task⇔session `session.json` mapping — unread.
 - `ui_messages.json` kinds other than `api_req_started` — display or
   interaction furniture (`ask=tool` is the approval point; the signals

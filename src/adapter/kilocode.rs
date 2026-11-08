@@ -40,7 +40,7 @@ const UNKNOWN_MODEL: &str = "unknown";
 /// lives apart from the shared `CLAUDE_ANALYZER_VERSION` (`adapter::transcript`) on purpose:
 /// a kilocode-only change must never force other harnesses through a full
 /// re-analyze. Stored under its own `meta` key.
-pub const KILOCODE_ANALYZER_VERSION: &str = "4";
+pub const KILOCODE_ANALYZER_VERSION: &str = "5";
 
 /// The `meta` key holding the kilocode analysis semantics.
 pub const KILOCODE_ANALYZER_META_KEY: &str = "kilocode_analyzer_version";
@@ -663,12 +663,21 @@ pub(crate) fn read_kilo_instructions(
     crate::adapter::config::read_claude_md_surfaces(&refs, scope, home)
 }
 
-/// The two files' stat folded into one per-task fingerprint: the latest mtime
-/// (either file moves on activity) and the summed size.
-fn task_fingerprint(conversation: &Path, ui: &Path) -> Option<(i64, i64)> {
+/// The task files' stat folded into one per-task fingerprint: the latest mtime
+/// (any of the three moves on activity) and the summed size. The metadata is
+/// optional — tasks analyzed before it existed keep the two-file fingerprint.
+fn task_fingerprint(
+    conversation: &Path,
+    ui: &Path,
+    metadata: Option<&Path>,
+) -> Option<(i64, i64)> {
     let conversation = file_fingerprint(conversation)?;
     let ui = file_fingerprint(ui)?;
-    Some((conversation.0.max(ui.0), conversation.1 + ui.1))
+    let (mtime, size) = match metadata.and_then(file_fingerprint) {
+        Some((mtime, size)) => (mtime, size),
+        None => (0, 0),
+    };
+    Some((conversation.0.max(ui.0).max(mtime), conversation.1 + ui.1 + size))
 }
 
 /// The kilocode tasks directory for this run: the first editor globalStorage
@@ -685,6 +694,24 @@ fn default_kilocode_tasks() -> Result<PathBuf> {
     }
 }
 
+/// A task's files-in-context from its `task_metadata.json`: the text the
+/// paths ride in is small and the file is optional. Missing files, unparsable
+/// bodies, and wrong-typed entries all read as no files — files-in-context
+/// that never existed are the normal case (older tasks, metadata pruned),
+/// not an error. Only strings survive; numbers and nulls are dropped rather
+/// than stringified into fake paths.
+pub fn files_in_context(metadata_json: &str) -> Vec<String> {
+    serde_json::from_str::<serde_json::Value>(metadata_json)
+        .ok()
+        .and_then(|value| value.get("files_in_context")?.as_array().cloned())
+        .map(|entries| {
+            entries
+                .iter()
+                .filter_map(|entry| entry.as_str().map(str::to_string))
+                .collect()
+        })
+        .unwrap_or_default()
+}
 /// Analyze kilocode task directories into the kilocode store. The file-to-
 /// record mapping is `adapter::kilocode`; this shell reads each task's two
 /// JSON files and ingests each task idempotently. See `docs/specs/harness.md`
@@ -729,9 +756,12 @@ pub fn analyze(input: Option<PathBuf>, db: &Path) -> Result<AnalyzeStats> {
             .map(|name| name.to_string_lossy().into_owned())
             .unwrap_or_default();
         // Per-task fingerprint: the directory stat would re-ingest every task
-        // on each run (checkpoints move too); the two files are the record.
+        // on each run (checkpoints move too); the task files are the record.
+        let metadata_path = task_dir.join("task_metadata.json");
         let fingerprint_key = format!("kilocode:{}", task_id);
-        let Some((mtime, size)) = task_fingerprint(&conversation_path, &ui_path) else {
+        let Some((mtime, size)) =
+            task_fingerprint(&conversation_path, &ui_path, Some(&metadata_path))
+        else {
             continue;
         };
         if reuse_ingested && store.is_ingested(&fingerprint_key, mtime, size)? {
@@ -774,7 +804,30 @@ pub fn analyze(input: Option<PathBuf>, db: &Path) -> Result<AnalyzeStats> {
             })
             .collect();
         // `work` owns the strings; the rows borrow them.
-        let work = extract_work_events(&conversation);
+        let mut work = extract_work_events(&conversation);
+        // Files-in-context (PBI 23): the task's metadata names the files the
+        // task kept in context. They read as `file_read` events so the
+        // never-fires wedge can match them against rule globs — the same join
+        // the Claude Code `Read` tool calls feed. Stamped with the task's
+        // start: the metadata carries no timestamps, and the start is the one
+        // honest instant the task states. A missing or unreadable metadata
+        // file reads as no files, like every other optional input.
+        if let Ok(metadata) = fs::read_to_string(&metadata_path) {
+            let at = session_start(&records).map(|start| start.timestamp_ms);
+            let epoch_ms = at.unwrap_or(0);
+            for path in files_in_context(&metadata) {
+                let id = match path.rsplit(['/', '\\']).next() {
+                    Some(base) if !base.is_empty() => base.to_string(),
+                    _ => path.clone(),
+                };
+                work.push(WorkEvent {
+                    epoch_ms,
+                    kind: "file_read",
+                    id,
+                    path: Some(path),
+                });
+            }
+        }
         let work_rows: Vec<(i64, &str, &str, Option<&str>)> = work
             .iter()
             .map(|event| {
@@ -845,6 +898,26 @@ mod tests {
             std::process::id(),
             std::thread::current().id()
         ))
+    }
+
+    #[test]
+    fn files_in_context_lists_every_declared_path() {
+        let json = r#"{"taskId":"t1","files_in_context":["/repo/src/main.rs","/repo/docs/a.md"]}"#;
+        assert_eq!(
+            files_in_context(json),
+            vec!["/repo/src/main.rs", "/repo/docs/a.md"]
+        );
+    }
+
+    #[test]
+    fn files_in_context_tolerates_missing_empty_and_mistyped_lists() {
+        // No metadata, no list, an empty list, a non-list: all read as no
+        // files — never an error, never a fabricated path.
+        assert!(files_in_context("{}").is_empty());
+        assert!(files_in_context(r#"{"files_in_context":[]}"#).is_empty());
+        assert!(files_in_context(r#"{"files_in_context":"nope"}"#).is_empty());
+        assert!(files_in_context(r#"{"files_in_context":[42,null]}"#).is_empty());
+        assert!(files_in_context("not json at all").is_empty());
     }
 
     #[test]
@@ -1903,17 +1976,17 @@ mod tests {
             + std::time::Duration::new(1_700_000_000, 100_000_000);
         set_mtime(&conversation, base);
         set_mtime(&ui, base);
-        let before = task_fingerprint(&conversation, &ui).unwrap();
+        let before = task_fingerprint(&conversation, &ui, None).unwrap();
         // Same sizes, same whole second, one file's mtime moved sub-second.
         std::fs::write(&conversation, r#"[{"role":"user"}]"#).unwrap();
         set_mtime(&conversation, base + std::time::Duration::from_millis(500));
-        let after = task_fingerprint(&conversation, &ui).unwrap();
+        let after = task_fingerprint(&conversation, &ui, None).unwrap();
         assert_ne!(
             before, after,
             "a same-second edit in either task file must move the fold"
         );
         // Untouched, the fold is stable so the skip still fires.
-        assert_eq!(after, task_fingerprint(&conversation, &ui).unwrap());
+        assert_eq!(after, task_fingerprint(&conversation, &ui, None).unwrap());
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
