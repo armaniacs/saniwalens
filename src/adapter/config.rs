@@ -995,7 +995,11 @@ mod tests {
         // Empty or missing matcher: the bare event (no invented suffix).
         assert_eq!(ids, vec!["PreToolUse", "PreToolUse:Bash", "Stop"]);
         assert!(surfaces.iter().all(|s| s.kind == "hook"));
-        assert!(surfaces.iter().all(|s| s.load_mode == LoadMode::PathConditional));
+        assert!(
+            surfaces
+                .iter()
+                .all(|s| s.load_mode == LoadMode::PathConditional)
+        );
     }
 
     #[test]

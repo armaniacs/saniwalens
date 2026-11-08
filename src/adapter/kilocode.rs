@@ -666,18 +666,17 @@ pub(crate) fn read_kilo_instructions(
 /// The task files' stat folded into one per-task fingerprint: the latest mtime
 /// (any of the three moves on activity) and the summed size. The metadata is
 /// optional — tasks analyzed before it existed keep the two-file fingerprint.
-fn task_fingerprint(
-    conversation: &Path,
-    ui: &Path,
-    metadata: Option<&Path>,
-) -> Option<(i64, i64)> {
+fn task_fingerprint(conversation: &Path, ui: &Path, metadata: Option<&Path>) -> Option<(i64, i64)> {
     let conversation = file_fingerprint(conversation)?;
     let ui = file_fingerprint(ui)?;
     let (mtime, size) = match metadata.and_then(file_fingerprint) {
         Some((mtime, size)) => (mtime, size),
         None => (0, 0),
     };
-    Some((conversation.0.max(ui.0).max(mtime), conversation.1 + ui.1 + size))
+    Some((
+        conversation.0.max(ui.0).max(mtime),
+        conversation.1 + ui.1 + size,
+    ))
 }
 
 /// The kilocode tasks directory for this run: the first editor globalStorage

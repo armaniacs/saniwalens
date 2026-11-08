@@ -21,8 +21,8 @@ use crate::core::path::basename;
 use crate::core::span::{
     DEFAULT_IDLE_GAP_MS, Record, RecordKind, Source, extract_spans, session_start,
 };
-use crate::core::surface::{LoadMode, Scope, Surface};
 use crate::core::subagent::SubagentRun;
+use crate::core::surface::{LoadMode, Scope, Surface};
 use crate::core::usage::{attribute_subagents, extract_usage_events, output_tokens};
 use crate::store::{IngestBatch, OpenMode, SessionMeta, Store};
 
@@ -991,7 +991,13 @@ mod tests {
         // A task part naming a child session becomes one run: agent type and
         // model from the call, out_tokens from the child's own cost, the
         // parent's callID as the join key both sides share.
-        let part = task_part("ses_1", Some("call_9"), Some("ses_child"), "Explore", Some("m"));
+        let part = task_part(
+            "ses_1",
+            Some("call_9"),
+            Some("ses_child"),
+            "Explore",
+            Some("m"),
+        );
         let parts = [PartRow {
             id: "prt_1",
             message_id: "msg_1",
@@ -1967,10 +1973,7 @@ mod run_event_tests {
         let (cols, rows) = store
             .query("SELECT agent, agent_id, out_tokens, spawn_depth FROM subagent_runs ORDER BY agent_id")
             .unwrap();
-        assert_eq!(
-            cols,
-            vec!["agent", "agent_id", "out_tokens", "spawn_depth"]
-        );
+        assert_eq!(cols, vec!["agent", "agent_id", "out_tokens", "spawn_depth"]);
         assert_eq!(rows.len(), 1, "exactly the joined spawn: {rows:?}");
         assert_eq!(
             rows[0],

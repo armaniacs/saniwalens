@@ -83,7 +83,10 @@ fn metadata_files_become_file_read_events_and_missing_metadata_stays_quiet() {
     assert!(out.status.success(), "sql exits 0: {out:?}");
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(stdout.contains("task-1"), "task-1 reads recorded: {stdout}");
-    assert!(stdout.contains("main.rs"), "the read file is named: {stdout}");
+    assert!(
+        stdout.contains("main.rs"),
+        "the read file is named: {stdout}"
+    );
     assert!(stdout.contains("a.md"), "both files recorded: {stdout}");
     assert!(
         !stdout.contains("task-2"),

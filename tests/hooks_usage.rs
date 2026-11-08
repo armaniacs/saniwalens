@@ -71,9 +71,7 @@ fn write_store(dir: &Path, settings: &Path, transcript: &Path) -> PathBuf {
                 ctx: 9_000,
             }),
         };
-        store
-            .ingest(IngestBatch::new(&meta, &[], &usage))
-            .unwrap();
+        store.ingest(IngestBatch::new(&meta, &[], &usage)).unwrap();
     }
     db
 }
@@ -100,8 +98,9 @@ fn a_fired_hook_is_used_and_a_quiet_one_is_unused() {
     let out = run(&dir, &db, &["waste", "--format", "json", "--frozen"]);
 
     assert!(out.status.success(), "waste json exits 0: {out:?}");
-    let json: serde_json::Value =
-        String::from_utf8_lossy(&out.stdout).parse().expect("valid JSON");
+    let json: serde_json::Value = String::from_utf8_lossy(&out.stdout)
+        .parse()
+        .expect("valid JSON");
     let unused: Vec<&str> = json["wedges"]
         .as_array()
         .unwrap()
