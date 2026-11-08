@@ -243,5 +243,4 @@ saniwalens sql "SELECT sql FROM sqlite_master"
 - `optimize` は harness 自前の対話セッションを上げる（既定 `claude`、
   `--harness kilocode` で `kilo --prompt`)。所見を種にし、briefing は
   非公開 temp ファイルに書く。コマンドラインには載せない。
-- 未実装（[`docs/specs/`](docs/specs/) 参照):meta-skill（`loop`）の入れ子 ―
-  transcript から親子を取る設計判断が未決。
+- 意図的に flat（[`docs/specs/`](docs/specs/) 参照):meta-skill（`loop`）の入れ子は推定しない ― transcript には入れ子と並列を区別する手がかりが無いので、各呼び出しはそれぞれの span のまま。

@@ -254,6 +254,6 @@ derived store.
   default, `kilo --prompt` under `--harness kilocode`) seeded with the
   findings; the briefing is written to a private temp file, never passed on
   the command line.
-- Not yet implemented (see [`docs/specs/`](docs/specs/)): meta-skill (`loop`)
-  nesting ― a pending design decision on detecting parent/child from the
-  transcript.
+- Deliberately flat (see [`docs/specs/`](docs/specs/)): meta-skill (`loop`)
+  nesting is not inferred ― transcripts carry no signal that distinguishes
+  nesting from sequencing, so each invocation stays its own span.

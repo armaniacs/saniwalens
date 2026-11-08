@@ -116,12 +116,13 @@ wall-clock.
 `IDLE_GAP` is a tuning constant injected into the core (not hard-wired), so
 tests pin it.
 
-## Meta-skills and nesting — intentionally flat
+## Meta-skills and nesting ― intentionally flat (spike decision, PBI 22)
 
 Some skills drive other skills (`loop` repeatedly invokes `git-commit`,
 `code-review`, …). It is tempting to treat those inner calls as **children** of
-the driver and nest them under a `parent_id`. We deliberately do **not**, because
-the transcript gives no signal to do it correctly.
+the driver and nest them under a `parent_id`. We deliberately do **not**, and a
+2026-11 design spike re-confirmed this against real transcripts instead of
+reversing it:
 
 Empirically, a meta-skill's "children" are recorded exactly like sequential
 top-level commands: each appears as its own `slash` invocation with its **own
@@ -129,6 +130,8 @@ distinct `promptId`** — not the driver's, not a tool-path call, not a sidechai
 There is no structural marker (`source`, `promptId`, nesting depth) that
 distinguishes "a skill `loop` ran" from "a skill the user ran next". Inferring
 nesting would require a fragile time-window or a hard-coded list of meta-skills.
+The spike checked every alternative against real transcripts and found each
+one unsound or out of scope:
 
 So the model stays flat: each invocation is its own span, and the boundary rules
 (next human turn / next skill / idle gap) apply uniformly. This is not a loss of
@@ -139,6 +142,21 @@ double-count, and need no parent-inclusive/exclusive distinction.
 
 The one thing that *is* attributable across the boundary is subagent cost, which
 carries a real join key — see below.
+
+Candidates the spike rejected, with reasons:
+
+- **Time-window containment** ("B's span inside A's span ⇒ nested"): sequential
+  siblings nest temporally too ― an agent running skill A over 1-10s and skill
+  B over 3-5s looks identical with or without nesting. Attributing on this
+  would corrupt the cost join the tool exists to keep honest.
+- **Turn-boundary rule** (no human turn between ⇒ nested): absence of a human
+  turn proves nothing; consecutive invocations in one assistant stretch are as
+  often sequential follow-ups as nested calls.
+- **`parentUuid` tree branches**: branches in real transcripts are attachment
+  records (hook results, file snapshots) riding alongside the next message ―
+  parallel metadata, not nested execution. The main line stays a chain.
+- **Hard-coded meta-skill names**: breaks on the first rename and can never
+  cover user-defined loops; the PBI itself flags this as irrecoverable.
 
 ## Metrics
 
