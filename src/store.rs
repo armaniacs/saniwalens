@@ -83,6 +83,7 @@ CREATE TABLE IF NOT EXISTS surfaces (
     static_tokens INTEGER,
     startup_tokens INTEGER,
     load_mode     TEXT NOT NULL,
+    attrs_json    TEXT,
     PRIMARY KEY (kind, id, scope, project)
 );
 -- Analyze-run metadata (analyzed_at, projects_dir, config_dir) so read
@@ -204,6 +205,13 @@ pub const EVENT_ENCODING: &[(&str, &[(EventRole, EventColumn)])] = &[
     ),
     (
         "file_edit",
+        &[
+            (EventRole::FileBasename, EventColumn::SurfaceId),
+            (EventRole::FilePath, EventColumn::Target),
+        ],
+    ),
+    (
+        "file_read",
         &[
             (EventRole::FileBasename, EventColumn::SurfaceId),
             (EventRole::FilePath, EventColumn::Target),
@@ -336,6 +344,10 @@ pub struct CatalogEntry {
     pub startup_tokens: Option<i64>,
     pub load_mode: String,
     pub uses: i64,
+    /// Rule `paths:` globs, parsed from `attrs_json` (empty for every other
+    /// kind, and for rows written before globs were recorded). The never-fires
+    /// wedge reads these, never the raw JSON.
+    pub paths: Vec<String>,
 }
 
 /// What one agent type cost: how many times it ran and the output tokens those
@@ -1042,6 +1054,27 @@ impl Store {
         Ok(rows)
     }
 
+    /// Every distinct read file target in the window — the evidence the
+    /// never-fires wedge matches rule `paths:` globs against. Read targets
+    /// are observed, never attributed: they share the `file_edit` encoding
+    /// (basename id, full-path target) but ride their own kind, so thrash
+    /// (which reads `file_edit` only) never sees them.
+    pub fn file_read_targets(&self, range: TimeRange) -> Result<Vec<String>> {
+        let path = encoding_column("file_read", EventRole::FilePath);
+        let (filter, binds) = range_clause(range, "e.started_epoch");
+        let sql = format!(
+            "SELECT DISTINCT e.{path}
+             FROM events e JOIN sessions s ON e.session_id = s.id
+             WHERE e.kind = 'file_read' AND e.{path} IS NOT NULL{filter}
+             ORDER BY e.{path}"
+        );
+        let mut stmt = self.conn.prepare(&sql)?;
+        let rows = stmt
+            .query_map(params_from_iter(binds), |row| row.get(0))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(rows)
+    }
+
     /// Counts of a work-event kind by id (e.g. Bash leading word, edited file),
     /// most frequent first.
     pub fn work_counts(&self, kind: &str, range: TimeRange) -> Result<Vec<(String, i64)>> {
@@ -1509,11 +1542,16 @@ impl Store {
         let tx = self.conn.transaction()?;
         tx.execute("DELETE FROM surfaces", ())?;
         for surface in surfaces {
+            let attrs = if surface.paths.is_empty() {
+                None
+            } else {
+                Some(serde_json::to_string(&surface.paths).context("catalog globs are strings")?)
+            };
             tx.execute(
                 "INSERT OR REPLACE INTO surfaces
                    (kind, id, scope, project, config_path, static_tokens,
-                    startup_tokens, load_mode)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                    startup_tokens, load_mode, attrs_json)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
                 (
                     &surface.kind,
                     &surface.id,
@@ -1523,6 +1561,7 @@ impl Store {
                     surface.static_tokens,
                     surface.startup_tokens,
                     surface.load_mode.label(),
+                    attrs,
                 ),
             )?;
         }
@@ -1539,7 +1578,7 @@ impl Store {
         let (filter, binds) = range_clause(range, "e.started_epoch");
         let mut stmt = self.conn.prepare(&format!(
             "SELECT f.kind, f.id, f.scope, f.project, f.static_tokens,
-                    f.startup_tokens, f.load_mode, COUNT(u.event_id)
+                    f.startup_tokens, f.load_mode, f.attrs_json, COUNT(u.event_id)
              FROM surfaces f
              LEFT JOIN (SELECT e.id AS event_id, e.surface_kind, e.surface_id,
                                s.project AS session_project
@@ -1555,6 +1594,7 @@ impl Store {
         ))?;
         let rows = stmt
             .query_map(params_from_iter(binds), |row| {
+                let attrs: Option<String> = row.get(7)?;
                 Ok(CatalogEntry {
                     kind: row.get(0)?,
                     id: row.get(1)?,
@@ -1563,7 +1603,10 @@ impl Store {
                     static_tokens: row.get(4)?,
                     startup_tokens: row.get(5)?,
                     load_mode: row.get(6)?,
-                    uses: row.get(7)?,
+                    uses: row.get(8)?,
+                    paths: attrs
+                        .and_then(|text| serde_json::from_str::<Vec<String>>(&text).ok())
+                        .unwrap_or_default(),
                 })
             })?
             .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -2166,6 +2209,7 @@ mod tests {
             static_tokens: Some(static_tokens),
             startup_tokens: Some(startup_tokens),
             load_mode: LoadMode::StartupDescription,
+            paths: Vec::new(),
         }
     }
 
@@ -2797,6 +2841,7 @@ mod tests {
                     static_tokens: Some(600),
                     startup_tokens: Some(600),
                     load_mode: LoadMode::StartupFull,
+                    paths: Vec::new(),
                 },
                 Surface {
                     kind: "rule".to_string(),
@@ -2806,6 +2851,7 @@ mod tests {
                     static_tokens: Some(900),
                     startup_tokens: Some(900),
                     load_mode: LoadMode::StartupFull,
+                    paths: Vec::new(),
                 },
                 // A skill contributes its description, never its 1000-token body.
                 skill_surface("git-commit", Scope::Global, 1000, 8),
@@ -2819,6 +2865,7 @@ mod tests {
                     static_tokens: None,
                     startup_tokens: None,
                     load_mode: LoadMode::ToolSchema,
+                    paths: Vec::new(),
                 },
                 // Another project's CLAUDE.md is always-on *there*, not globally.
                 Surface {
@@ -2829,6 +2876,7 @@ mod tests {
                     static_tokens: Some(400),
                     startup_tokens: Some(400),
                     load_mode: LoadMode::StartupFull,
+                    paths: Vec::new(),
                 },
             ])
             .unwrap();

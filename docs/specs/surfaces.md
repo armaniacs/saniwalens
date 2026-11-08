@@ -130,10 +130,13 @@ rare** apply only to usage-measurable kinds — never to `rule` / `hook` /
 
 - **Never-fires rule** needs evidence a rule's `paths:` glob *could* have fired.
   The only honest source is session activity — did any file matching the glob
-  appear as a `tool_use` target (Read/Edit/Write) in the window? That requires
-  extracting tool-use file targets, a usage signal **not in v1**; until then this
-  wedge is aspirational and labelled so, not computed from "zero events" (a rule
-  has no events regardless).
+  appear as a read target in the window? Read targets are extracted per
+  `tool_use` (`file_read` events, `docs/specs/events.md`) and the catalog
+  carries each rule's globs (`attrs_json`, `docs/specs/storage.md`); the waste
+  view flags a rule whose globs matched nothing read, with the globs as
+  evidence. A window with no read targets at all flags nothing — no evidence,
+  never an accusation (this also keeps harnesses without read extraction from
+  false-flagging every rule).
 - **Redundant** needs a purpose/similarity signal (e.g. derived from each
   surface's `description`), which the v1 schema does not carry; it lands in
   `attrs_json` or is scoped out of v1 like the AI layer.

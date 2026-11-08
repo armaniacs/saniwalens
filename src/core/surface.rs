@@ -98,6 +98,10 @@ pub struct Surface {
     /// (`docs/specs/surfaces.md`).
     pub startup_tokens: Option<u64>,
     pub load_mode: LoadMode,
+    /// Glob patterns from a rule's `paths:` frontmatter (PBI 04) — what the
+    /// rule fires on. Empty for every other kind; the never-fires wedge reads
+    /// these against the window's file targets.
+    pub paths: Vec<String>,
 }
 
 /// Whether a surface kind can ever acquire usage events. Absence of events is
@@ -124,6 +128,9 @@ pub enum Wedge {
     AlwaysOnHeavy,
     /// Costly but rarely used — trim or make on-demand.
     CostlyRare,
+    /// Path-conditional rule whose globs matched nothing read in-window —
+    /// narrow its paths or delete it.
+    NeverFires,
 }
 
 impl Wedge {
@@ -132,6 +139,7 @@ impl Wedge {
             Wedge::Unused => "UNUSED",
             Wedge::AlwaysOnHeavy => "ALWAYS-ON HEAVY",
             Wedge::CostlyRare => "COSTLY+RARE",
+            Wedge::NeverFires => "NEVER-FIRES",
         }
     }
 
@@ -140,6 +148,7 @@ impl Wedge {
             Wedge::Unused => "delete / disable",
             Wedge::AlwaysOnHeavy => "slim, or make path-conditional / on-demand",
             Wedge::CostlyRare => "trim, or make on-demand",
+            Wedge::NeverFires => "narrow its paths or delete it",
         }
     }
 
@@ -149,6 +158,7 @@ impl Wedge {
             Wedge::AlwaysOnHeavy => 0,
             Wedge::Unused => 1,
             Wedge::CostlyRare => 2,
+            Wedge::NeverFires => 3,
         }
     }
 }
@@ -227,6 +237,59 @@ pub fn classify_wedge(
     None
 }
 
+/// One path-conditional rule's matchable surface for [`never_fires`]: its
+/// identity plus the declared globs and static cost that become the wedge's
+/// evidence.
+#[derive(Debug, Clone)]
+pub struct RuleGlobs {
+    pub id: String,
+    pub scope: String,
+    pub project: String,
+    pub globs: Vec<String>,
+    pub static_tokens: Option<u64>,
+}
+
+/// A path-conditional rule that fired nowhere in the window, ready for the
+/// waste view: its identity, its declared globs (the evidence), and its
+/// static cost.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NeverFireHit {
+    pub id: String,
+    pub scope: String,
+    pub project: String,
+    pub globs: Vec<String>,
+    pub static_tokens: Option<u64>,
+}
+
+/// Route path-conditional rules with declared globs against the window's read
+/// file targets. A rule whose globs matched no read target never fired
+/// in-window — provided the window observed reads at all. No targets means
+/// no evidence (a quiet window, or a harness that does not report reads),
+/// never a flag: without this guard every rule would light up on an idle
+/// window. Catalog order in, same order out.
+pub fn never_fires(rules: &[RuleGlobs], targets: &[String]) -> Vec<NeverFireHit> {
+    if targets.is_empty() {
+        return Vec::new();
+    }
+    rules
+        .iter()
+        .filter(|rule| !rule.globs.is_empty())
+        .filter(|rule| {
+            let globs: Vec<&str> = rule.globs.iter().map(String::as_str).collect();
+            !targets
+                .iter()
+                .any(|t| crate::core::glob_match::matches_any(&globs, t))
+        })
+        .map(|rule| NeverFireHit {
+            id: rule.id.clone(),
+            scope: rule.scope.clone(),
+            project: rule.project.clone(),
+            globs: rule.globs.clone(),
+            static_tokens: rule.static_tokens,
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -287,6 +350,46 @@ mod tests {
         // that does; swapping the arms must fail here, not in a report.
         let wedge = classify_wedge(true, LoadMode::StartupFull, Some(1500), 0, 1000);
         assert_eq!(wedge, Some(Wedge::AlwaysOnHeavy));
+    }
+
+    fn rule_row(id: &str, globs: &[&str]) -> RuleGlobs {
+        RuleGlobs {
+            id: id.to_string(),
+            scope: "global".to_string(),
+            project: String::new(),
+            globs: globs.iter().map(|g| g.to_string()).collect(),
+            static_tokens: Some(1200),
+        }
+    }
+
+    #[test]
+    fn a_rule_whose_globs_match_nothing_read_is_never_fires() {
+        let rules = vec![
+            rule_row("used", &["src/**"]),
+            rule_row("idle", &["docs/**"]),
+        ];
+        let hits = never_fires(&rules, &["src/main.rs".to_string()]);
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].id, "idle");
+        assert_eq!(hits[0].globs, vec!["docs/**".to_string()]);
+        assert_eq!(hits[0].static_tokens, Some(1200));
+    }
+
+    #[test]
+    fn a_rule_without_globs_or_reads_is_never_flagged() {
+        // No declared globs: nothing can claim a target for it.
+        let rules = vec![rule_row("globless", &[])];
+        assert!(never_fires(&rules, &["src/main.rs".to_string()]).is_empty());
+        // No read targets at all: a quiet window (or a harness that does not
+        // report reads) is no evidence, never a flag.
+        let rules = vec![rule_row("idle", &["docs/**"])];
+        assert!(never_fires(&rules, &[]).is_empty());
+    }
+
+    #[test]
+    fn any_matching_glob_saves_the_rule() {
+        let rules = vec![rule_row("multi", &["docs/**", "src/*.rs"])];
+        assert!(never_fires(&rules, &["src/a.rs".to_string()]).is_empty());
     }
 
     #[test]

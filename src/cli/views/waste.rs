@@ -8,8 +8,8 @@ use anyhow::Result;
 use crate::core::period::TimeRange;
 use crate::core::scope::ScopeFilter;
 use crate::core::surface::{
-    HEAVY_TOKENS, LoadMode, StartupSavings, Wedge, classify_wedge, is_usage_measurable,
-    on_demand_tokens, startup_savings,
+    HEAVY_TOKENS, LoadMode, RuleGlobs, StartupSavings, Wedge, classify_wedge, is_usage_measurable,
+    never_fires, on_demand_tokens, startup_savings,
 };
 use crate::session::{Session, Style};
 
@@ -44,6 +44,9 @@ pub(crate) fn waste(
         startup_tokens: Option<u64>,
         /// What its body costs when loaded — an invocation cost, never a saving.
         on_demand_tokens: Option<u64>,
+        /// Never-fires evidence: the unmatched globs (and body cost) replace
+        /// the generic suggestion. `None` for every other wedge.
+        evidence: Option<String>,
     }
 
     let mut found: Vec<Row> = Vec::new();
@@ -79,8 +82,55 @@ pub(crate) fn waste(
                 savings: startup_savings(load_mode, startup_tokens),
                 startup_tokens,
                 on_demand_tokens: on_demand_tokens(load_mode, static_tokens),
+                evidence: None,
             });
         }
+    }
+
+    // Never-fires (PBI 04): path-conditional rules whose globs matched
+    // nothing read in-window. Rules without declared globs are skipped (the
+    // core matcher), and a window with no read targets at all yields no
+    // flags — no evidence, never an accusation.
+    let read_targets = store.file_read_targets(window)?;
+    let rules: Vec<RuleGlobs> = catalog
+        .iter()
+        .filter(|e| e.kind == "rule")
+        .filter_map(|e| match LoadMode::from_label(&e.load_mode) {
+            Some(LoadMode::PathConditional) if !e.paths.is_empty() => Some(RuleGlobs {
+                id: e.id.clone(),
+                scope: e.scope.clone(),
+                project: e.project.clone(),
+                globs: e.paths.clone(),
+                static_tokens: e.static_tokens.map(|tokens| tokens as u64),
+            }),
+            _ => None,
+        })
+        .collect();
+    let hits = never_fires(&rules, &read_targets);
+    let hit_ids: std::collections::HashSet<&str> = hits.iter().map(|hit| hit.id.as_str()).collect();
+    for rule in &rules {
+        if !hit_ids.contains(rule.id.as_str()) {
+            continue;
+        }
+        let body = match rule.static_tokens {
+            Some(n) => format!("{n}-token body"),
+            None => "body".to_string(),
+        };
+        found.push(Row {
+            wedge: Wedge::NeverFires,
+            kind: "rule",
+            id: &rule.id,
+            scope: &rule.scope,
+            project: &rule.project,
+            uses: 0,
+            savings: StartupSavings::Declutter,
+            startup_tokens: None,
+            on_demand_tokens: rule.static_tokens,
+            evidence: Some(format!(
+                "never fired in window [{}] — narrow its paths or delete its {body}",
+                rule.globs.join(", ")
+            )),
+        });
     }
 
     found.sort_by_key(|row| savings_rank(row.savings));
@@ -122,7 +172,7 @@ pub(crate) fn waste(
                     "startup_tokens": row.startup_tokens,
                     "on_demand_tokens": row.on_demand_tokens,
                     "uses": if is_usage_measurable(row.kind) { Some(row.uses) } else { None },
-                    "suggestion": savings_suggestion(row.wedge, row.savings, row.on_demand_tokens),
+                    "suggestion": row.evidence.clone().unwrap_or_else(|| savings_suggestion(row.wedge, row.savings, row.on_demand_tokens)),
                 })
             })
             .collect();
@@ -171,7 +221,9 @@ pub(crate) fn waste(
                 scope_cell(row.scope, row.project),
                 savings_cell(row.savings, row.startup_tokens),
                 uses_cell,
-                savings_suggestion(row.wedge, row.savings, row.on_demand_tokens),
+                row.evidence.clone().unwrap_or_else(|| {
+                    savings_suggestion(row.wedge, row.savings, row.on_demand_tokens)
+                }),
             ]
         })
         .collect();

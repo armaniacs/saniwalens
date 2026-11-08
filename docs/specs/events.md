@@ -23,6 +23,7 @@ identifying the configuration surface it exercises (the join key into
 | `prompt` | — (user input; raw material for skill extraction) | point event; text referenced, not stored |
 | `tool_error` | — (a failed `tool_result`) | point event; friction category in `surface_id`, a short error-text excerpt in `source`, the originating tool name in `model`, the call's target (file_path / command) in `target` |
 | `file_edit` | — (an Edit/Write target) | point event; the file's **basename** in `surface_id`, its **full path** in `target` |
+| `file_read` | — (a Read target) | point event; same encoding as `file_edit`. Observed, never attributed: it feeds the never-fires wedge (`docs/specs/surfaces.md`), not thrash (which reads `file_edit` only) or hotspots |
 | `bash_cmd` | — (a Bash invocation) | point event; the command's leading word in `surface_id` |
 | `compaction` | — (a `compact_boundary`) | point marker, used by the context metric |
 | `permission_prompt` | `permission` | point event (friction signal) — partly heuristic source |

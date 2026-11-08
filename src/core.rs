@@ -4,6 +4,7 @@
 pub mod bucket;
 pub mod findings;
 pub mod friction;
+pub mod glob_match;
 pub mod metrics;
 pub mod optimize;
 pub mod path;

@@ -42,6 +42,7 @@ pub fn skill_surface(id: &str, config_path: &str, content: &str, scope: &Scope) 
         static_tokens: Some(approx_tokens(content)),
         startup_tokens: Some(description_tokens(content)),
         load_mode: LoadMode::StartupDescription,
+        paths: Vec::new(),
     }
 }
 
@@ -96,6 +97,11 @@ pub fn read_skill_surfaces(skills_dir: &Path, scope: &Scope) -> Vec<Surface> {
 /// Build a `rule` surface. A rule with a `paths:` frontmatter key is loaded
 /// only when a matching file is in play (`PathConditional`); one without is
 /// always loaded (`StartupFull`). See `docs/specs/config-format.md`.
+/// The glob list rides along in `Surface.paths` so the never-fires wedge can
+/// match it against the window's file targets (`docs/specs/surfaces.md`).
+/// Unparseable or empty `paths:` yields no globs — the rule stays
+/// path-conditional by load mode, but nothing can claim a target for it,
+/// so it is never flagged.
 pub fn rule_surface(id: &str, config_path: &str, content: &str, scope: &Scope) -> Surface {
     let tokens = approx_tokens(content);
     let (load_mode, startup_tokens) = if has_paths_frontmatter(content) {
@@ -112,7 +118,57 @@ pub fn rule_surface(id: &str, config_path: &str, content: &str, scope: &Scope) -
         static_tokens: Some(tokens),
         startup_tokens: Some(startup_tokens),
         load_mode,
+        paths: rule_paths(content),
     }
+}
+
+/// The glob patterns a rule's `paths:` frontmatter declares, in order.
+/// Block lists (`- "src/**"`), single/double-quoted or bare, plus a simple
+/// inline list (`paths: [a, b]`); anything else yields no globs rather than
+/// a guessed one, so a weird value can never route a wedge.
+fn rule_paths(content: &str) -> Vec<String> {
+    let Some(block) = frontmatter(content) else {
+        return Vec::new();
+    };
+    let mut lines = block.lines().peekable();
+    let mut out = Vec::new();
+    while let Some(line) = lines.next() {
+        let trimmed = line.trim_start();
+        let rest = match trimmed.strip_prefix("paths:") {
+            Some(rest) => rest.trim(),
+            None => continue,
+        };
+        if rest.is_empty() {
+            // Block list below: `- "glob"` lines, indented or not.
+            for item in lines.by_ref() {
+                let item = item.trim_start();
+                let Some(entry) = item.strip_prefix('-').map(str::trim) else {
+                    break;
+                };
+                let glob = entry
+                    .strip_prefix('"')
+                    .and_then(|s| s.strip_suffix('"'))
+                    .or_else(|| entry.strip_prefix('\'').and_then(|s| s.strip_suffix('\'')))
+                    .unwrap_or(entry);
+                if !glob.is_empty() {
+                    out.push(glob.to_string());
+                }
+            }
+        } else {
+            // Inline list: `paths: [a, b]` (or a bare single value).
+            let inner = rest
+                .strip_prefix('[')
+                .and_then(|s| s.strip_suffix(']'))
+                .unwrap_or(rest);
+            out.extend(
+                inner
+                    .split(',')
+                    .map(|s| s.trim().trim_matches('"').trim_matches('\'').to_string())
+                    .filter(|s| !s.is_empty()),
+            );
+        }
+    }
+    out
 }
 
 /// Build a `command` surface. Like skills and agents, only the description
@@ -126,6 +182,7 @@ pub fn command_surface(id: &str, config_path: &str, content: &str, scope: &Scope
         static_tokens: Some(approx_tokens(content)),
         startup_tokens: Some(description_tokens(content)),
         load_mode: LoadMode::StartupDescription,
+        paths: Vec::new(),
     }
 }
 
@@ -139,6 +196,7 @@ pub fn agent_surface(id: &str, config_path: &str, content: &str, scope: &Scope) 
         static_tokens: Some(approx_tokens(content)),
         startup_tokens: Some(description_tokens(content)),
         load_mode: LoadMode::StartupDescription,
+        paths: Vec::new(),
     }
 }
 
@@ -154,6 +212,7 @@ pub fn claude_md_surface(id: &str, config_path: &str, content: &str, scope: &Sco
         static_tokens: Some(tokens),
         startup_tokens: Some(tokens),
         load_mode: LoadMode::StartupFull,
+        paths: Vec::new(),
     }
 }
 
@@ -547,6 +606,7 @@ pub fn read_mcp_server_surfaces(mcp_json: &Path, scope: &Scope) -> Vec<Surface> 
             // from local config — unknown, never a false zero.
             startup_tokens: None,
             load_mode: LoadMode::ToolSchema,
+            paths: Vec::new(),
         })
         .collect()
 }
@@ -845,6 +905,37 @@ mod tests {
         let surface = rule_surface("spec-sync", "/cfg/spec-sync.md", content, &Scope::Global);
         assert_eq!(surface.kind, "rule");
         assert_eq!(surface.load_mode, LoadMode::PathConditional);
+    }
+
+    #[test]
+    fn rule_paths_keeps_every_declared_glob_in_order() {
+        let content =
+            "---\npaths:\n  - \"src/**/*.rs\"\n  - 'docs/**'\n  - tests/*.md\n---\n# Body";
+        assert_eq!(
+            rule_paths(content),
+            vec!["src/**/*.rs", "docs/**", "tests/*.md"]
+        );
+        let surface = rule_surface("r", "/c/r.md", content, &Scope::Global);
+        assert_eq!(surface.paths, vec!["src/**/*.rs", "docs/**", "tests/*.md"]);
+    }
+
+    #[test]
+    fn rule_paths_accepts_an_inline_list() {
+        let content = "---\npaths: [\"a/**\", b]\n---\n# Body";
+        assert_eq!(rule_paths(content), vec!["a/**", "b"]);
+    }
+
+    #[test]
+    fn rule_paths_is_empty_without_parseable_globs() {
+        // No frontmatter, no list, empty list, broken fence: nothing to
+        // claim a target with, so the wedge can never route on it.
+        assert!(rule_paths("# Just a heading").is_empty());
+        assert!(rule_paths("---\ndescription: x\n---\n# Body").is_empty());
+        assert!(rule_paths("---\npaths:\n---\n# Body").is_empty());
+        assert!(rule_paths("---\npaths:\n  - \"\"\n---\n# Body").is_empty());
+        assert!(rule_paths("---\npaths: [\"\"]\n---\n# Body").is_empty());
+        let surface = rule_surface("r", "/c/r.md", "# Just a heading", &Scope::Global);
+        assert!(surface.paths.is_empty());
     }
 
     #[test]

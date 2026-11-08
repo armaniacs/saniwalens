@@ -33,7 +33,7 @@ pub const CLAUDE_ANALYZER_META_KEY: &str = "analyzer_version";
 /// that changes no analysis should not force everyone through a full
 /// re-analyze. opencode and kilocode carry their own keys beside their own
 /// mappings (`adapter::opencode`, `adapter::kilocode`).
-pub const CLAUDE_ANALYZER_VERSION: &str = "7";
+pub const CLAUDE_ANALYZER_VERSION: &str = "8";
 
 /// response written as several lines is charged once (`assistant_records`).
 pub fn parse_session(jsonl: &str) -> Vec<Record> {
@@ -538,6 +538,22 @@ pub fn extract_work_events(jsonl: &str) -> Vec<WorkEvent> {
                         });
                     }
                 }
+                // Read targets are observed, never attributed: they feed the
+                // never-fires wedge (did any read touch the rule's paths?),
+                // not thrash (which reads `file_edit` only) or hotspots.
+                "Read" => {
+                    if let Some(path) = input
+                        .and_then(|i| i.get("file_path"))
+                        .and_then(|v| v.as_str())
+                    {
+                        events.push(WorkEvent {
+                            epoch_ms: ts,
+                            kind: "file_read",
+                            id: basename(path).to_string(),
+                            path: Some(path.to_string()),
+                        });
+                    }
+                }
                 _ => {}
             }
         }
@@ -886,6 +902,23 @@ mod tests {
         // The full path rides along so thrash detection can tell two same-named
         // files apart.
         assert_eq!(events[1].path.as_deref(), Some("/a/b/cli.rs"));
+    }
+
+    #[test]
+    fn work_events_capture_read_targets_without_editing_thrash() {
+        // Read is observed, never attributed: its own kind, full path kept.
+        // (Thrash reads `file_edit` only, so reads can never fake a burst.)
+        let jsonl = concat!(
+            r#"{"type":"assistant","timestamp":"2026-01-01T00:00:00.000Z","message":{"content":[{"type":"tool_use","name":"Read","input":{"file_path":"/a/b/cli.rs"}}]}}"#,
+            "\n",
+            r#"{"type":"assistant","timestamp":"2026-01-01T00:00:01.000Z","message":{"content":[{"type":"tool_use","name":"Edit","input":{"file_path":"/a/b/other.rs"}}]}}"#,
+        );
+        let events = extract_work_events(jsonl);
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0].kind, "file_read");
+        assert_eq!(events[0].id, "cli.rs");
+        assert_eq!(events[0].path.as_deref(), Some("/a/b/cli.rs"));
+        assert_eq!(events[1].kind, "file_edit");
     }
 
     #[test]
