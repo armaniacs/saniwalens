@@ -769,8 +769,7 @@ mod tests {
         // analyzer) and the resolved values come back resolved. Frozen
         // never creates, so the store below already exists — the old
         // creating open violated the no-create contract (`cli.md`).
-        crate::store::Store::open(&dir.join("store.db"), crate::store::OpenMode::ReadWrite)
-            .unwrap();
+        crate::store::Store::open(dir.join("store.db"), crate::store::OpenMode::ReadWrite).unwrap();
         let period = PeriodArgs {
             since: None,
             until: None,
@@ -852,8 +851,7 @@ mod tests {
 
         // All flags valid: the filter comes back resolved beside the read
         // (frozen reads an existing store; it never creates one).
-        crate::store::Store::open(&dir.join("store.db"), crate::store::OpenMode::ReadWrite)
-            .unwrap();
+        crate::store::Store::open(dir.join("store.db"), crate::store::OpenMode::ReadWrite).unwrap();
         let opened = dispatch
             .open_scoped(Some("global"), None, &period, &read, panic_analyzer())
             .expect("the flags resolve and the store opens");
@@ -911,8 +909,7 @@ mod tests {
 
         // The two values it does take resolve to the formats doctor renders
         // (frozen reads an existing store; it never creates one).
-        crate::store::Store::open(&dir.join("store.db"), crate::store::OpenMode::ReadWrite)
-            .unwrap();
+        crate::store::Store::open(dir.join("store.db"), crate::store::OpenMode::ReadWrite).unwrap();
         for (value, expected) in [(None, Format::Table), (Some("json"), Format::Json)] {
             let opened = dispatch
                 .open_scoped_table_json(Some("project"), value, &period, &read, panic_analyzer())
@@ -968,8 +965,7 @@ mod tests {
 
         // All flags valid: the pair resolves and the session opens
         // (frozen reads an existing store; it never creates one).
-        crate::store::Store::open(&dir.join("store.db"), crate::store::OpenMode::ReadWrite)
-            .unwrap();
+        crate::store::Store::open(dir.join("store.db"), crate::store::OpenMode::ReadWrite).unwrap();
         let pair = PairArgs {
             since: None,
             until: None,
