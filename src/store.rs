@@ -84,6 +84,7 @@ CREATE TABLE IF NOT EXISTS surfaces (
     startup_tokens INTEGER,
     load_mode     TEXT NOT NULL,
     attrs_json    TEXT,
+    description   TEXT,
     PRIMARY KEY (kind, id, scope, project)
 );
 -- Analyze-run metadata (analyzed_at, projects_dir, config_dir) so read
@@ -348,6 +349,10 @@ pub struct CatalogEntry {
     /// kind, and for rows written before globs were recorded). The never-fires
     /// wedge reads these, never the raw JSON.
     pub paths: Vec<String>,
+    /// A skill/agent/command's own description (PBI 15), for the
+    /// redundant-purpose wedge. `None` when the kind declares none or the row
+    /// predates the column.
+    pub description: Option<String>,
 }
 
 /// One session's cost shape: what it spent, how long it ran, and how often
@@ -1672,8 +1677,8 @@ impl Store {
             tx.execute(
                 "INSERT OR REPLACE INTO surfaces
                    (kind, id, scope, project, config_path, static_tokens,
-                    startup_tokens, load_mode, attrs_json)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                    startup_tokens, load_mode, attrs_json, description)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
                 (
                     &surface.kind,
                     &surface.id,
@@ -1684,6 +1689,7 @@ impl Store {
                     surface.startup_tokens,
                     surface.load_mode.label(),
                     attrs,
+                    &surface.description,
                 ),
             )?;
         }
@@ -1700,7 +1706,7 @@ impl Store {
         let (filter, binds) = range_clause(range, "e.started_epoch");
         let mut stmt = self.conn.prepare(&format!(
             "SELECT f.kind, f.id, f.scope, f.project, f.static_tokens,
-                    f.startup_tokens, f.load_mode, f.attrs_json, COUNT(u.event_id)
+                    f.startup_tokens, f.load_mode, f.attrs_json, f.description, COUNT(u.event_id)
              FROM surfaces f
              LEFT JOIN (SELECT e.id AS event_id, e.surface_kind, e.surface_id,
                                s.project AS session_project
@@ -1725,10 +1731,11 @@ impl Store {
                     static_tokens: row.get(4)?,
                     startup_tokens: row.get(5)?,
                     load_mode: row.get(6)?,
-                    uses: row.get(8)?,
+                    uses: row.get(9)?,
                     paths: attrs
                         .and_then(|text| serde_json::from_str::<Vec<String>>(&text).ok())
                         .unwrap_or_default(),
+                    description: row.get(8)?,
                 })
             })?
             .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -2332,6 +2339,7 @@ mod tests {
             startup_tokens: Some(startup_tokens),
             load_mode: LoadMode::StartupDescription,
             paths: Vec::new(),
+            description: None,
         }
     }
 
@@ -2964,6 +2972,7 @@ mod tests {
                     startup_tokens: Some(600),
                     load_mode: LoadMode::StartupFull,
                     paths: Vec::new(),
+                    description: None,
                 },
                 Surface {
                     kind: "rule".to_string(),
@@ -2974,6 +2983,7 @@ mod tests {
                     startup_tokens: Some(900),
                     load_mode: LoadMode::StartupFull,
                     paths: Vec::new(),
+                    description: None,
                 },
                 // A skill contributes its description, never its 1000-token body.
                 skill_surface("git-commit", Scope::Global, 1000, 8),
@@ -2988,6 +2998,7 @@ mod tests {
                     startup_tokens: None,
                     load_mode: LoadMode::ToolSchema,
                     paths: Vec::new(),
+                    description: None,
                 },
                 // Another project's CLAUDE.md is always-on *there*, not globally.
                 Surface {
@@ -2999,6 +3010,7 @@ mod tests {
                     startup_tokens: Some(400),
                     load_mode: LoadMode::StartupFull,
                     paths: Vec::new(),
+                    description: None,
                 },
             ])
             .unwrap();

@@ -52,6 +52,7 @@ fn surface(id: &str, scope: Scope) -> Surface {
         startup_tokens: Some(40),
         load_mode: LoadMode::StartupDescription,
         paths: Vec::new(),
+        description: None,
     }
 }
 

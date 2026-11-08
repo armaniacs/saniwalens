@@ -22,12 +22,12 @@ Scenario: 類似度がしきい値未満のペアは提示されない
   And   重複候補が 1 件も無い場合は、その旨が分かる空の表示になる（裸の見出しだけを出さない）
 
 ## 受け入れ基準
-- [ ] description 由来の類似度で、重複している surface のペアが提示される。ペアには互いの名前・所有スコープと merge の示唆を載せる
-- [ ] 類似度がしきい値未満のペアは提示されない（しきい値は既定値を持つ）
-- [ ] 提示までとする。merge を強制しない（ファイルの書き換え・削除・自動統合は行わない）
-- [ ] 類似度シグナルの格納先を決めて実装する（attrs_json 相当の列に description を載せるか、類似度を直接格納するか。判断は spec 更新とセット。v1 の外に出す判断にする場合は根拠を spec に残す）
-- [ ] waste ビュー（flagged opportunities）に redundant の候補が現れ、既存の unused / costly+rare 等の出力は変わらない
-- [ ] cargo fmt --check、cargo clippy --all-targets --all-features -- -D warnings、cargo test が green
+- [x] description 由来の類似度で、重複している surface のペアが提示される（各ペア両面に行を出し、相手を名指し）
+- [x] 類似度がしきい値未満のペアは提示されない（しきい値 MIN_REDUNDANT_OVERLAP=0.5。境界テスト済み）
+- [x] 提示までとする。merge は強制しない（表示のみ。書き換えなし）
+- [x] 類似度シグナルの格納先を決めて実装する（surfaces.description 列を新設。REBUILTテーブルのためmigration不要。attrs_jsonはglobs専用に据え置き。判断をspecに記録）
+- [x] waste ビュー（flagged opportunities）に redundant の候補が現れ、既存の unused / costly+rare 等の出力は変わらない（E2Eで相互名指しを確認）
+- [x] cargo fmt --check、cargo clippy --all-targets --all-features -- -D warnings、cargo test が green
 
 ## テスト戦略
 - E2E: 似た description を持つ surface 同士が合成ストアで重複候補として現れ、似ていない場合は現れないことをユーザーシナリオとして確認する
@@ -47,6 +47,6 @@ Scenario: 類似度がしきい値未満のペアは提示されない
 - プライバシー: 実 config の description はコミットしない。合成 fixture のみ
 
 ## Definition of Done
-- [ ] 全BDDシナリオが自動テストとして実装されパスする
-- [ ] コードレビュー完了
-- [ ] ドキュメント更新済み
+- [x] 全BDDシナリオが自動テストとして実装されパスする（E2E 2件＋core単体3件）
+- [x] コードレビュー完了（バッチ統合レビュー: 親エージェントが全diff・spec同期・干渉を目視確認）
+- [x] ドキュメント更新済み（surfaces.mdのredundant節を計測済みに更新）

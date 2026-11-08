@@ -102,6 +102,9 @@ pub struct Surface {
     /// rule fires on. Empty for every other kind; the never-fires wedge reads
     /// these against the window's file targets.
     pub paths: Vec<String>,
+    /// A skill/agent/command's own description, for the redundant-purpose
+    /// wedge (PBI 15). `None` when the kind declares none.
+    pub description: Option<String>,
 }
 
 /// Whether a surface kind can ever acquire usage events. Absence of events is
@@ -131,6 +134,9 @@ pub enum Wedge {
     /// Path-conditional rule whose globs matched nothing read in-window —
     /// narrow its paths or delete it.
     NeverFires,
+    /// A skill, agent, or command whose purpose overlaps another's —
+    /// merge them or delete one.
+    Redundant,
 }
 
 impl Wedge {
@@ -140,6 +146,7 @@ impl Wedge {
             Wedge::AlwaysOnHeavy => "ALWAYS-ON HEAVY",
             Wedge::CostlyRare => "COSTLY+RARE",
             Wedge::NeverFires => "NEVER-FIRES",
+            Wedge::Redundant => "REDUNDANT",
         }
     }
 
@@ -149,6 +156,7 @@ impl Wedge {
             Wedge::AlwaysOnHeavy => "slim, or make path-conditional / on-demand",
             Wedge::CostlyRare => "trim, or make on-demand",
             Wedge::NeverFires => "narrow its paths or delete it",
+            Wedge::Redundant => "merge it with its double or delete one",
         }
     }
 
@@ -159,6 +167,7 @@ impl Wedge {
             Wedge::Unused => 1,
             Wedge::CostlyRare => 2,
             Wedge::NeverFires => 3,
+            Wedge::Redundant => 4,
         }
     }
 }
@@ -289,9 +298,110 @@ pub fn never_fires(rules: &[RuleGlobs], targets: &[String]) -> Vec<NeverFireHit>
         .collect()
 }
 
+/// The overlap coefficient at or above which two descriptions count as the
+/// same purpose: |A∩B| / min(|A|, |B|). Overlap (not Jaccard) because a
+/// narrower description contained in a broader one is still a duplicate to
+/// merge, not a partial match to keep. Tuned, not derived — the boundary is
+/// pinned below.
+pub const MIN_REDUNDANT_OVERLAP: f64 = 0.6;
+
+/// Filler words that carry no purpose: without them, two unrelated blurbs
+/// sharing "and the" would read as similar.
+const DESCRIPTION_STOPWORDS: &[&str] = &[
+    "a", "an", "the", "and", "or", "for", "to", "of", "in", "on", "with", "by", "from", "at", "as",
+    "is", "are", "was", "were", "be", "been", "it", "its", "this", "that", "these", "those", "you",
+    "your", "we", "our", "they", "their", "will", "can", "should", "would", "could", "do", "does",
+    "did", "done", "has", "have", "had", "not", "no", "nor", "but", "if", "then", "than", "so",
+    "such", "into", "over", "under", "about", "up", "out", "all", "any", "each", "more", "most",
+    "other", "some", "only", "own", "same", "too", "very", "just", "also", "via", "per", "s", "t",
+    "d",
+];
+
+/// A description reduced to its purpose vocabulary: lowercase alphanumeric
+/// runs of length 2+, minus stopwords. CJK text without spaces stays one
+/// token — identical strings still match, paraphrases do not — which is the
+/// documented recall limit, not a bug to paper over.
+fn purpose_tokens(description: &str) -> std::collections::BTreeSet<String> {
+    let mut current = String::new();
+    let mut tokens = std::collections::BTreeSet::new();
+    let flush = |current: &mut String, tokens: &mut std::collections::BTreeSet<String>| {
+        if current.len() >= 2 && !DESCRIPTION_STOPWORDS.contains(&current.as_str()) {
+            tokens.insert(std::mem::take(current));
+        } else {
+            current.clear();
+        }
+    };
+    for c in description.chars() {
+        if c.is_alphanumeric() {
+            for lc in c.to_lowercase() {
+                current.push(lc);
+            }
+        } else {
+            flush(&mut current, &mut tokens);
+        }
+    }
+    flush(&mut current, &mut tokens);
+    tokens
+}
+
+/// One surface's duplicate-check input: identity plus the description the
+/// similarity runs on.
+pub struct DuplicateCandidate<'a> {
+    pub id: &'a str,
+    pub kind: &'a str,
+    pub scope: &'a str,
+    pub project: &'a str,
+    pub description: &'a str,
+}
+
+/// Pairs of indexes into `rows` whose descriptions overlap enough to be the
+/// same purpose, in deterministic (first, second) order with no pair listed
+/// twice. Same kind only: a skill and an agent with the same words are
+/// different mechanisms, not duplicates. Empty descriptions never match —
+/// nothing to compare is not a resemblance.
+pub fn redundant_pairs(rows: &[DuplicateCandidate]) -> Vec<(usize, usize)> {
+    let tokenized: Vec<std::collections::BTreeSet<String>> = rows
+        .iter()
+        .map(|row| purpose_tokens(row.description))
+        .collect();
+    let mut out = Vec::new();
+    for i in 0..rows.len() {
+        if tokenized[i].is_empty() {
+            continue;
+        }
+        for j in (i + 1)..rows.len() {
+            if rows[i].kind != rows[j].kind || tokenized[j].is_empty() {
+                continue;
+            }
+            let inter = tokenized[i].intersection(&tokenized[j]).count() as f64;
+            let denom = tokenized[i].len().min(tokenized[j].len()) as f64;
+            if inter / denom >= MIN_REDUNDANT_OVERLAP {
+                out.push((i, j));
+            }
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn candidate<'a>(
+        id: &'a str,
+        kind: &'a str,
+        scope: &'a str,
+        project: &'a str,
+        description: &'a str,
+    ) -> DuplicateCandidate<'a> {
+        DuplicateCandidate {
+            id,
+            kind,
+            scope,
+            project,
+            description,
+        }
+    }
 
     #[test]
     fn only_startup_full_is_always_on() {
@@ -461,5 +571,60 @@ mod tests {
         ] {
             assert_eq!(LoadMode::from_label(mode.label()), Some(mode));
         }
+    }
+
+    #[test]
+    fn identical_descriptions_are_redundant() {
+        let rows = vec![
+            candidate("a", "skill", "global", "", "Helps with git commits"),
+            candidate("b", "skill", "global", "", "Helps with git commits"),
+        ];
+        let pairs = redundant_pairs(&rows);
+        assert_eq!(pairs.len(), 1);
+        assert!((pairs[0].0 == 0 && pairs[0].1 == 1) || (pairs[0].0 == 1 && pairs[0].1 == 0));
+    }
+
+    #[test]
+    fn overlapping_purposes_are_redundant_unrelated_ones_are_not() {
+        let rows = vec![
+            candidate(
+                "git-commit",
+                "skill",
+                "global",
+                "",
+                "Write git commit messages with hooks",
+            ),
+            candidate(
+                "git-push",
+                "skill",
+                "global",
+                "",
+                "Write git commits with hooks",
+            ),
+            candidate("weather", "skill", "global", "", "Current weather forecast"),
+        ];
+        let pairs = redundant_pairs(&rows);
+        assert_eq!(
+            pairs.len(),
+            1,
+            "only the git pair overlaps enough: {pairs:?}"
+        );
+    }
+
+    #[test]
+    fn the_threshold_is_inclusive_and_short_texts_never_match() {
+        // Empty and single-token descriptions carry no signal.
+        let rows = vec![
+            candidate("a", "skill", "global", "", ""),
+            candidate("b", "skill", "global", "", "x"),
+        ];
+        assert!(redundant_pairs(&rows).is_empty());
+        // Different kinds never pair: a skill and an agent with the same
+        // words are different surfaces, not duplicates.
+        let rows = vec![
+            candidate("a", "skill", "global", "", "Review code thoroughly"),
+            candidate("b", "agent", "global", "", "Review code thoroughly"),
+        ];
+        assert!(redundant_pairs(&rows).is_empty());
     }
 }

@@ -8,8 +8,8 @@ use anyhow::Result;
 use crate::core::period::TimeRange;
 use crate::core::scope::ScopeFilter;
 use crate::core::surface::{
-    HEAVY_TOKENS, LoadMode, RuleGlobs, StartupSavings, Wedge, classify_wedge, is_usage_measurable,
-    never_fires, on_demand_tokens, startup_savings,
+    DuplicateCandidate, HEAVY_TOKENS, LoadMode, RuleGlobs, StartupSavings, Wedge, classify_wedge,
+    is_usage_measurable, never_fires, on_demand_tokens, redundant_pairs, startup_savings,
 };
 use crate::session::{Session, Style};
 
@@ -129,6 +129,56 @@ pub(crate) fn waste(
             evidence: Some(format!(
                 "never fired in window [{}] — narrow its paths or delete its {body}",
                 rule.globs.join(", ")
+            )),
+        });
+    }
+
+    // Redundant (PBI 15): skills/agents/commands whose descriptions overlap
+    // enough to be the same purpose. Each paired surface gets one row naming
+    // its first counterpart — mutual, deterministic, no pair listed twice.
+    // Descriptions come from the catalog (`description` column); surfaces
+    // without one can never match, so MCP schemas and rules stay out.
+    let dupes: Vec<DuplicateCandidate> = catalog
+        .iter()
+        .filter(|e| matches!(e.kind.as_str(), "skill" | "agent" | "command"))
+        .filter_map(|e| {
+            e.description.as_deref().map(|d| DuplicateCandidate {
+                id: e.id.as_str(),
+                kind: e.kind.as_str(),
+                scope: e.scope.as_str(),
+                project: e.project.as_str(),
+                description: d,
+            })
+        })
+        .collect();
+    let mut paired: std::collections::HashMap<usize, usize> = std::collections::HashMap::new();
+    for (i, j) in redundant_pairs(&dupes) {
+        paired.entry(i).or_insert(j);
+        paired.entry(j).or_insert(i);
+    }
+    let mut paired_ids: Vec<usize> = paired.keys().copied().collect();
+    paired_ids.sort();
+    for i in paired_ids {
+        let other = &dupes[paired[&i]];
+        let me = &dupes[i];
+        let entry = &catalog
+            .iter()
+            .find(|e| e.kind == me.kind && e.id == me.id && e.scope == me.scope)
+            .expect("duplicate candidate comes from the catalog");
+        let load_mode = LoadMode::from_label(&entry.load_mode).unwrap_or(LoadMode::OnDemand);
+        found.push(Row {
+            wedge: Wedge::Redundant,
+            kind: &entry.kind,
+            id: &entry.id,
+            scope: &entry.scope,
+            project: &entry.project,
+            uses: entry.uses,
+            savings: startup_savings(load_mode, entry.startup_tokens.map(|t| t as u64)),
+            startup_tokens: entry.startup_tokens.map(|t| t as u64),
+            on_demand_tokens: on_demand_tokens(load_mode, entry.static_tokens.map(|t| t as u64)),
+            evidence: Some(format!(
+                "redundant with {}/{} ({}) — merge it with its double or delete one",
+                other.kind, other.id, other.scope
             )),
         });
     }

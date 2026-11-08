@@ -43,6 +43,7 @@ pub fn skill_surface(id: &str, config_path: &str, content: &str, scope: &Scope) 
         startup_tokens: Some(description_tokens(content)),
         load_mode: LoadMode::StartupDescription,
         paths: Vec::new(),
+        description: frontmatter_description(content),
     }
 }
 
@@ -119,6 +120,7 @@ pub fn rule_surface(id: &str, config_path: &str, content: &str, scope: &Scope) -
         startup_tokens: Some(startup_tokens),
         load_mode,
         paths: rule_paths(content),
+        description: None,
     }
 }
 
@@ -183,6 +185,7 @@ pub fn command_surface(id: &str, config_path: &str, content: &str, scope: &Scope
         startup_tokens: Some(description_tokens(content)),
         load_mode: LoadMode::StartupDescription,
         paths: Vec::new(),
+        description: frontmatter_description(content),
     }
 }
 
@@ -197,6 +200,7 @@ pub fn agent_surface(id: &str, config_path: &str, content: &str, scope: &Scope) 
         startup_tokens: Some(description_tokens(content)),
         load_mode: LoadMode::StartupDescription,
         paths: Vec::new(),
+        description: frontmatter_description(content),
     }
 }
 
@@ -213,6 +217,7 @@ pub fn claude_md_surface(id: &str, config_path: &str, content: &str, scope: &Sco
         startup_tokens: Some(tokens),
         load_mode: LoadMode::StartupFull,
         paths: Vec::new(),
+        description: None,
     }
 }
 
@@ -607,6 +612,7 @@ pub fn read_mcp_server_surfaces(mcp_json: &Path, scope: &Scope) -> Vec<Surface> 
             startup_tokens: None,
             load_mode: LoadMode::ToolSchema,
             paths: Vec::new(),
+            description: None,
         })
         .collect()
 }

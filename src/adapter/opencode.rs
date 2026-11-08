@@ -339,6 +339,7 @@ pub fn command_surface(id: &str, config_path: &str, content: &str, scope: &Scope
         startup_tokens: Some(description_tokens(content)),
         load_mode: LoadMode::StartupDescription,
         paths: Vec::new(),
+        description: frontmatter_description(content),
     }
 }
 
@@ -354,6 +355,7 @@ pub fn agent_surface(id: &str, config_path: &str, content: &str, scope: &Scope) 
         startup_tokens: Some(description_tokens(content)),
         load_mode: LoadMode::StartupDescription,
         paths: Vec::new(),
+        description: frontmatter_description(content),
     }
 }
 

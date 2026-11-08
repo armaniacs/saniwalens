@@ -774,6 +774,7 @@ mod tests {
                 startup_tokens: Some(1),
                 load_mode: LoadMode::OnDemand,
                 paths: Vec::new(),
+                description: None,
             }]
         }
 
@@ -813,6 +814,7 @@ mod tests {
                 startup_tokens: None,
                 load_mode: LoadMode::OnDemand,
                 paths: Vec::new(),
+                description: None,
             }]
         }
 

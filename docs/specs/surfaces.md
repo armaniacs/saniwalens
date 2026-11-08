@@ -137,9 +137,15 @@ rare** apply only to usage-measurable kinds — never to `rule` / `hook` /
   evidence. A window with no read targets at all flags nothing — no evidence,
   never an accusation (this also keeps harnesses without read extraction from
   false-flagging every rule).
-- **Redundant** needs a purpose/similarity signal (e.g. derived from each
-  surface's `description`), which the v1 schema does not carry; it lands in
-  `attrs_json` or is scoped out of v1 like the AI layer.
+- **Redundant** needs a purpose/similarity signal derived from each
+  surface's `description`. Skill/agent/command descriptions are catalogued
+  in the `surfaces.description` column; the waste view pairs same-kind
+  surfaces whose tokenized descriptions overlap at least half
+  (`MIN_REDUNDANT_OVERLAP`), and lists each paired surface once, naming its
+  first counterpart. No counterpart, no row ― and a window with no reads at
+  all is not consulted, since this wedge is config-side, not activity-side.
+  Identical descriptions always match; CJK text without spaces only matches
+  identically, which is the documented recall limit.
 
 **Load mode** is a first-class part of a surface because the same static-token
 figure means something very different for a `CLAUDE.md` paid every session than
