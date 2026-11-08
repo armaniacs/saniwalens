@@ -13,7 +13,7 @@ use serde_json::Value;
 
 use crate::adapter::harness::{
     AnalyzeStats, Harness, Site, SiteCtx, catalog_surfaces, home_dir, load_claude_md,
-    load_skills_deduped,
+    load_skills_deduped, restat_matches,
 };
 use crate::adapter::transcript::{ToolError, WorkEvent};
 use crate::core::friction::classify_error;
@@ -730,6 +730,34 @@ pub(crate) fn opencode_home() -> Result<PathBuf> {
         .context("set XDG_CONFIG_HOME or HOME")
 }
 
+/// The live fingerprint of one session: its current `time_updated` and
+/// message count, re-read from the database. The snapshot is read once up
+/// front, so a session that grows while earlier sessions ingest would
+/// otherwise be stamped with the snapshot's stale pair and skipped next run --
+/// the caller compares this against the snapshot values after ingest and
+/// stamps only on a match. `None` when the session row is gone (pruned
+/// mid-run): fail closed, so the gate refuses the stamp.
+pub(crate) fn query_session_fingerprint(db: &Path, session_id: &str) -> Result<Option<(i64, i64)>> {
+    let conn =
+        rusqlite::Connection::open_with_flags(db, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+            .with_context(|| format!("open opencode database {}", db.display()))?;
+    let time_updated: Option<i64> = match conn.query_row(
+        "SELECT time_updated FROM session WHERE id = ?1",
+        [session_id],
+        |row| row.get(0),
+    ) {
+        Ok(value) => Some(value),
+        Err(rusqlite::Error::QueryReturnedNoRows) => return Ok(None),
+        Err(other) => return Err(other.into()),
+    };
+    let message_count: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM message WHERE session_id = ?1",
+        [session_id],
+        |row| row.get(0),
+    )?;
+    Ok(time_updated.map(|updated| (updated, message_count)))
+}
+
 /// Analyze an opencode database into the opencode store. The row-to-record
 /// mapping is `adapter::opencode`; this shell reads the database read-only,
 /// groups rows by session, and ingests each session idempotently. See
@@ -914,7 +942,17 @@ pub fn analyze(input: Option<PathBuf>, db: &Path) -> Result<AnalyzeStats> {
                 .work_events(&work_rows)
                 .subagent_runs(&runs),
         )?;
-        store.record_ingested_file(&fingerprint_key, session.time_updated_ms, message_count)?;
+        // The snapshot is read once up front: re-read this session's live
+        // fingerprint and stamp only when it still matches what was ingested.
+        // A session that grew mid-run keeps its previous stamp, so the next
+        // run re-ingests it instead of skipping on a stale stamp. An unreadable
+        // live row fails closed to no stamp, for the same reason.
+        let fresh = query_session_fingerprint(&input, &session.id)
+            .ok()
+            .flatten();
+        if restat_matches(Some((session.time_updated_ms, message_count)), fresh) {
+            store.record_ingested_file(&fingerprint_key, session.time_updated_ms, message_count)?;
+        }
         sessions += 1;
         spans_total += spans.len();
     }
@@ -953,8 +991,8 @@ mod tests {
     use crate::core::surface::{LoadMode, Scope};
     use serde_json::json;
 
-    fn task_part<'a>(
-        session_id: &'a str,
+    fn task_part(
+        _session_id: &str,
         call_id: Option<&str>,
         child: Option<&str>,
         agent: &str,
@@ -1487,6 +1525,108 @@ mod tests {
     fn a_missing_database_is_an_error() {
         let path = scratch_db("missing");
         assert!(read_database(&path).is_err());
+    }
+
+    // ---- PBI C11: the live session re-query behind the re-stat gate ----
+
+    /// A synthetic opencode database with one session and one message —
+    /// never a real one (`.claude/rules/session-data-privacy.md`).
+    fn restat_fixture_db(path: &std::path::Path) {
+        let conn = rusqlite::Connection::open(path).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE session
+               (id TEXT PRIMARY KEY, slug TEXT, directory TEXT,
+                time_created INTEGER, time_updated INTEGER);
+             CREATE TABLE message
+               (id TEXT PRIMARY KEY, session_id TEXT, time_created INTEGER, data TEXT);
+             CREATE TABLE part
+               (id TEXT PRIMARY KEY, message_id TEXT, session_id TEXT,
+                time_created INTEGER, data TEXT);",
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO session VALUES ('ses_1', 'example', '/tmp/example', 1000, 2000)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO message VALUES ('msg_1', 'ses_1', 1000, '{\"role\":\"user\"}')",
+            [],
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn the_live_fingerprint_sees_rows_added_after_the_snapshot() {
+        // The production race in miniature: the snapshot is read once up
+        // front, then the session grows while earlier sessions ingest. The
+        // re-query must report the fresh pair, and the gate must refuse the
+        // snapshot's stale stamp — otherwise the new rows are skipped.
+        let path = scratch_db("restat-drift");
+        restat_fixture_db(&path);
+        let snapshot = read_database(&path).unwrap();
+        let session = snapshot.sessions.iter().find(|s| s.id == "ses_1").unwrap();
+        let pre = (
+            session.time_updated_ms,
+            snapshot
+                .messages
+                .iter()
+                .filter(|m| m.session_id == "ses_1")
+                .count() as i64,
+        );
+        // A concurrent append lands after the snapshot read.
+        let conn = rusqlite::Connection::open(&path).unwrap();
+        conn.execute(
+            "INSERT INTO message VALUES ('msg_2', 'ses_1', 2500, '{\"role\":\"user\"}')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "UPDATE session SET time_updated = 2500 WHERE id = 'ses_1'",
+            [],
+        )
+        .unwrap();
+        drop(conn);
+
+        let fresh = query_session_fingerprint(&path, "ses_1").unwrap();
+        assert_eq!(fresh, Some((2500, 2)));
+        assert!(
+            !crate::adapter::harness::restat_matches(Some(pre), fresh),
+            "a session that grew mid-run must not be stamped stale"
+        );
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn the_live_fingerprint_of_a_quiet_session_matches_its_snapshot() {
+        // The gate must not add re-ingests on the quiet path: nothing moved,
+        // so the re-query agrees with the snapshot and the stamp proceeds.
+        let path = scratch_db("restat-quiet");
+        restat_fixture_db(&path);
+        let snapshot = read_database(&path).unwrap();
+        let session = snapshot.sessions.iter().find(|s| s.id == "ses_1").unwrap();
+        let pre = (
+            session.time_updated_ms,
+            snapshot
+                .messages
+                .iter()
+                .filter(|m| m.session_id == "ses_1")
+                .count() as i64,
+        );
+        let fresh = query_session_fingerprint(&path, "ses_1").unwrap();
+        assert_eq!(fresh, Some(pre));
+        assert!(crate::adapter::harness::restat_matches(Some(pre), fresh));
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn the_live_fingerprint_of_a_missing_session_is_none() {
+        // A session pruned mid-run re-queries to nothing: fail closed, so the
+        // gate refuses the stamp and the next run re-ingests, never skips.
+        let path = scratch_db("restat-gone");
+        restat_fixture_db(&path);
+        assert_eq!(query_session_fingerprint(&path, "ses_gone").unwrap(), None);
+        std::fs::remove_file(&path).ok();
     }
 
     #[test]

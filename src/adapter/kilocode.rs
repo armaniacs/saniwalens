@@ -17,7 +17,7 @@ use serde_json::Value;
 
 use crate::adapter::harness::{
     AnalyzeStats, Harness, Site, catalog_surfaces, file_fingerprint, home_dir, load_agents,
-    load_claude_md, load_commands, load_kilo_instructions, load_skills_deduped,
+    load_claude_md, load_commands, load_kilo_instructions, load_skills_deduped, restat_matches,
 };
 use crate::adapter::transcript::{ToolError, WorkEvent};
 use crate::core::friction::classify_error;
@@ -845,7 +845,15 @@ pub fn analyze(input: Option<PathBuf>, db: &Path) -> Result<AnalyzeStats> {
         )?;
         // Record the size actually consumed, so a file that grows after the
         // read shows a mismatch next run instead of being skipped forever.
-        store.record_ingested_file(&fingerprint_key, mtime, size)?;
+        // The re-stat refuses the stamp when a task file moved while it was
+        // read: the previous stamp then stays, and the next run re-ingests
+        // instead of skipping on a stale stamp.
+        if restat_matches(
+            Some((mtime, size)),
+            task_fingerprint(&conversation_path, &ui_path, Some(&metadata_path)),
+        ) {
+            store.record_ingested_file(&fingerprint_key, mtime, size)?;
+        }
         sessions += 1;
         spans_total += spans.len();
     }
@@ -917,6 +925,60 @@ mod tests {
         assert!(files_in_context(r#"{"files_in_context":"nope"}"#).is_empty());
         assert!(files_in_context(r#"{"files_in_context":[42,null]}"#).is_empty());
         assert!(files_in_context("not json at all").is_empty());
+    }
+
+    // ---- PBI C11: a mid-read task append breaks the re-stat match ----
+
+    /// One synthetic task dir — never a real one
+    /// (`.claude/rules/session-data-privacy.md`).
+    fn restat_task_fixture(name: &str) -> std::path::PathBuf {
+        let dir = unique_dir(&format!("saniwalens-kilo-restat-test-{name}"));
+        std::fs::remove_dir_all(&dir).ok();
+        let task = dir.join("task-1");
+        std::fs::create_dir_all(&task).unwrap();
+        std::fs::write(task.join("api_conversation_history.json"), "[]").unwrap();
+        std::fs::write(task.join("ui_messages.json"), "[]").unwrap();
+        task
+    }
+
+    #[test]
+    fn a_mid_read_task_append_breaks_the_restat_match() {
+        // The production race in miniature: fingerprint, then one task file
+        // grows before the post-read re-stat. The gate `analyze` stamps
+        // through must refuse, so the grown task is re-ingested next run.
+        let task = restat_task_fixture("drift");
+        let conversation = task.join("api_conversation_history.json");
+        let ui = task.join("ui_messages.json");
+        let base = std::time::SystemTime::UNIX_EPOCH
+            + std::time::Duration::new(1_700_000_100, 100_000_000);
+        set_mtime(&conversation, base);
+        set_mtime(&ui, base);
+        let pre = task_fingerprint(&conversation, &ui, None).unwrap();
+        std::fs::write(&conversation, "[1]").unwrap();
+        set_mtime(&conversation, base + std::time::Duration::from_millis(500));
+        let post = task_fingerprint(&conversation, &ui, None).unwrap();
+        assert_ne!(pre, post, "the drift fixture must move the fingerprint");
+        assert!(
+            !crate::adapter::harness::restat_matches(Some(pre), Some(post)),
+            "a task that grew mid-read must not be stamped"
+        );
+        std::fs::remove_dir_all(task.parent().unwrap()).ok();
+    }
+
+    #[test]
+    fn an_untouched_task_passes_the_restat_match() {
+        // The gate must not add re-ingests on the quiet path: unchanged task
+        // files fingerprint identically twice, so the stamp proceeds.
+        let task = restat_task_fixture("quiet");
+        let conversation = task.join("api_conversation_history.json");
+        let ui = task.join("ui_messages.json");
+        let pre = task_fingerprint(&conversation, &ui, None).unwrap();
+        let post = task_fingerprint(&conversation, &ui, None).unwrap();
+        assert!(crate::adapter::harness::restat_matches(
+            Some(pre),
+            Some(post)
+        ));
+        std::fs::remove_dir_all(task.parent().unwrap()).ok();
     }
 
     #[test]

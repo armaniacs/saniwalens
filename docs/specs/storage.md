@@ -454,7 +454,13 @@ line granularity), never parsed as a broken record. The fingerprint stored in
 actually consumed. A file that grew during the read therefore shows a changed
 `(mtime, size)` on the next run and is re-ingested, picking up the tail. Stamping
 the fingerprint before the read would record the post-growth size against
-pre-growth events and permanently skip the tail.
+pre-growth events and permanently skip the tail. The stamp is additionally gated
+on a post-read re-stat (`restat_matches` in `adapter::harness`): only when the
+re-read fingerprint equals the pre-read one is the stamp written, so a mid-run
+append fails closed to "ingest without stamping" and the next run re-ingests
+rather than skipping on a stale stamp. Row-backed fingerprints (`opencode`'s
+`time_updated_ms` plus message count, kilocode's task fold) re-query after ingest
+under the same gate.
 
 ## Why a dimension + catalog + spine, not one span table
 

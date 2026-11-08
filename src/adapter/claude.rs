@@ -15,7 +15,7 @@ use anyhow::{Context, Result};
 use crate::adapter::config::claude_home;
 use crate::adapter::harness::{
     AnalyzeStats, Harness, Site, catalog_surfaces, file_fingerprint, load_agents, load_claude_md,
-    load_hooks, load_mcp, load_rules, load_skills,
+    load_hooks, load_mcp, load_rules, load_skills, restat_matches,
 };
 use crate::adapter::transcript::{
     CLAUDE_ANALYZER_META_KEY, CLAUDE_ANALYZER_VERSION, count_permission_denials,
@@ -240,9 +240,14 @@ pub fn analyze(projects: Option<PathBuf>, db: &Path) -> Result<AnalyzeStats> {
                 .tool_errors(&error_rows)
                 .work_events(&work_rows),
         )?;
-        if let Some((mtime, _)) = fingerprint {
+        if let Some((mtime, _)) = fingerprint
+            && restat_matches(fingerprint, file_fingerprint(&transcript))
+        {
             // Record the size actually consumed, so a tail appended after the
             // read shows a mismatch next run instead of being skipped forever.
+            // The re-stat above refuses the stamp when the file moved while it
+            // was read: the previous stamp then stays, and the next run
+            // re-ingests instead of skipping on a stale stamp.
             store.record_ingested_file(&path_str, mtime, text.len() as i64)?;
         }
         sessions += 1;
@@ -529,5 +534,57 @@ mod tests {
         );
         // Idempotent: an already-folded root stays put.
         assert_eq!(normalize_root("/tmp/example/repo"), "/tmp/example/repo");
+    }
+
+    // ---- PBI C11: a mid-read append breaks the re-stat match ----
+
+    /// One synthetic transcript under a scratch dir — never a real transcript
+    /// (`.claude/rules/session-data-privacy.md`).
+    fn restat_fixture(name: &str) -> (PathBuf, PathBuf) {
+        let dir = std::env::temp_dir().join(format!(
+            "saniwalens-claude-restat-test-{name}-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("transcript.jsonl");
+        std::fs::write(&path, "aaaa").unwrap();
+        (dir, path)
+    }
+
+    #[test]
+    fn a_mid_read_append_breaks_the_restat_match() {
+        // The production race in miniature: stat, then the file grows before
+        // the post-read re-stat. The gate `analyze` stamps through must
+        // refuse, so the grown file is re-ingested next run, never skipped.
+        let (dir, path) = restat_fixture("drift");
+        let base = std::time::SystemTime::UNIX_EPOCH
+            + std::time::Duration::new(1_700_000_100, 100_000_000);
+        set_mtime(&path, base);
+        let pre = crate::adapter::harness::file_fingerprint(&path).unwrap();
+        std::fs::write(&path, "aaaabbbb").unwrap();
+        set_mtime(&path, base + std::time::Duration::from_millis(500));
+        let post = crate::adapter::harness::file_fingerprint(&path).unwrap();
+        assert_ne!(pre, post, "the drift fixture must move the fingerprint");
+        assert!(
+            !crate::adapter::harness::restat_matches(Some(pre), Some(post)),
+            "a file that grew mid-read must not be stamped"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn an_untouched_file_passes_the_restat_match() {
+        // The gate must not add re-ingests on the quiet path: an unchanged
+        // file stats identically twice, so the stamp proceeds as before.
+        let (dir, path) = restat_fixture("quiet");
+        let pre = crate::adapter::harness::file_fingerprint(&path).unwrap();
+        let post = crate::adapter::harness::file_fingerprint(&path).unwrap();
+        assert!(crate::adapter::harness::restat_matches(
+            Some(pre),
+            Some(post)
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

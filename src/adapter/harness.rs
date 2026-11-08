@@ -567,6 +567,18 @@ pub(crate) fn file_fingerprint(path: &Path) -> Option<(i64, i64)> {
         .as_nanos() as i64;
     Some((mtime, meta.len() as i64))
 }
+
+/// Whether a post-read re-stat agrees with the pre-read fingerprint: the
+/// stamp records "this content was ingested", so it may only be written when
+/// the source did not move while it was read. Any drift — or a stat failing
+/// on either side — refuses the stamp, and the next run re-ingests instead
+/// of skipping on a stale stamp (`pbi/2026-11-09-02-fix-fingerprint-restat.md`).
+pub(crate) fn restat_matches(pre: Option<(i64, i64)>, post: Option<(i64, i64)>) -> bool {
+    match (pre, post) {
+        (Some(before), Some(after)) => before == after,
+        _ => false,
+    }
+}
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -924,5 +936,37 @@ mod tests {
         ));
         let _ = std::fs::remove_file(&missing);
         assert_eq!(file_fingerprint(&missing), None);
+    }
+
+    // ---- PBI C11: the post-read re-stat gate ----
+
+    #[test]
+    fn a_matching_restat_agrees_to_stamp() {
+        // No drift between the pre-read stat and the post-read re-stat: the
+        // stamp may record what was read.
+        assert!(restat_matches(Some((100, 4)), Some((100, 4))));
+    }
+
+    #[test]
+    fn an_mtime_drift_refuses_the_stamp() {
+        // The file moved while it was read: stamping would pin content older
+        // than the fingerprint, so the next run must re-ingest instead.
+        assert!(!restat_matches(Some((100, 4)), Some((200, 4))));
+    }
+
+    #[test]
+    fn a_size_drift_refuses_the_stamp() {
+        // An append that kept the mtime (coarse clock, racing writer) still
+        // refuses: either half of the pair drifting aborts the stamp.
+        assert!(!restat_matches(Some((100, 4)), Some((100, 9))));
+    }
+
+    #[test]
+    fn a_failed_stat_on_either_side_refuses_the_stamp() {
+        // Fail closed: a file that cannot be stat'ed before or after the read
+        // is never stamped, so it is re-ingested next run, never skipped.
+        assert!(!restat_matches(None, Some((100, 4))));
+        assert!(!restat_matches(Some((100, 4)), None));
+        assert!(!restat_matches(None, None));
     }
 }

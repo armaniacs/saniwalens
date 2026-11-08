@@ -2,7 +2,7 @@
 //! `task_metadata.json` names files gets `file_read` events; a task without
 //! metadata ingests exactly as before. Synthetic task dirs only.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 mod common;
 use common::ScratchDir;
