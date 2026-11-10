@@ -178,20 +178,20 @@ impl AdvisorLaunch for ProcessAdvisor {
 /// a last line, so every exit — error return, failure bail, or panic unwind —
 /// deletes the secret file. Modeled on `HeadlessRun` (`headless.rs`), which
 /// owns the run log and the child the same way.
-struct BriefingFile {
+pub(crate) struct BriefingFile {
     path: Option<PathBuf>,
 }
 
 impl BriefingFile {
     /// Take ownership of the pointer file at `path`.
-    fn new(path: PathBuf) -> Self {
+    pub(crate) fn new(path: PathBuf) -> Self {
         Self { path: Some(path) }
     }
 
     /// The path the argv pointer closes over. The guard must outlive the
     /// advisor run: dropping it first would pull the file while the advisor
     /// still needs it.
-    fn path(&self) -> &Path {
+    pub(crate) fn path(&self) -> &Path {
         self.path.as_ref().expect("the briefing file is owned")
     }
 }
@@ -304,7 +304,7 @@ pub(crate) fn private_temp_path(prefix: &str, ext: &str) -> PathBuf {
 /// Write `contents` to a fresh file in the temp dir. Used for the optimization
 /// briefing, which may hold sensitive paths/excerpts and must not sit on argv or
 /// be world-readable.
-fn write_private_tempfile(contents: &str) -> Result<PathBuf> {
+pub(crate) fn write_private_tempfile(contents: &str) -> Result<PathBuf> {
     let path = private_temp_path("saniwalens-briefing", "md");
     write_private_file(&path, contents)?;
     Ok(path)

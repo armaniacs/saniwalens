@@ -2,9 +2,10 @@ use std::io::{BufRead, IsTerminal, Write};
 use std::path::Path;
 
 use crate::adapter::harness::{Harness, home_dir};
+use crate::core::optimize::{AdvisorLanguage, RunMode};
 use crate::core::period::TimeRange;
 use crate::core::scope::ScopeFilter;
-use crate::session::{SessionEnv, config_file_path, env_roots, resolve_cli};
+use crate::session::{Session, SessionEnv, config_file_path, env_roots, resolve_cli_with_language};
 use crate::store::Store;
 
 use super::super::report::Format;
@@ -19,18 +20,37 @@ pub(crate) enum Entry {
     Guide {
         harness: Option<String>,
         profile: Option<String>,
+        language: Option<String>,
     },
     /// Anything else: normal clap parsing (today's behavior, unchanged).
     Normal,
 }
 
-/// Pure argv classifier: `--harness` / `--profile` values are presets (both
-/// `--flag value` and `--flag=value` forms), `tui`
+impl Entry {
+    /// Build a guide entry from clap's already-parsed globals, for the
+    /// explicit `tui` arm (`cli/mod.rs`): the values ride the entry instead
+    /// of another parameter, so the shell stays within its line budget.
+    pub(crate) fn preset(
+        harness: Option<String>,
+        profile: Option<String>,
+        language: Option<String>,
+    ) -> Self {
+        Entry::Guide {
+            harness,
+            profile,
+            language,
+        }
+    }
+}
+
+/// Pure argv classifier: `--harness` / `--profile` / `--language` values are
+/// presets (both `--flag value` and `--flag=value` forms), `tui`
 /// is the explicit entry (flags after it still count as presets), a `-` flag
 /// or any other token is a real command.
 pub(crate) fn guide_entry(argv: &[String]) -> Entry {
     let mut harness: Option<String> = None;
     let mut profile: Option<String> = None;
+    let mut language: Option<String> = None;
     let mut args = argv.iter().skip(1);
     while let Some(arg) = args.next() {
         if let Some(value) = arg.strip_prefix("--harness=") {
@@ -43,6 +63,11 @@ pub(crate) fn guide_entry(argv: &[String]) -> Entry {
                 return Entry::Normal;
             }
             profile = Some(value.to_string());
+        } else if let Some(value) = arg.strip_prefix("--language=") {
+            if value.is_empty() {
+                return Entry::Normal;
+            }
+            language = Some(value.to_string());
         } else if arg == "--harness" {
             match args.next() {
                 // A `-` token in the value position is a flag, not a preset:
@@ -55,6 +80,11 @@ pub(crate) fn guide_entry(argv: &[String]) -> Entry {
                 Some(value) if !value.starts_with('-') => profile = Some(value.clone()),
                 _ => return Entry::Normal,
             }
+        } else if arg == "--language" {
+            match args.next() {
+                Some(value) if !value.starts_with('-') => language = Some(value.clone()),
+                _ => return Entry::Normal,
+            }
         } else if arg != "tui" {
             // A `-` flag (--help, --version, …) or a real subcommand:
             // clap owns this invocation, not the guide.
@@ -63,7 +93,23 @@ pub(crate) fn guide_entry(argv: &[String]) -> Entry {
     }
     // End of argv with no subcommand or flag: guide entry. An explicit `tui`
     // needs no separate handling — reaching here means clap has nothing to parse.
-    Entry::Guide { harness, profile }
+    Entry::Guide {
+        harness,
+        profile,
+        language,
+    }
+}
+
+/// The pre-parse guide check for `run()`: classify argv, and on a guide
+/// invocation with both stdio streams on a terminal, hand back the entry to
+/// run. `None` means normal clap parsing (today's behavior, unchanged) —
+/// either a real command owns the invocation, or there is no terminal and
+/// the guide must not start.
+pub(crate) fn guide_entry_if_terminal(argv: &[String]) -> Option<Entry> {
+    match guide_entry(argv) {
+        entry @ Entry::Guide { .. } if terminal_available() => Some(entry),
+        _ => None,
+    }
 }
 
 /// The three reports the guide offers (design doc §2: v0.5.4 scope).
@@ -120,14 +166,31 @@ pub(crate) fn equivalent_command(
     format!("saniwalens{harness_part} {command}{scope_part}")
 }
 
+/// Whether the guide's inline next step hands off (`--apply`): a headless
+/// harness has no dialog partner in the seeded session, so the plan is saved
+/// and the harness's own interactive session opens on it; an interactive
+/// harness already sits in a dialog, so the plain inline optimize applies its
+/// own plan. Reads the harness's run-mode data (`launch_command`), so a new
+/// harness lands in the adapter, not in a name match here.
+pub(crate) fn next_step_runs_handoff(harness: &Harness) -> bool {
+    harness.launch_command().2 == RunMode::Headless
+}
+
 /// The post-run next step: `optimize` is out of the guide's scope, but every
 /// guided run points at it with the matching `--scope` so the cause can be
-/// dug into by hand. The table test below pins all three scopes.
-pub(crate) fn next_step_line(scope: ScopeChoice) -> String {
-    match scope {
+/// dug into by hand. Headless-aware: a headless harness hands off (`--apply`),
+/// so its line names the flag the inline run actually uses. The table tests
+/// below pin all three scopes on both sides of the handoff branch.
+pub(crate) fn next_step_line(harness: &Harness, scope: ScopeChoice) -> String {
+    let base = match scope {
         ScopeChoice::All => "saniwalens optimize".to_string(),
         ScopeChoice::Global => "saniwalens optimize --scope global".to_string(),
         ScopeChoice::Project => "saniwalens optimize --scope project".to_string(),
+    };
+    if next_step_runs_handoff(harness) {
+        format!("{base} --apply")
+    } else {
+        base
     }
 }
 
@@ -298,7 +361,7 @@ pub(crate) fn ask_save<R: BufRead, W: Write>(
 ) -> anyhow::Result<Option<String>> {
     writeln!(
         output,
-        "この設定を保存しますか? (config: {})",
+        "使っているエージェント ({harness}) の設定を保存しますか? (config: {})",
         path.display()
     )?;
     let pick = ask_choice(
@@ -308,7 +371,7 @@ pub(crate) fn ask_save<R: BufRead, W: Write>(
         &[
             "保存しない",
             "既定のharnessにする (default_harness)",
-            "profileに保存する",
+            "名前付きで保存する (--profile 名 で呼び出せる)",
         ],
         0,
     )?;
@@ -360,6 +423,23 @@ fn ask_profile_name<R: BufRead, W: Write>(
     }
 }
 
+/// y/N confirmation: `y` (any case) means yes; anything else — `n`,
+/// empty, `q`, EOF — means no. `q` never quits the guide here; only the
+/// y/N answer matters. Generic over I/O so `Cursor`-driven tests cover
+/// every answer without touching stdin.
+pub(crate) fn ask_yes_no<R: BufRead, W: Write>(
+    input: &mut R,
+    output: &mut W,
+    prompt: &str,
+) -> anyhow::Result<bool> {
+    writeln!(output, "{prompt}")?;
+    let mut line = String::new();
+    if input.read_line(&mut line)? == 0 {
+        return Ok(false);
+    }
+    Ok(line.trim().eq_ignore_ascii_case("y"))
+}
+
 /// Thin filesystem wrapper: create parents, compare against the snapshot the
 /// dialog showed, write to a pid-unique sibling temp file, then rename into
 /// place — so a mid-write kill leaves either the old or the new config, never
@@ -405,13 +485,15 @@ fn persist_config(path: &Path, text: &str, expected: Option<&str>) -> anyhow::Re
 
 /// Shared open + report call for the scoped table views (waste, failures).
 /// Doctor keeps its own open: its `--format` set is narrower (table|json).
+/// Returns the scope filter the report used, so the guide's inline optimize
+/// reuses the identical filter without re-parsing.
 fn run_scoped(
     dispatch: &WindowedDispatch,
     scope_flag: Option<&str>,
     period: &PeriodArgs,
     read: &ReadArgs,
     report: fn(&Store, &Harness, &ScopeFilter, TimeRange, Format) -> anyhow::Result<()>,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<ScopeFilter> {
     let opened = dispatch.open_scoped(scope_flag, None, period, read, run_analyze)?;
     let (windowed, filter) = opened.into_parts();
     report(
@@ -420,18 +502,43 @@ fn run_scoped(
         &filter,
         windowed.window,
         windowed.format,
-    )
+    )?;
+    Ok(filter)
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn run_guide<R: BufRead, W: Write>(
-    harness: &Harness,
-    dispatch: &WindowedDispatch,
+    initial: &Harness,
+    language: AdvisorLanguage,
+    has_preset: bool,
+    config_db: Option<&Path>,
+    env: &SessionEnv,
     input: &mut R,
     output: &mut W,
     config_path: Option<&Path>,
 ) -> anyhow::Result<()> {
-    // Step 1 (design §2): confirm, not re-ask ― Enter keeps the resolved value.
-    writeln!(output, "使っているエージェント: {}", harness.label())?;
+    // Step 1 (design §2: harness → purpose → scope → execution): with no
+    // preset the harness is an asked choice defaulting to the resolved value;
+    // a preset skips the question and keeps the resolved value.
+    let mut current = *initial;
+    if !has_preset {
+        let options: Vec<&str> = Harness::ALL.iter().map(|harness| harness.label()).collect();
+        let default = Harness::ALL
+            .iter()
+            .position(|harness| harness == initial)
+            .unwrap_or(0);
+        match ask_choice(
+            input,
+            output,
+            "使っているエージェントを選んでください（q で終了）",
+            &options,
+            default,
+        )? {
+            Choice::Quit => return Ok(()),
+            Choice::Pick(i) => current = Harness::ALL[i],
+        }
+    }
+    writeln!(output, "使っているエージェント: {}", current.label())?;
 
     let period = PeriodArgs {
         since: None,
@@ -474,14 +581,22 @@ pub(crate) fn run_guide<R: BufRead, W: Write>(
             _ => ScopeChoice::Project,
         };
         // Step 4: show the command, run it, reprint it.
-        let command = equivalent_command(harness, purpose, scope);
+        let command = equivalent_command(&current, purpose, scope);
         writeln!(output, "実行: {command}")?;
         let scope_flag: Option<&str> = match scope {
             ScopeChoice::All => None,
             ScopeChoice::Global => Some("global"),
             ScopeChoice::Project => Some("project"),
         };
-        match purpose {
+        // The selected harness owns the report: a fresh dispatch per run
+        // borrows it, so the store guard sees the chosen harness, not the
+        // one resolved before the question.
+        let dispatch = WindowedDispatch {
+            harness: &current,
+            config_db,
+            env,
+        };
+        let filter: ScopeFilter = match purpose {
             Purpose::Doctor => {
                 let opened = dispatch.open_scoped_table_json(
                     scope_flag,
@@ -498,27 +613,47 @@ pub(crate) fn run_guide<R: BufRead, W: Write>(
                     windowed.window,
                     windowed.format,
                 )?;
+                filter
             }
-            Purpose::Waste => {
-                run_scoped(dispatch, scope_flag, &period, &read, waste)?;
-            }
-            Purpose::Failures => {
-                run_scoped(dispatch, scope_flag, &period, &read, failures)?;
-            }
-        }
+            Purpose::Waste => run_scoped(&dispatch, scope_flag, &period, &read, waste)?,
+            Purpose::Failures => run_scoped(&dispatch, scope_flag, &period, &read, failures)?,
+        };
         writeln!(output, "実行したコマンド: {command}")?;
         writeln!(
             output,
             "次の一手: {} で原因の深掘りと対策提案",
-            next_step_line(scope)
+            next_step_line(&current, scope)
         )?;
+        if ask_yes_no(input, output, "次の一手を実行しますか? [y/N]")? {
+            let line = next_step_line(&current, scope);
+            writeln!(output, "実行: {line}")?;
+            // Same harness, same scope, and same language as the resolved
+            // invocation: the report already refreshed the store, so frozen
+            // skips a second analyze. A headless harness has no dialog partner
+            // in the seeded session, so the next step hands off (--apply): the
+            // plan is saved and the harness's own interactive session opens on
+            // it. An interactive harness already sits in a dialog, so the
+            // plain inline optimize applies its own plan. The branch reads
+            // the harness's run-mode data, never its name. A failed launch
+            // must not end the guide.
+            let attempted = guide_session(&current, language, config_db, env).and_then(|sess| {
+                if next_step_runs_handoff(&current) {
+                    super::super::handoff::run_apply(&sess, None, &filter, true, None, env)
+                } else {
+                    super::super::optimize(&sess, None, &filter, true, false, false, None)
+                }
+            });
+            if let Err(e) = attempted {
+                writeln!(output, "optimize に失敗しました: {e:#}")?;
+            }
+        }
         if let Some(path) = config_path {
             let existing = match std::fs::read_to_string(path) {
                 Ok(text) => Some(text),
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
                 Err(e) => return Err(e.into()),
             };
-            if let Some(text) = ask_save(input, output, existing.as_deref(), harness.label(), path)?
+            if let Some(text) = ask_save(input, output, existing.as_deref(), current.label(), path)?
             {
                 persist_config(path, &text, existing.as_deref())?;
             }
@@ -543,25 +678,53 @@ pub(crate) fn terminal_available() -> bool {
         || (std::io::stdin().is_terminal() && std::io::stdout().is_terminal())
 }
 
-pub(crate) fn run_guide_entry(harness: Option<&str>, profile: Option<&str>) -> anyhow::Result<()> {
+/// The guide's inline next-step session: the same resolve-then-open shape as
+/// the normal `optimize` arm (`cli/mod.rs`) — resolve the store path, open it,
+/// then carry the resolved advisor language on the session, so the inline run
+/// renders the same language without naming the flag.
+fn guide_session(
+    current: &Harness,
+    language: AdvisorLanguage,
+    config_db: Option<&Path>,
+    env: &SessionEnv,
+) -> anyhow::Result<Session> {
+    let path = Session::resolve_path(current, None, config_db, env)?;
+    let mut sess = Session::open_resolved(current, path)?;
+    sess.language = language;
+    Ok(sess)
+}
+
+pub(crate) fn run_guide_entry(entry: Entry) -> anyhow::Result<()> {
+    let Entry::Guide {
+        harness,
+        profile,
+        language,
+    } = entry
+    else {
+        anyhow::bail!("run_guide_entry needs a guide entry");
+    };
     let roots = env_roots();
     let env = SessionEnv {
         state_home: roots.state_home.as_deref(),
         home: home_dir(),
         config_home: roots.config_home.as_deref(),
     };
-    let resolved = resolve_cli(harness, profile, &env)?;
-    let dispatch = WindowedDispatch {
-        harness: &resolved.harness,
-        config_db: resolved.config_db.as_deref(),
-        env: &env,
-    };
+    let resolved = resolve_cli_with_language(
+        harness.as_deref(),
+        profile.as_deref(),
+        language.as_deref(),
+        &env,
+    )?;
+    let has_preset = harness.is_some() || profile.is_some();
     let stdin = std::io::stdin();
     let stdout = std::io::stdout();
     let config_path = config_file_path(roots.config_home.as_deref(), home_dir());
     run_guide(
         &resolved.harness,
-        &dispatch,
+        resolved.language,
+        has_preset,
+        resolved.config_db.as_deref(),
+        &env,
         &mut stdin.lock(),
         &mut stdout.lock(),
         config_path.as_deref(),
@@ -579,7 +742,8 @@ mod tests {
             guide_entry(&argv),
             Entry::Guide {
                 harness: None,
-                profile: None
+                profile: None,
+                language: None
             }
         ));
     }
@@ -593,7 +757,7 @@ mod tests {
         ];
         assert!(matches!(
             guide_entry(&argv),
-            Entry::Guide { harness: Some(h), profile: None } if h == "kilocode"
+            Entry::Guide { harness: Some(h), profile: None, language: None } if h == "kilocode"
         ));
     }
 
@@ -613,7 +777,7 @@ mod tests {
         ];
         assert!(matches!(
             guide_entry(&argv),
-            Entry::Guide { harness: Some(h), profile: None } if h == "kilocode"
+            Entry::Guide { harness: Some(h), profile: None, language: None } if h == "kilocode"
         ));
     }
 
@@ -629,7 +793,7 @@ mod tests {
         ];
         assert!(matches!(
             guide_entry(&argv),
-            Entry::Guide { harness: Some(h), profile: Some(p) } if h == "claude" && p == "w"
+            Entry::Guide { harness: Some(h), profile: Some(p), language: None } if h == "claude" && p == "w"
         ));
     }
 
@@ -683,7 +847,7 @@ mod tests {
         let argv = vec!["saniwalens".to_string(), "--harness=kilocode".to_string()];
         assert!(matches!(
             guide_entry(&argv),
-            Entry::Guide { harness: Some(h), profile: None } if h == "kilocode"
+            Entry::Guide { harness: Some(h), profile: None, language: None } if h == "kilocode"
         ));
     }
 
@@ -696,7 +860,7 @@ mod tests {
         ];
         assert!(matches!(
             guide_entry(&argv),
-            Entry::Guide { harness: None, profile: Some(p) } if p == "w"
+            Entry::Guide { harness: None, profile: Some(p), language: None } if p == "w"
         ));
     }
 
@@ -707,12 +871,67 @@ mod tests {
     }
 
     #[test]
+    fn language_flag_becomes_the_preset_not_a_subcommand() {
+        let argv = vec![
+            "saniwalens".to_string(),
+            "--language".to_string(),
+            "ja".to_string(),
+        ];
+        assert!(matches!(
+            guide_entry(&argv),
+            Entry::Guide { harness: None, profile: None, language: Some(l) } if l == "ja"
+        ));
+    }
+
+    #[test]
+    fn language_equals_form_after_tui_becomes_the_preset() {
+        let argv = vec![
+            "saniwalens".to_string(),
+            "tui".to_string(),
+            "--language=ja".to_string(),
+        ];
+        assert!(matches!(
+            guide_entry(&argv),
+            Entry::Guide { harness: None, profile: None, language: Some(l) } if l == "ja"
+        ));
+    }
+
+    #[test]
+    fn language_combines_with_the_harness_preset() {
+        let argv = vec![
+            "saniwalens".to_string(),
+            "--harness".to_string(),
+            "kilocode".to_string(),
+            "--language".to_string(),
+            "ja".to_string(),
+        ];
+        assert!(matches!(
+            guide_entry(&argv),
+            Entry::Guide { harness: Some(h), profile: None, language: Some(l) }
+                if h == "kilocode" && l == "ja"
+        ));
+    }
+
+    #[test]
+    fn trailing_language_without_a_value_is_normal() {
+        let argv = vec!["saniwalens".to_string(), "--language".to_string()];
+        assert!(matches!(guide_entry(&argv), Entry::Normal));
+    }
+
+    #[test]
+    fn empty_language_equals_value_is_normal() {
+        let argv = vec!["saniwalens".to_string(), "--language=".to_string()];
+        assert!(matches!(guide_entry(&argv), Entry::Normal));
+    }
+
+    #[test]
     fn a_flag_in_the_harness_value_position_is_normal() {
         // `--harness --help` must reach clap's help, not the guide: a value
         // starting with `-` is a flag, not a preset.
         for argv in [
             vec!["saniwalens", "--harness", "--help"],
             vec!["saniwalens", "--profile", "--version"],
+            vec!["saniwalens", "--language", "--help"],
             vec!["saniwalens", "--harness", "-x"],
             vec!["saniwalens", "tui", "--harness", "--help"],
         ] {
@@ -773,15 +992,47 @@ mod tests {
 
     #[test]
     fn next_step_line_points_at_optimize_with_the_matching_scope() {
-        assert_eq!(next_step_line(ScopeChoice::All), "saniwalens optimize");
+        for harness in [&Harness::Claude, &Harness::Kilocode] {
+            assert_eq!(
+                next_step_line(harness, ScopeChoice::All),
+                "saniwalens optimize"
+            );
+            assert_eq!(
+                next_step_line(harness, ScopeChoice::Global),
+                "saniwalens optimize --scope global"
+            );
+            assert_eq!(
+                next_step_line(harness, ScopeChoice::Project),
+                "saniwalens optimize --scope project"
+            );
+        }
+    }
+
+    #[test]
+    fn next_step_line_appends_apply_for_a_headless_harness() {
         assert_eq!(
-            next_step_line(ScopeChoice::Global),
-            "saniwalens optimize --scope global"
+            next_step_line(&Harness::Opencode, ScopeChoice::All),
+            "saniwalens optimize --apply"
         );
         assert_eq!(
-            next_step_line(ScopeChoice::Project),
-            "saniwalens optimize --scope project"
+            next_step_line(&Harness::Opencode, ScopeChoice::Global),
+            "saniwalens optimize --scope global --apply"
         );
+        assert_eq!(
+            next_step_line(&Harness::Opencode, ScopeChoice::Project),
+            "saniwalens optimize --scope project --apply"
+        );
+    }
+
+    #[test]
+    fn next_step_handoff_follows_the_harness_run_mode() {
+        // PBI BDD: a headless harness hands off (--apply), an interactive one
+        // runs the plain inline optimize. The branch reads the harness's
+        // run-mode data, never its name: one arm per mode, pinned for every
+        // harness.
+        assert!(next_step_runs_handoff(&Harness::Opencode));
+        assert!(!next_step_runs_handoff(&Harness::Claude));
+        assert!(!next_step_runs_handoff(&Harness::Kilocode));
     }
 
     #[test]
@@ -825,26 +1076,169 @@ mod tests {
     }
 
     #[test]
-    fn quitting_at_the_first_prompt_runs_no_report() {
-        // No store, no harness roots, no dispatch work: `q` exits before any I/O
-        // beyond the prompt. The harness value is never read on this path.
+    fn no_preset_asks_harness_first_and_q_quits_before_any_report() {
+        // With no preset the guide asks which harness to use first; `q`
+        // there quits before any report or store work.
         let harness = Harness::Claude;
         let env = SessionEnv {
             state_home: None,
             home: Some("/nonexistent"),
             config_home: None,
         };
-        let dispatch = WindowedDispatch {
-            harness: &harness,
-            config_db: None,
-            env: &env,
+        let mut input = std::io::Cursor::new("q\n");
+        let mut output = Vec::new();
+        run_guide(
+            &harness,
+            AdvisorLanguage::En,
+            false,
+            None,
+            &env,
+            &mut input,
+            &mut output,
+            None,
+        )
+        .unwrap();
+        let shown = String::from_utf8(output).unwrap();
+        assert!(
+            shown.contains("エージェントを選んで"),
+            "the harness question comes first: {shown}"
+        );
+        assert!(!shown.contains("実行:"), "no report runs: {shown}");
+    }
+
+    #[test]
+    fn no_preset_pick_opencode_then_q_at_purpose_runs_nothing() {
+        // Choosing 2 (opencode) then `q` at purpose quits without running;
+        // the harness prompt appeared and no command was echoed.
+        let harness = Harness::Claude;
+        let env = SessionEnv {
+            state_home: None,
+            home: Some("/nonexistent"),
+            config_home: None,
+        };
+        let mut input = std::io::Cursor::new("2\nq\n");
+        let mut output = Vec::new();
+        run_guide(
+            &harness,
+            AdvisorLanguage::En,
+            false,
+            None,
+            &env,
+            &mut input,
+            &mut output,
+            None,
+        )
+        .unwrap();
+        let shown = String::from_utf8(output).unwrap();
+        assert!(
+            shown.contains("エージェントを選んで"),
+            "the harness prompt appeared: {shown}"
+        );
+        assert!(
+            shown.contains("使っているエージェント: opencode"),
+            "the selected harness is shown: {shown}"
+        );
+        assert!(!shown.contains("実行:"), "no report runs: {shown}");
+    }
+
+    #[test]
+    fn preset_skips_the_harness_question() {
+        // With a preset the guide uses the resolved harness directly:
+        // no question is asked, only the display line is shown.
+        let harness = Harness::Kilocode;
+        let env = SessionEnv {
+            state_home: None,
+            home: Some("/nonexistent"),
+            config_home: None,
         };
         let mut input = std::io::Cursor::new("q\n");
         let mut output = Vec::new();
-        run_guide(&harness, &dispatch, &mut input, &mut output, None).unwrap();
+        run_guide(
+            &harness,
+            AdvisorLanguage::En,
+            true,
+            None,
+            &env,
+            &mut input,
+            &mut output,
+            None,
+        )
+        .unwrap();
+        let shown = String::from_utf8(output).unwrap();
+        assert!(
+            !shown.contains("エージェントを選んで"),
+            "no harness question with a preset: {shown}"
+        );
+        assert!(
+            shown.contains("使っているエージェント: kilocode"),
+            "the resolved harness is shown: {shown}"
+        );
+        assert!(
+            shown.contains("健康診断"),
+            "the purpose prompt is reached: {shown}"
+        );
+        assert!(!shown.contains("実行:"), "no report runs: {shown}");
+    }
+
+    #[test]
+    fn quitting_at_the_first_prompt_runs_no_report() {
+        // No store, no harness roots, no dispatch work: the harness default
+        // then `q` at purpose exits before any report I/O. The store value
+        // is never read on this path.
+        let harness = Harness::Claude;
+        let env = SessionEnv {
+            state_home: None,
+            home: Some("/nonexistent"),
+            config_home: None,
+        };
+        let mut input = std::io::Cursor::new("\nq\n");
+        let mut output = Vec::new();
+        run_guide(
+            &harness,
+            AdvisorLanguage::En,
+            false,
+            None,
+            &env,
+            &mut input,
+            &mut output,
+            None,
+        )
+        .unwrap();
         let shown = String::from_utf8(output).unwrap();
         assert!(shown.contains("健康診断"));
         assert!(!shown.contains("実行:"));
+    }
+
+    #[test]
+    fn non_claude_default_is_shown_when_empty_input_keeps_it() {
+        // The harness prompt defaults to the resolved value, not the first
+        // choice: empty input with an opencode resolution shows opencode
+        // and quits at purpose before any report.
+        let harness = Harness::Opencode;
+        let env = SessionEnv {
+            state_home: None,
+            home: Some("/nonexistent"),
+            config_home: None,
+        };
+        let mut input = std::io::Cursor::new("\nq\n");
+        let mut output = Vec::new();
+        run_guide(
+            &harness,
+            AdvisorLanguage::En,
+            false,
+            None,
+            &env,
+            &mut input,
+            &mut output,
+            None,
+        )
+        .unwrap();
+        let shown = String::from_utf8(output).unwrap();
+        assert!(
+            shown.contains("使っているエージェント: opencode"),
+            "the resolved default is kept: {shown}"
+        );
+        assert!(!shown.contains("実行:"), "no report runs: {shown}");
     }
 
     #[test]
@@ -934,6 +1328,24 @@ mod tests {
     }
 
     #[test]
+    fn ask_save_prompt_names_the_harness_label() {
+        // The save prompt must name whose setting it is: after a long plan
+        // output "この設定" alone reads as the plan just shown, but the
+        // prompt means the harness choice.
+        for harness in ["claude", "opencode", "kilocode"] {
+            let mut input = std::io::Cursor::new("1\n");
+            let mut output = Vec::new();
+            let path = std::path::Path::new("/tmp/saniwalens-test-config.toml");
+            ask_save(&mut input, &mut output, None, harness, path).unwrap();
+            let shown = String::from_utf8(output).unwrap();
+            assert!(
+                shown.contains(harness),
+                "the prompt names the harness ({harness}): {shown}"
+            );
+        }
+    }
+
+    #[test]
     fn ask_save_skip_returns_none() {
         let mut input = std::io::Cursor::new("1\n");
         let mut output = Vec::new();
@@ -1014,6 +1426,30 @@ mod tests {
     }
 
     #[test]
+    fn ask_yes_no_y_means_yes() {
+        for stdin in ["y\n", "Y\n", " y \n"] {
+            let mut input = std::io::Cursor::new(stdin);
+            let mut output = Vec::new();
+            assert!(
+                ask_yes_no(&mut input, &mut output, "次の一手を実行しますか? [y/N]").unwrap(),
+                "{stdin:?} must mean yes"
+            );
+        }
+    }
+
+    #[test]
+    fn ask_yes_no_n_empty_eof_and_q_mean_no() {
+        for stdin in ["n\n", "N\n", "\n", "q\n", "Q\n", ""] {
+            let mut input = std::io::Cursor::new(stdin);
+            let mut output = Vec::new();
+            assert!(
+                !ask_yes_no(&mut input, &mut output, "次の一手を実行しますか? [y/N]").unwrap(),
+                "{stdin:?} must mean no"
+            );
+        }
+    }
+
+    #[test]
     fn persist_config_round_trip_through_a_pid_unique_dir() {
         let dir =
             std::env::temp_dir().join(format!("saniwalens-guide-test-{}", std::process::id()));
@@ -1081,5 +1517,82 @@ mod tests {
             .expect_err("deleted meanwhile must refuse");
         assert!(!path.exists());
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn guide_inline_next_step_carries_a_ja_setting_into_the_prompt() {
+        // PBI 2026-11-10-08 BDD "ガイドでも ja が効く": with
+        // `language = "ja"` resolved, the prompt the guide's inline next step
+        // composes must carry the single language sentence. The session is
+        // built through the guide's own seam (`guide_session`), the same
+        // resolve-open-carry shape as the normal `optimize` arm.
+        use crate::core::optimize::{self as optimize_mod, AdvisorLanguage};
+        use crate::session::resolve_cli_with_language;
+
+        let dir =
+            std::env::temp_dir().join(format!("saniwalens-guide-lang-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let state = dir.join("state");
+        let env = SessionEnv {
+            state_home: Some(state.as_path()),
+            home: None,
+            config_home: None,
+        };
+        let resolved = resolve_cli_with_language(None, None, Some("ja"), &env).unwrap();
+        assert_eq!(resolved.language, AdvisorLanguage::Ja);
+        let sess = guide_session(&resolved.harness, resolved.language, None, &env).unwrap();
+        assert_eq!(sess.language, AdvisorLanguage::Ja);
+        let mut copy = sess.harness.copy();
+        copy.language = sess.language;
+        let prompt = optimize_mod::compose_prompt(
+            &optimize_mod::Findings::default(),
+            "s.db",
+            &ScopeFilter::All,
+            &copy,
+        );
+        let sentence = AdvisorLanguage::Ja.instruction_sentence().unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(
+            prompt.contains(sentence),
+            "the ja setting is lost on the guide path:\n{prompt}"
+        );
+    }
+
+    #[test]
+    fn guide_inline_next_step_without_a_setting_carries_no_sentence() {
+        // PBI 2026-11-10-08 BDD "未設定では従来どおり": with no language
+        // resolved, the guide's inline prompt carries no language sentence.
+        use crate::core::optimize::{self as optimize_mod, AdvisorLanguage};
+        use crate::session::resolve_cli_with_language;
+
+        let dir = std::env::temp_dir().join(format!(
+            "saniwalens-guide-lang-unset-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        let state = dir.join("state");
+        let env = SessionEnv {
+            state_home: Some(state.as_path()),
+            home: None,
+            config_home: None,
+        };
+        let resolved = resolve_cli_with_language(None, None, None, &env).unwrap();
+        assert_eq!(resolved.language, AdvisorLanguage::En);
+        let sess = guide_session(&resolved.harness, resolved.language, None, &env).unwrap();
+        assert_eq!(sess.language, AdvisorLanguage::En);
+        let mut copy = sess.harness.copy();
+        copy.language = sess.language;
+        let prompt = optimize_mod::compose_prompt(
+            &optimize_mod::Findings::default(),
+            "s.db",
+            &ScopeFilter::All,
+            &copy,
+        );
+        let sentence = AdvisorLanguage::Ja.instruction_sentence().unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(
+            !prompt.contains(sentence),
+            "unset output gained a sentence:\n{prompt}"
+        );
     }
 }

@@ -61,6 +61,7 @@ fn claude_copy() -> saniwalens::core::optimize::HarnessCopy {
         project_ref: ".claude / CLAUDE.md",
         instruction_file: "CLAUDE.md",
         config_inventory: "CLAUDE.md, rules, hooks, skills, and settings",
+        language: saniwalens::core::optimize::AdvisorLanguage::default(),
     }
 }
 

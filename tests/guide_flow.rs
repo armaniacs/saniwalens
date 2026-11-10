@@ -9,6 +9,18 @@
 //! database there, exit 1), so a scripted preset run cannot reach exit 0
 //! without seeding a harness database in the test. Reported as NEEDS_CONTEXT;
 //! not worked around here.
+//!
+//! NOTE: no E2E drives the inline next-step execution (`y` at the
+//! next-step question): answering yes launches a real advisor subprocess --
+//! the plain inline optimize on an interactive harness, the `--apply`
+//! handoff (plan save plus the harness's own dialog) on a headless one --
+//! which a scripted test must never spawn. The headless `y` display line
+//! (`saniwalens optimize --apply`, scope-matched) is therefore pinned by the
+//! `next_step_line` unit tests, not by a run below. The branch adds no new
+//! question,
+//! so every script below keeps its input positions: the execute answer is the
+//! 4th slot (9th on a looped second iteration), always No (empty line) here,
+//! and only the question's appearance is asserted.
 
 mod common;
 
@@ -55,9 +67,10 @@ fn stdout(out: &std::process::Output) -> String {
 
 #[test]
 fn defaults_flow_renders_report_echoes_command_and_writes_nothing() {
-    // Purpose / scope / save / continue all take the default: doctor over
-    // all history, no save, no second report.
-    let (dir, out) = run_guided("defaults", &[], "\n\n\n\n");
+    // Harness / purpose / scope / execute? / save / continue all take the
+    // default: doctor over all history, no inline optimize, no save, no
+    // second report.
+    let (dir, out) = run_guided("defaults", &[], "\n\n\n\n\n\n");
     assert!(
         out.status.success(),
         "defaults flow must exit 0: {}",
@@ -77,6 +90,10 @@ fn defaults_flow_renders_report_echoes_command_and_writes_nothing() {
         "the next step points at optimize: {shown}"
     );
     assert!(
+        shown.contains("次の一手を実行"),
+        "the guide offers to run the next step inline: {shown}"
+    );
+    assert!(
         !dir.join("cfg")
             .join("saniwalens")
             .join("config.toml")
@@ -87,8 +104,9 @@ fn defaults_flow_renders_report_echoes_command_and_writes_nothing() {
 
 #[test]
 fn default_save_writes_exactly_the_default_harness_line() {
-    // Purpose / scope default, save as default_harness, confirm, EOF ends it.
-    let (dir, out) = run_guided("default-save", &[], "\n\n2\ny\n");
+    // Harness / purpose / scope default, No to the inline optimize, save as
+    // default_harness, confirm, EOF ends it.
+    let (dir, out) = run_guided("default-save", &[], "\n\n\n\n2\ny\n");
     assert!(
         out.status.success(),
         "default save must exit 0: {}",
@@ -111,7 +129,9 @@ fn default_save_writes_exactly_the_default_harness_line() {
 fn profile_save_is_idempotent_across_two_runs() {
     // One scratch dir, two identical runs: the second must update the
     // `[profiles.work]` section in place, never duplicate it.
-    let script = "\n\n3\nwork\ny\n";
+    // Harness / purpose / scope default, No to the inline optimize, then
+    // the profile save answers.
+    let script = "\n\n\n\n3\nwork\ny\n";
     let (dir, first) = run_guided("profile-save", &[], script);
     assert!(
         first.status.success(),
@@ -162,10 +182,81 @@ fn profile_save_is_idempotent_across_two_runs() {
 }
 
 #[test]
+fn quit_at_harness_runs_no_report_and_touches_no_store() {
+    // `q` at the harness prompt quits before any report or save: the guide
+    // never opens the store, so no database file may appear. The trailing
+    // newline is never read (no report runs, so the execute question never
+    // appears); it keeps every scripted input carrying the new answer slot.
+    let (dir, out) = run_guided("quit-harness", &[], "q\n\n");
+    assert!(
+        out.status.success(),
+        "quitting must exit 0: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let shown = stdout(&out);
+    assert!(
+        shown.contains("使っているエージェントを選んで"),
+        "the harness prompt is shown: {shown}"
+    );
+    assert!(
+        !shown.contains("実行:"),
+        "no report runs, so no command is echoed: {shown}"
+    );
+    assert!(
+        !dir.join("state")
+            .join("saniwalens")
+            .join("saniwalens.db")
+            .exists(),
+        "analyze never ran, so no store file may exist"
+    );
+}
+
+#[test]
+fn pick_opencode_echoes_the_harness_command() {
+    // Choosing 2 (opencode) at the harness prompt flows the selected
+    // harness into the echoed command. The report itself cannot run here:
+    // the synthetic home holds no opencode database, so the binary exits
+    // non-zero after the echo — the echo line is the assertion. The trailing
+    // newline is never read (the report fails before the execute question).
+    let (_dir, out) = run_guided("pick-opencode", &[], "2\n\n\n\n\n");
+    let shown = stdout(&out);
+    assert!(
+        shown.contains("実行: saniwalens --harness opencode doctor"),
+        "the selected harness names the command: {shown}"
+    );
+}
+
+#[test]
+fn continue_y_loops_back_with_the_same_harness_and_asks_it_once() {
+    // Default harness, doctor over all history, No to the inline optimize,
+    // skip save, `y` continues: the second iteration runs doctor again with
+    // the same (default) harness, and the harness question appears exactly
+    // once. One extra No per iteration for the execute question.
+    let (_dir, out) = run_guided("loop-keeps-harness", &[], "\n\n\n\n\ny\n\n\n\n\nn\n");
+    assert!(
+        out.status.success(),
+        "looped flow must exit 0: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let shown = stdout(&out);
+    assert_eq!(
+        shown.matches("実行: saniwalens doctor").count(),
+        2,
+        "both iterations echo the kept harness command: {shown}"
+    );
+    assert_eq!(
+        shown.matches("使っているエージェントを選んで").count(),
+        1,
+        "the harness is asked once, then kept: {shown}"
+    );
+}
+
+#[test]
 fn quit_first_runs_no_report_and_touches_no_store() {
-    // `q` at the purpose prompt quits before any report or save: the guide
-    // never opens the store, so no database file may appear.
-    let (dir, out) = run_guided("quit-first", &[], "q\n");
+    // Harness default, then `q` at the purpose prompt quits before any
+    // report or save: the guide never opens the store, so no database file
+    // may appear. The trailing newline is never read (no report runs).
+    let (dir, out) = run_guided("quit-first", &[], "\nq\n\n");
     assert!(
         out.status.success(),
         "quitting must exit 0: {}",

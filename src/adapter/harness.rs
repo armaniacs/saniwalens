@@ -38,6 +38,23 @@ pub enum RunLine {
     Silent,
 }
 
+/// The plan text out of a headless run's rendered lines: the `Text` lines
+/// only, in stream order, joined for the `--apply` plan file. Progress
+/// markers and silent lines are JSON-event noise (`docs/specs/cli.md`:
+/// the plan file must be distinguishable from the raw log), so they never
+/// reach the file. Empty input yields no text — the handoff refuses to save
+/// an empty plan.
+pub fn extract_plan_text(lines: &[RunLine]) -> String {
+    lines
+        .iter()
+        .filter_map(|line| match line {
+            RunLine::Text(text) => Some(text.as_str()),
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 /// A headless run-line renderer: one raw stdout line turned into the
 /// [`RunLine`] the terminal shows. The signature is uniform so the shell's
 /// headless loop can run any harness's renderer without knowing its stream.
@@ -450,6 +467,8 @@ impl Harness {
     /// The plain harness data every prompt and briefing renders from —
     /// assembled here so the shell never spells `HarnessCopy` field by field
     /// and the core stays harness-agnostic (`core::optimize::HarnessCopy`).
+    /// The advisor language defaults to English here; the shell overwrites it
+    /// with the resolved setting before rendering any prompt.
     pub fn copy(&self) -> crate::core::optimize::HarnessCopy {
         crate::core::optimize::HarnessCopy {
             agent: self.display_name(),
@@ -460,6 +479,7 @@ impl Harness {
             project_ref: self.project_config_ref(),
             instruction_file: self.instruction_file(),
             config_inventory: self.config_inventory(),
+            language: crate::core::optimize::AdvisorLanguage::default(),
         }
     }
 
@@ -603,6 +623,24 @@ impl Harness {
             // A bare `kilo <text>` positional is treated as a file to open
             // (measured), not a prompt — `--prompt` is the TUI's message surface.
             Harness::Kilocode => ("kilo", &["--prompt"], RunMode::Interactive),
+        }
+    }
+
+    /// The interactive launch shape for the `--apply` handoff: the binary
+    /// plus any leading argv the harness's own TUI takes its opening prompt
+    /// through. claude and kilo reuse their established Interactive arms
+    /// (`launch_command`, above). opencode's `("opencode", &["--prompt"])`
+    /// arm is the expected shape: `--prompt` flag acceptance is verified on
+    /// opencode v2.2.6, but whether the TUI injects its value as the opening
+    /// message still needs one confirmation on a real TTY
+    /// (`.superpowers/sdd/task-1-report.md`), so until then this arm is
+    /// expected, not proven. A positional is unusable for opencode (it names
+    /// a directory), hence `--prompt` like kilo's arm.
+    pub fn interactive_launch_command(&self) -> (&'static str, &'static [&'static str]) {
+        match self {
+            Harness::Claude => ("claude", &[]),
+            Harness::Opencode => ("opencode", &["--prompt"]),
+            Harness::Kilocode => ("kilo", &["--prompt"]),
         }
     }
 
@@ -1179,5 +1217,55 @@ mod tests {
         assert!(!restat_matches(None, Some((100, 4))));
         assert!(!restat_matches(Some((100, 4)), None));
         assert!(!restat_matches(None, None));
+    }
+
+    // ---- PBI 01-feat: the --apply handoff ----
+
+    #[test]
+    fn extract_plan_text_keeps_only_agent_text_lines() {
+        // The headless log mixes JSON event lines with the agent's text; the
+        // saved plan must hold the Text lines only, in stream order, so no
+        // JSON event line ever lands in the plan file.
+        let rendered = vec![
+            RunLine::Progress("read".to_string()),
+            RunLine::Text("Plan: batch wiki edits".to_string()),
+            RunLine::Silent,
+            RunLine::Text("1. Add a file map".to_string()),
+        ];
+        assert_eq!(
+            extract_plan_text(&rendered),
+            "Plan: batch wiki edits\n1. Add a file map"
+        );
+    }
+
+    #[test]
+    fn extract_plan_text_boundary_inputs_yield_no_plan() {
+        // Empty output, JSON-only output, and unreadable lines all yield no
+        // plan text — the handoff refuses to save an empty plan file.
+        assert_eq!(extract_plan_text(&[]), "");
+        assert_eq!(
+            extract_plan_text(&[RunLine::Progress("read".to_string()), RunLine::Silent]),
+            ""
+        );
+    }
+
+    #[test]
+    fn interactive_launch_command_opens_each_harness_own_tui() {
+        // claude and kilo reuse their established Interactive arms. opencode's
+        // `opencode --prompt` TUI shape is the expected one: flag acceptance
+        // verified on opencode v2.2.6, but TUI prompt injection still needs
+        // one confirmation on a real TTY, so this pins the shape as expected.
+        assert_eq!(
+            Harness::Claude.interactive_launch_command(),
+            ("claude", &[] as &[&str])
+        );
+        assert_eq!(
+            Harness::Kilocode.interactive_launch_command(),
+            ("kilo", &["--prompt"] as &[&str])
+        );
+        assert_eq!(
+            Harness::Opencode.interactive_launch_command(),
+            ("opencode", &["--prompt"] as &[&str])
+        );
     }
 }

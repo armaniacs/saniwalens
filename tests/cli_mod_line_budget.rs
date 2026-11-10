@@ -10,7 +10,18 @@
 //! tripwire does not grow the very file it guards.
 
 /// The measured size of `src/cli/mod.rs` at the latest budget change (the
-/// PBI C6 split of 2026-11-09: 1,039 lines, the six remaining views and the
+/// advisor language flag of 2026-11-10: 1,132 lines, for the `--language`
+/// global flag, its `resolve_cli_with_language` wiring, and the resolved
+/// language handoff into the `optimize` session (all language logic lives in
+/// `core::optimize`, `adapter::config_file`, and `session.rs`, not the shell).
+/// The plans/backups cleanup command of 2026-11-10: 1,117 lines, for the
+/// `Cleanup` variant and its one dispatch arm (all selection, scoping, and
+/// rendering lives in `cli/cleanup.rs`, beside the handoff seam in
+/// `cli/handoff.rs`, not in the shell). The --apply handoff of 2026-11-09: 1,097 lines, for the Optimize flag, the
+/// arm-top pre-check, and the handoff branch (all handoff logic lives in
+/// `cli/handoff.rs`, beside the delivery seam in `cli/deliver.rs`, not in the
+/// shell; the `run_analyze` reflow is `cargo fmt`'s. The PBI C6 split of
+/// 2026-11-09: 1,039 lines, the six remaining views and the
 /// delivery seam moved to `cli/views/` and `cli/deliver.rs`, with 41 lines of
 /// slack for one view's dispatch wiring; the formatter-canonical
 /// re-measurement of 2026-11-06: 3,037 lines, for the `cargo fmt` +
@@ -24,7 +35,7 @@
 /// landing measured 3,383), with no slack — raising this constant is a review
 /// point, done in the same PR as the spec update it forces
 /// (`docs/specs/architecture.md`).
-const MOD_RS_LINE_BUDGET: usize = 1080;
+const MOD_RS_LINE_BUDGET: usize = 1132;
 
 /// The remedy half of the tripwire's failure message, pinned here so its
 /// wording cannot drift away from what it prescribes.

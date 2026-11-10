@@ -16,11 +16,13 @@ use crate::core::subagent::SplitCoverage;
 use crate::core::surface::{StartupSavings, Wedge};
 use crate::session::{
     AnalyzeStats, Session, SessionEnv, Style, env_roots, eprint_freshness, freshness_line,
-    guard_harness, resolve_cli,
+    guard_harness, resolve_cli_with_language,
 };
 use crate::store::{OpenMode, Store};
 
+pub(crate) mod cleanup;
 pub(crate) mod deliver;
+pub(crate) mod handoff;
 pub(crate) mod headless;
 pub mod heartbeat;
 pub(crate) mod report;
@@ -61,6 +63,11 @@ pub struct Cli {
     /// over whatever the profile sets. See `docs/specs/cli.md`.
     #[arg(long, global = true)]
     profile: Option<String>,
+    /// Advisor output language: en (the default) | ja. Global so every
+    /// command resolves it through the same flag-beats-file order; only
+    /// `optimize` renders it into a prompt today. See `docs/specs/cli.md`.
+    #[arg(long, global = true)]
+    language: Option<String>,
     #[command(subcommand)]
     command: Command,
 }
@@ -263,6 +270,10 @@ enum Command {
         /// (headless opencode runs log raw output to a file by default).
         #[arg(long)]
         verbose: bool,
+        /// Save the headless plan under $XDG_STATE_HOME/saniwalens/plans/ and
+        /// open the harness's own interactive session to apply it (headless only).
+        #[arg(long)]
+        apply: bool,
         /// Stop a headless advisor after this long (e.g. 30s, 2m, 500ms).
         #[arg(long, value_name = "DURATION")]
         timeout: Option<String>,
@@ -270,14 +281,27 @@ enum Command {
     /// Step-by-step guide to the typical patterns (doctor / waste / failures).
     /// Needs an interactive terminal; without one it refuses instead of hanging.
     Tui,
+    /// List or prune the `--apply` handoff's saved plans and backups.
+    /// Needs no store: it only reads (and, with `--keep`, deletes) under
+    /// $XDG_STATE_HOME/saniwalens/plans/ and .../backups/.
+    Cleanup {
+        /// Only list plans and backups with their sizes; delete nothing.
+        /// A bare run lists too; the sweep needs an explicit `--keep`.
+        #[arg(long, conflicts_with = "keep")]
+        list: bool,
+        /// Delete all but the newest N generations in each area, showing the
+        /// count and total size first. A bare `--keep` keeps 10.
+        #[arg(long, num_args(0..=1), default_missing_value = "10")]
+        keep: Option<usize>,
+        #[command(flatten)]
+        format: FormatArgs,
+    },
 }
 
 pub fn run() -> Result<()> {
     let argv: Vec<String> = std::env::args().collect();
-    if let views::guide::Entry::Guide { harness, profile } = views::guide::guide_entry(&argv)
-        && views::guide::terminal_available()
-    {
-        return views::guide::run_guide_entry(harness.as_deref(), profile.as_deref());
+    if let Some(entry) = views::guide::guide_entry_if_terminal(&argv) {
+        return views::guide::run_guide_entry(entry);
     }
     // Non-TTY without a subcommand: fall through to `Cli::parse`, whose
     // missing-subcommand error is what scripts see today (behavior unchanged).
@@ -290,9 +314,15 @@ pub fn run() -> Result<()> {
         home: home_dir(),
         config_home: roots.config_home.as_deref(),
     };
-    let resolved = resolve_cli(cli.harness.as_deref(), cli.profile.as_deref(), &env)?;
+    let resolved = resolve_cli_with_language(
+        cli.harness.as_deref(),
+        cli.profile.as_deref(),
+        cli.language.as_deref(),
+        &env,
+    )?;
     let harness = resolved.harness;
     let config_db = resolved.config_db;
+    let language = resolved.language;
     // The windowed report arms resolve their flags through `cli/window.rs` —
     // `open` (no scope) or `open_scoped` (scope, format, period) — so an
     // invalid flag fails on its own before any store work (PBI 01's order).
@@ -489,15 +519,28 @@ pub fn run() -> Result<()> {
             print,
             verbose,
             timeout,
+            apply,
         } => {
+            // The handoff pre-check runs before any store work: a conflict
+            // fails fast, and a non-apply run passes straight through, so the
+            // order below keeps its exact behavior without `--apply`.
+            handoff::check_apply_args(apply, print, verbose, &harness)?;
             // Resolve (including the legacy-store move) before parsing --scope,
             // then open after — the pre-Session dispatch's exact order, kept so
             // double failures report the same error the old binary did.
             let path = Session::resolve_path(&harness, db, config_db.as_deref(), &env)?;
             let filter = parse_scope(scope.as_deref())?;
-            let sess = Session::open_resolved(&harness, path)?;
+            let mut sess = Session::open_resolved(&harness, path)?;
+            sess.language = language;
             let timeout = headless::resolve_timeout(timeout.as_deref())?;
+            if apply {
+                return handoff::run_apply(&sess, projects, &filter, frozen, timeout, &env);
+            }
             optimize(&sess, projects, &filter, frozen, print, verbose, timeout)
+        }
+        Command::Cleanup { list, keep, format } => {
+            let fmt = parse_format(format.as_deref())?;
+            cleanup::run_cleanup(&env, list, keep, fmt)
         }
         Command::Tui => {
             if !views::guide::terminal_available() {
@@ -505,7 +548,8 @@ pub fn run() -> Result<()> {
                     "`tui` needs an interactive terminal (stdin and stdout must both be TTYs)"
                 ); // No-TTY-only arm: TTY input returns via the pre-parse branch above.
             }
-            views::guide::run_guide_entry(cli.harness.as_deref(), cli.profile.as_deref())
+            let entry = views::guide::Entry::preset(cli.harness, cli.profile, cli.language);
+            views::guide::run_guide_entry(entry)
         }
     }
 }
@@ -557,7 +601,10 @@ fn optimize(
 
     // The harness copy for every prompt and briefing rendered here — the
     // harness assembles its own (adapter side), so the core stays agnostic.
-    let copy = sess.harness.copy();
+    // The resolved advisor language rides the same copy, so every prompt
+    // builder shares the one wording source (`core::optimize`).
+    let mut copy = sess.harness.copy();
+    copy.language = sess.language;
     // The launch shape is the harness's own data (`Harness::launch_command`,
     // beside its other arms), so the shell names no harness here.
     let (binary, leading, run_mode) = sess.harness.launch_command();
@@ -601,7 +648,7 @@ fn optimize(
 /// shell's half is the queries and the store-row → plain-row mapping; every
 /// join, cap, and sort lives in the core where it is testable
 /// (`pbi/2026-10-29-04-feat-findings-assembly-core.md`).
-fn collect_findings(store: &Store, window: TimeRange) -> Result<optimize_mod::Findings> {
+pub(crate) fn collect_findings(store: &Store, window: TimeRange) -> Result<optimize_mod::Findings> {
     Ok(findings::collect_findings(&findings_input(store, window)?))
 }
 
@@ -771,7 +818,11 @@ fn analyze(sess: &Session, projects: Option<PathBuf>, format: Format) -> Result<
 /// Analyze raw input into the store, dispatching on the harness. The guard
 /// runs first: a store built by another harness refuses the write rather than
 /// mixing rows (`docs/specs/harness.md`).
-fn run_analyze(harness: &Harness, projects: Option<PathBuf>, db: &Path) -> Result<AnalyzeStats> {
+pub(crate) fn run_analyze(
+    harness: &Harness,
+    projects: Option<PathBuf>,
+    db: &Path,
+) -> Result<AnalyzeStats> {
     guard_harness(
         &Store::open(db, OpenMode::ReadWrite).context("open store")?,
         harness,
