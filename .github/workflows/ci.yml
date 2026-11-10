@@ -92,7 +92,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: EmbarkStudios/cargo-deny-action@v2
+      # Pinned tool, not a floating action: the Embark action tracked deny
+      # 0.20.x while the file still used the pre-1.0 schema, so the gate was
+      # red from birth. Same install pattern the repo already uses elsewhere.
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deny@0.20.2
+      - run: cargo deny check
 
   # Coverage as information, not a gate: no threshold fails the build (PBI 03).
   # The rate summary lands in the run's step summary and the LCOV/HTML reports
@@ -129,6 +135,9 @@ jobs:
       - uses: actions/checkout@v7
         with:
           fetch-tags: true
+          # Full history too: `git describe --tags --abbrev=0` needs tag
+          # ancestry, which a shallow checkout cannot provide.
+          fetch-depth: 0
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-semver-checks

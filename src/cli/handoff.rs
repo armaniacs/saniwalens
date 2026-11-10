@@ -402,23 +402,33 @@ mod tests {
         assert!(check_apply_args(true, false, false, &Harness::Opencode).is_ok());
     }
 
+    /// Fixture roots from the temp dir, which is absolute on every OS: a
+    /// spelled-out `/tmp/...` is not absolute on Windows, and these resolvers
+    /// ignore non-absolute inputs. Expectations derive from the same roots
+    /// with `join`, never from a second spelled-out literal.
+    fn fixture_root(tag: &str) -> PathBuf {
+        std::env::temp_dir().join(format!("saniwalens-handoff-fixture-{tag}"))
+    }
+
     #[test]
     fn plans_dir_prefers_an_absolute_state_home() {
+        let state = fixture_root("state");
+        let home = fixture_root("home");
         assert_eq!(
-            plans_dir(
-                Some(Path::new("/tmp/example/state")),
-                Some(Path::new("/tmp/example/home"))
-            )
-            .unwrap(),
-            PathBuf::from("/tmp/example/state/saniwalens/plans")
+            plans_dir(Some(&state), Some(&home)).unwrap(),
+            state.join("saniwalens").join("plans")
         );
     }
 
     #[test]
     fn plans_dir_falls_back_to_the_home_state_dir() {
+        let home = fixture_root("home");
         assert_eq!(
-            plans_dir(None, Some(Path::new("/tmp/example/home"))).unwrap(),
-            PathBuf::from("/tmp/example/home/.local/state/saniwalens/plans")
+            plans_dir(None, Some(&home)).unwrap(),
+            home.join(".local")
+                .join("state")
+                .join("saniwalens")
+                .join("plans")
         );
     }
 
@@ -426,13 +436,13 @@ mod tests {
     fn plans_dir_ignores_a_relative_state_home() {
         // XDG: a non-absolute XDG_STATE_HOME is invalid and must be ignored —
         // honoring it would put the plans back under the current directory.
+        let home = fixture_root("home");
         assert_eq!(
-            plans_dir(
-                Some(Path::new("relative/state")),
-                Some(Path::new("/tmp/example/home"))
-            )
-            .unwrap(),
-            PathBuf::from("/tmp/example/home/.local/state/saniwalens/plans")
+            plans_dir(Some(Path::new("relative/state")), Some(&home)).unwrap(),
+            home.join(".local")
+                .join("state")
+                .join("saniwalens")
+                .join("plans")
         );
     }
 
@@ -447,25 +457,25 @@ mod tests {
         // The sweep must resolve the same base as the saver: an absolute XDG
         // value wins, a relative one is ignored, and without an absolute
         // home there is no answer. Never cwd-relative.
+        let state = fixture_root("state");
+        let home = fixture_root("home");
         assert_eq!(
-            backups_dir(
-                Some(Path::new("/tmp/example/state")),
-                Some(Path::new("/tmp/example/home"))
-            )
-            .unwrap(),
-            PathBuf::from("/tmp/example/state/saniwalens/backups")
+            backups_dir(Some(&state), Some(&home)).unwrap(),
+            state.join("saniwalens").join("backups")
         );
         assert_eq!(
-            backups_dir(None, Some(Path::new("/tmp/example/home"))).unwrap(),
-            PathBuf::from("/tmp/example/home/.local/state/saniwalens/backups")
+            backups_dir(None, Some(&home)).unwrap(),
+            home.join(".local")
+                .join("state")
+                .join("saniwalens")
+                .join("backups")
         );
         assert_eq!(
-            backups_dir(
-                Some(Path::new("relative/state")),
-                Some(Path::new("/tmp/example/home"))
-            )
-            .unwrap(),
-            PathBuf::from("/tmp/example/home/.local/state/saniwalens/backups")
+            backups_dir(Some(Path::new("relative/state")), Some(&home)).unwrap(),
+            home.join(".local")
+                .join("state")
+                .join("saniwalens")
+                .join("backups")
         );
         assert!(backups_dir(None, None).is_err());
     }
@@ -474,21 +484,12 @@ mod tests {
     fn plans_and_backups_share_their_parent() {
         // The list/sweep pair the cleanup command prints is one state home
         // seen twice: the two dirs differ only in the last component.
-        let plans = plans_dir(
-            Some(Path::new("/tmp/example/state")),
-            Some(Path::new("/tmp/example/home")),
-        )
-        .unwrap();
-        let backups = backups_dir(
-            Some(Path::new("/tmp/example/state")),
-            Some(Path::new("/tmp/example/home")),
-        )
-        .unwrap();
+        let state = fixture_root("state");
+        let home = fixture_root("home");
+        let plans = plans_dir(Some(&state), Some(&home)).unwrap();
+        let backups = backups_dir(Some(&state), Some(&home)).unwrap();
         assert_eq!(plans.parent(), backups.parent());
-        assert_eq!(
-            plans.parent().unwrap(),
-            Path::new("/tmp/example/state/saniwalens")
-        );
+        assert_eq!(plans.parent().unwrap(), state.join("saniwalens").as_path());
     }
 
     #[test]

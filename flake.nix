@@ -1,5 +1,5 @@
 {
-  description = "saniwalens — a lens onto your coding-agent usage";
+  description = "saniwalens - a lens onto your coding-agent usage";
 
   # Advertise the shared Cachix cache so `nix run github:armaniacs/saniwalens`
   # pulls prebuilt artifacts instead of compiling from source. Trusted users
@@ -55,7 +55,13 @@
           || rel == "pbi"
           || pkgs.lib.hasPrefix "pbi/" rel
           || rel == ".claude"
-          || pkgs.lib.hasPrefix ".claude/" rel;
+          || pkgs.lib.hasPrefix ".claude/" rel
+          # Goldens are read at runtime by the e2e tests
+          # (`tests/e2e_golden_harness.rs`, `tests/render_view_golden.rs`,
+          # `tests/mod_split_views_golden.rs`), so the package build - which
+          # runs those tests - needs the tree, not just Cargo sources.
+          || rel == "tests/golden"
+          || pkgs.lib.hasPrefix "tests/golden/" rel;
 
         commonArgs = {
           src = pkgs.lib.cleanSourceWith {
@@ -64,7 +70,7 @@
           };
           strictDeps = true;
           # rusqlite is built with the `bundled` feature, so SQLite compiles from
-          # C against the stdenv C toolchain — no system sqlite/pkg-config needed.
+          # C against the stdenv C toolchain - no system sqlite/pkg-config needed.
         };
         cargoArtifacts = craneLib.buildDepsOnly commonArgs;
 
@@ -81,7 +87,7 @@
         packages.default = saniwalens;
         apps.default = flake-utils.lib.mkApp { drv = saniwalens; };
 
-        # `nix develop` — the pinned tools, same ones CI uses via `just`.
+        # `nix develop` - the pinned tools, same ones CI uses via `just`.
         devShells.default = pkgs.mkShell {
           packages = with pkgs; [
             rustToolchain
@@ -93,7 +99,7 @@
           ];
           env.RUST_BACKTRACE = "1";
           shellHook = ''
-            echo "saniwalens dev shell — $(rustc --version)"
+            echo "saniwalens dev shell - $(rustc --version)"
           '';
         };
 

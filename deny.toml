@@ -1,9 +1,14 @@
 # cargo-deny: advisories + licenses in one gate (PBI 01).
 # cargo-audit is advisory-only, so running both would duplicate the advisory
-# scan — this one file is the whole dependency policy. CI runs
+# scan - this one file is the whole dependency policy. CI runs
 # `cargo deny check` with no tokens; a red gate names the advisory or the
-# unlisted license, and the fix is an upgrade, an exception below, or a
-# license-list change — never silence.
+# denied license, and the fix is an upgrade, an exception below, or a
+# license-list change - never silence.
+#
+# Schema: cargo-deny 0.20.x (pinned in CI via taiki-e/install-action
+# `cargo-deny@0.20.2`). The file never validated under any older deny either
+# (0.16.4/0.17.0/0.19.9 reject it the same way), so it is migrated forward
+# rather than pinning an old tool.
 [graph]
 # All features, all targets: the policy covers what any platform builds.
 all-features = true
@@ -12,39 +17,51 @@ exclude-dev = true
 [advisories]
 # RUSTSEC database. Yanked crates are denied: a yanked version is never what
 # a fresh lockfile should resolve to. If the DB fetch itself fails the gate
-# fails too — a silent skip would read as clean.
+# fails too - a silent skip would read as clean.
 yanked = "deny"
-unmaintained = "warn"
-unsound = "warn"
-ignore = []
+# 0.20.x offers no `warn` level here, only all|workspace|transitive|none.
+# `unmaintained = "all"` and `unsound = "workspace"` are the documented
+# defaults, and fail-closed per this repo's stated philosophy - verified
+# against deny 0.20.2 on 2026-11-10 (check output below).
+unmaintained = "all"
+unsound = "workspace"
+# RUSTSEC-2026-0459 (libsqlite3-sys < 0.39, bundled SQLite < 3.54): the fix
+# needs rusqlite 0.41, but rusqlite stays pinned to 0.32 - newer
+# libsqlite3-sys build scripts use the still-unstable `cfg_select` feature
+# and fail on stable Rust (see the pin comment on `rusqlite` in Cargo.toml).
+# Attack vector is local (a crafted db plus sibling -wal the victim opens);
+# this tool opens the user's own harness databases, written by the harness
+# itself, so exposure is that of the local user. Revisit with the pin.
+ignore = [
+    "RUSTSEC-2026-0459",
+]
 
 [licenses]
-# MIT / Apache-2.0 family only — and any OR-combination of them, since the
-# closure's real license strings are the combos (`MIT OR Apache-2.0`, the old
-# slash spelling `MIT/Apache-2.0`, the Unicode-3.0 combo on `unicode-ident`,
-# the BSD-2-Clause combo on `zerocopy`, the Unlicense combo on `memchr`).
+# Single SPDX ids only - 0.20.x matches each crate's license expression
+# per-license, so explicit combo strings (`MIT OR Apache-2.0`, the legacy
+# slash spelling `MIT/Apache-2.0`) are no longer needed and no longer parse.
+# Listing each id once covers every OR-combination of them. deny reports
+# `Apache-2.0 WITH LLVM-exception` as unencountered (warning only, the gate
+# still passes); it stays so a future dependency does not fail closed. There is no
+# `unlisted` key anymore: the new default denies everything not explicitly
+# allowed, which is the same-or-stronger fail-closed stance as before.
 # Verified against Cargo.lock 2026-11-08: no LGPL / MPL / copyleft crate in
 # the graph, so a future one fails closed here and gets an explicit entry
-# with its reason — or stays denied. `deny` matches these strings literally,
-# including the legacy slash spelling.
-unlisted = "deny"
+# with its reason - or stays denied.
 allow = [
     "MIT",
     "Apache-2.0",
     "Apache-2.0 WITH LLVM-exception",
-    "MIT OR Apache-2.0",
-    "Apache-2.0 OR MIT",
-    "MIT/Apache-2.0",
-    "Unlicense OR MIT",
-    "Unlicense/MIT",
-    "BSD-2-Clause OR Apache-2.0 OR MIT",
-    "(MIT OR Apache-2.0) AND Unicode-3.0",
+    "Unlicense",
+    "BSD-2-Clause",
+    "Unicode-3.0",
 ]
 exceptions = []
 
 [licenses.private]
 # A crate that is never published still gets its license checked: there is
 # no private workspace here, so everything is gated like a public crate.
+# (Accepted by deny 0.20.2 - it raised no error against this key.)
 ignore = false
 
 [bans]
@@ -56,7 +73,14 @@ highlight = "all"
 # rusqlite pins libsqlite3-sys via Cargo.toml comments (stable-toolchain
 # breakage); an automated bump PR must not fight that pin, so major bumps of
 # the SQLite stack stay manual.
-skip = []
+#
+# hashbrown 0.14.5 (via hashlink 0.9 <- rusqlite 0.32) alongside 0.17.1 (via
+# indexmap <- toml): the split unifies only through the blocked rusqlite
+# upgrade above, so the older transitive copy is skipped, not the policy
+# weakened - `multiple-versions` still denies every other duplicate.
+skip = [
+    { name = "hashbrown", version = "=0.14.5" },
+]
 skip-tree = []
 
 [sources]

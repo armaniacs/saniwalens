@@ -49,7 +49,7 @@ pub fn skill_surface(id: &str, config_path: &str, content: &str, scope: &Scope) 
 
 /// The startup weight of a description-loaded surface: its frontmatter
 /// `description`, or zero when it declares none. Only the description text is
-/// counted — the listing scaffolding Claude Code wraps it in is not ours to
+/// counted - the listing scaffolding Claude Code wraps it in is not ours to
 /// weigh (`docs/specs/config-format.md`).
 fn description_tokens(content: &str) -> u64 {
     frontmatter_description(content).map_or(0, |d| approx_tokens(&d))
@@ -57,7 +57,7 @@ fn description_tokens(content: &str) -> u64 {
 
 /// Read a config directory, warning when it exists but cannot be read. macOS
 /// protects `~/Documents`, `~/Desktop`, and `~/Downloads` per app, so a
-/// catalog scan of a project there can fail with a permission error — and a
+/// catalog scan of a project there can fail with a permission error - and a
 /// silent empty result would read as "nothing configured here", a wedge the
 /// environment manufactures, not found in usage. One warning line tells the
 /// user why surfaces stay orphaned. A missing directory stays silent (the
@@ -68,7 +68,7 @@ fn read_dir_warn(dir: &Path) -> Vec<std::fs::DirEntry> {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Vec::new(),
         Err(e) => {
             eprintln!(
-                "warning: could not read {}: {e} — config here stays uncatalogued",
+                "warning: could not read {}: {e} - config here stays uncatalogued",
                 dir.display()
             );
             Vec::new()
@@ -119,7 +119,7 @@ pub fn hook_surface(id: &str, config_path: &str, command: &str, scope: &Scope) -
 /// `~/.claude/settings.json`, project `.claude/settings.json` /
 /// `settings.local.json`) into one surface per hook entry. Missing files,
 /// unparsable JSON, and a missing/non-object `hooks` table all read as no
-/// hooks — the same silent-absence the other optional config files use.
+/// hooks - the same silent-absence the other optional config files use.
 pub fn read_hook_surfaces(settings_json: &Path, scope: &Scope) -> Vec<Surface> {
     let Ok(text) = fs::read_to_string(settings_json) else {
         return Vec::new();
@@ -167,7 +167,7 @@ pub fn read_hook_surfaces(settings_json: &Path, scope: &Scope) -> Vec<Surface> {
 /// always loaded (`StartupFull`). See `docs/specs/config-format.md`.
 /// The glob list rides along in `Surface.paths` so the never-fires wedge can
 /// match it against the window's file targets (`docs/specs/surfaces.md`).
-/// Unparseable or empty `paths:` yields no globs — the rule stays
+/// Unparseable or empty `paths:` yields no globs - the rule stays
 /// path-conditional by load mode, but nothing can claim a target for it,
 /// so it is never flagged.
 pub fn rule_surface(id: &str, config_path: &str, content: &str, scope: &Scope) -> Surface {
@@ -271,7 +271,7 @@ pub fn agent_surface(id: &str, config_path: &str, content: &str, scope: &Scope) 
     }
 }
 
-/// Build a `claude_md` surface — always-on context paid every session, so its
+/// Build a `claude_md` surface - always-on context paid every session, so its
 /// whole text is startup cost.
 pub fn claude_md_surface(id: &str, config_path: &str, content: &str, scope: &Scope) -> Surface {
     let tokens = approx_tokens(content);
@@ -291,7 +291,7 @@ pub fn claude_md_surface(id: &str, config_path: &str, content: &str, scope: &Sco
 /// The YAML frontmatter block of a markdown file, without its `---` fences.
 /// The block ends at the first line that is *only* dashes: a substring search
 /// would also stop at a line merely starting with them, dropping every key
-/// below it — and a lost `paths:` changes a rule's load mode, not just its
+/// below it - and a lost `paths:` changes a rule's load mode, not just its
 /// weight.
 fn frontmatter(content: &str) -> Option<&str> {
     let opened = content.trim_start().strip_prefix("---")?;
@@ -315,10 +315,10 @@ fn has_paths_frontmatter(content: &str) -> bool {
     })
 }
 
-/// The frontmatter `description` — the text a skill or agent contributes to
+/// The frontmatter `description` - the text a skill or agent contributes to
 /// every session's startup listing. Parsed defensively: a plain or quoted
 /// scalar, or a block scalar, in every case folded together with the indented
-/// continuation lines that follow it — YAML wraps a value onto those lines with
+/// continuation lines that follow it - YAML wraps a value onto those lines with
 /// or without a `>` / `|` indicator, and reading only the first line would
 /// understate the startup cost. A file with no frontmatter, or none declaring
 /// the key, yields `None`.
@@ -355,7 +355,7 @@ fn frontmatter_description(content: &str) -> Option<String> {
     Some(unquote(&value).to_string())
 }
 
-/// Drop a plain scalar's trailing YAML comment — a `#` that opens the value or
+/// Drop a plain scalar's trailing YAML comment - a `#` that opens the value or
 /// follows whitespace is comment syntax, and no session ever loads it. Inside a
 /// block scalar (`block`) or quotes, a `#` is literal text and stays.
 fn strip_comment(value: &str, block: bool) -> &str {
@@ -405,7 +405,7 @@ pub fn read_command_surfaces(commands_dir: &Path, scope: &Scope) -> Vec<Surface>
 /// Add one skills site to `surfaces`, deduped by **canonical path** against
 /// everything already seen. Sites may reach one shared directory through
 /// symlinks (`.opencode/skills -> ../.agents/skills` is the observed shape),
-/// so one definition must count once — deduping by name instead would mark
+/// so one definition must count once - deduping by name instead would mark
 /// the shared definition unused at one scope, a wedge the catalog
 /// manufactures.
 pub fn add_skill_site(
@@ -450,7 +450,7 @@ fn collect_rule_surfaces(
 ) {
     if depth > MAX_RULE_DEPTH {
         eprintln!(
-            "warning: rule directory depth exceeds {MAX_RULE_DEPTH} at {} — deeper rules stay uncatalogued",
+            "warning: rule directory depth exceeds {MAX_RULE_DEPTH} at {} - deeper rules stay uncatalogued",
             dir.display()
         );
         return;
@@ -460,7 +460,7 @@ fn collect_rule_surfaces(
     let canonical = fs::canonicalize(dir).unwrap_or_else(|_| dir.to_path_buf());
     if !visited.insert(canonical) {
         eprintln!(
-            "warning: skipping cyclic rule directory {} — already visited",
+            "warning: skipping cyclic rule directory {} - already visited",
             dir.display()
         );
         return;
@@ -470,7 +470,7 @@ fn collect_rule_surfaces(
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return,
         Err(e) => {
             eprintln!(
-                "warning: could not read {}: {e} — config here stays uncatalogued",
+                "warning: could not read {}: {e} - config here stays uncatalogued",
                 dir.display()
             );
             return;
@@ -483,12 +483,16 @@ fn collect_rule_surfaces(
         } else if path.extension().is_some_and(|ext| ext == "md")
             && let Ok(content) = fs::read_to_string(&path)
         {
+            // Canonical display keys use `/`: `Path` joins with `\` on
+            // Windows, and tests, goldens, and store rows all assume `/`.
+            // (`config_path` below keeps the native form - it names a file,
+            // not a display key.)
             let id = path
                 .strip_prefix(root)
                 .unwrap_or(&path)
                 .with_extension("")
                 .to_string_lossy()
-                .into_owned();
+                .replace('\\', "/");
             out.push(rule_surface(
                 &id,
                 &path.display().to_string(),
@@ -504,7 +508,7 @@ fn collect_rule_surfaces(
 const MAX_IMPORT_HOPS: usize = 5;
 
 /// The raw `@path` imports a `CLAUDE.md` names, in order. An import is an `@`
-/// opening a whitespace-separated word — so an e-mail address is not one — and
+/// opening a whitespace-separated word - so an e-mail address is not one - and
 /// is not evaluated inside a code span or fenced block, where `@` is just text
 /// (`docs/specs/config-format.md`).
 fn import_refs(content: &str) -> Vec<&str> {
@@ -536,7 +540,7 @@ fn import_refs(content: &str) -> Vec<&str> {
 
 /// Where an `@path` import points: relative to the importing file's directory,
 /// `~/` to the home directory, an absolute path as written. The result is
-/// The result is unconfined — the caller (`read_claude_md_surfaces`) canonicalizes it and
+/// The result is unconfined - the caller (`read_claude_md_surfaces`) canonicalizes it and
 /// keeps only targets inside the importing top-level file's directory, so a
 /// cloned repo cannot pull host files outside its root into the catalog.
 fn resolve_import(raw: &str, base_dir: &Path, home: Option<&Path>) -> Option<PathBuf> {
@@ -552,7 +556,7 @@ fn resolve_import(raw: &str, base_dir: &Path, home: Option<&Path>) -> Option<Pat
 /// `@<path>` (relative to the importing top-level file's directory when inside
 /// it), so the always-on cost lands on the file that carries it and can be
 /// pruned file by file. Every file is weighed once however many times it is
-/// reached — by symlink, by a second import, by a cycle — because Claude Code
+/// reached - by symlink, by a second import, by a cycle - because Claude Code
 /// injects it once (`docs/specs/config-format.md`).
 pub fn read_claude_md_surfaces(
     files: &[(&Path, &str)],
@@ -601,8 +605,8 @@ pub fn read_claude_md_surfaces(
             if !resolved.is_file() || !seen.insert(resolved.clone()) {
                 continue;
             }
-            // Containment: an import resolving outside the importing root —
-            // `..` escapes, absolute paths, `~/`, symlink hops — is skipped
+            // Containment: an import resolving outside the importing root -
+            // `..` escapes, absolute paths, `~/`, symlink hops - is skipped
             // with a warning rather than catalogued. Warn-once falls out of
             // the `seen` gate above: repeats exit silently.
             if !resolved.starts_with(&root) {
@@ -616,8 +620,11 @@ pub fn read_claude_md_surfaces(
                 continue;
             };
             let shown = resolved.strip_prefix(&root).unwrap_or(&target);
+            // Same `/` canonicalization as rule IDs above: `display()` on
+            // Windows renders `\`, but these IDs are display keys.
+            let shown = shown.to_string_lossy().replace('\\', "/");
             surfaces.push(claude_md_surface(
-                &format!("@{}", shown.display()),
+                &format!("@{shown}"),
                 &target.display().to_string(),
                 &imported,
                 scope,
@@ -650,7 +657,7 @@ pub fn read_project_surfaces(root: &Path, project: &str, home: Option<&Path>) ->
 
 /// Read MCP server declarations from an `mcp.json` (top-level `mcpServers`
 /// object) into surfaces. The tool-schema cost is dynamic and not on disk, so
-/// `static_tokens` is unknown (`None`) — see `docs/specs/config-format.md`.
+/// `static_tokens` is unknown (`None`) - see `docs/specs/config-format.md`.
 pub fn read_mcp_server_surfaces(mcp_json: &Path, scope: &Scope) -> Vec<Surface> {
     let Ok(text) = fs::read_to_string(mcp_json) else {
         return Vec::new();
@@ -675,7 +682,7 @@ pub fn read_mcp_server_surfaces(mcp_json: &Path, scope: &Scope) -> Vec<Surface> 
             config_path: mcp_json.display().to_string(),
             static_tokens: None,
             // Its schema is loaded every session, but the weight is unknowable
-            // from local config — unknown, never a false zero.
+            // from local config - unknown, never a false zero.
             startup_tokens: None,
             load_mode: LoadMode::ToolSchema,
             paths: Vec::new(),
@@ -773,7 +780,7 @@ mod tests {
     fn an_unreadable_dir_warns_instead_of_reading_as_absent() {
         // macOS protects ~/Documents per app, so a scan there can fail with a
         // permission error. Absence stays silent; a dir that exists but cannot
-        // be read yields nothing here and warns on stderr (not asserted — the
+        // be read yields nothing here and warns on stderr (not asserted - the
         // call must simply not read as a missing scope).
         use std::os::unix::fs::PermissionsExt;
         let dir =
@@ -828,7 +835,7 @@ mod tests {
     #[test]
     fn a_skill_pays_only_its_description_at_startup() {
         // The body is loaded on invocation, so the startup cost is the
-        // description alone — 25 chars, ~7 tokens — not the 1000-char file.
+        // description alone - 25 chars, ~7 tokens - not the 1000-char file.
         let content = format!(
             "---\nname: repro\ndescription: short startup description\n---\n{}",
             "x".repeat(1000)
@@ -881,7 +888,7 @@ mod tests {
             frontmatter_description(wrapped).as_deref(),
             Some("abcd efgh")
         );
-        // A quoted value may span lines too — the quotes belong to the folded
+        // A quoted value may span lines too - the quotes belong to the folded
         // value, not to its first fragment.
         let quoted = "---\ndescription: \"abcd\n  efgh\"\n---\nbody";
         assert_eq!(
@@ -894,7 +901,7 @@ mod tests {
     fn only_a_line_that_is_just_dashes_closes_the_frontmatter() {
         // A value line merely starting with dashes must not end the block:
         // truncating there drops the keys below it, and for a rule that means
-        // losing `paths:` — which flips its load mode, not just its weight.
+        // losing `paths:` - which flips its load mode, not just its weight.
         let content = "---\nname: x\n---nope\ndescription: abcd\n---\nbody";
         assert_eq!(frontmatter_description(content).as_deref(), Some("abcd"));
         let ruled = "---\n---nope\npaths:\n  - \"src/**\"\n---\nbody";
@@ -910,7 +917,7 @@ mod tests {
     #[test]
     fn an_inline_comment_is_not_part_of_the_description() {
         // Claude Code loads what YAML says the value is, and YAML drops a
-        // whitespace-preceded `#` — counting it would weigh text no session
+        // whitespace-preceded `#` - counting it would weigh text no session
         // ever sees.
         let commented = "---\ndescription: Real text # not the description\n---\nbody";
         assert_eq!(

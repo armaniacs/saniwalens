@@ -943,20 +943,28 @@ mod tests {
         assert!(Harness::Claude.run_line_renderer().is_none());
     }
 
+    /// Fixture roots are built from the temp dir, which is absolute on every
+    /// OS: a spelled-out `/tmp/example/...` is not absolute on Windows, so
+    /// any test using one fails there. Expectations derive from the same
+    /// root with `join`, never with a second spelled-out literal.
+    fn absolute_fixture_root(tag: &str) -> PathBuf {
+        std::env::temp_dir().join(format!("saniwalens-fixture-{tag}"))
+    }
+
     #[test]
     fn kilocode_tasks_candidates_cover_the_known_editors() {
         // The tasks dir varies with the editor install (Code / Cursor /
         // VSCodium) and the platform, so the list is what the shell probes —
         // in a fixed order, `--projects` always winning over it.
-        let candidates = Harness::kilocode_tasks_candidates(Some(Path::new("/tmp/example/home")));
+        let home = absolute_fixture_root("home");
+        let candidates = Harness::kilocode_tasks_candidates(Some(&home));
         assert_eq!(candidates.len(), 3);
+        // Component-wise: `to_string_lossy` renders `\` on Windows, so a
+        // string `ends_with` with `/` would fail there.
+        let tail = Path::new("kilocode.kilo-code").join("tasks");
         for candidate in &candidates {
-            assert!(
-                candidate
-                    .to_string_lossy()
-                    .ends_with("kilocode.kilo-code/tasks")
-            );
-            assert!(candidate.starts_with("/tmp/example/home"));
+            assert!(candidate.ends_with(&tail));
+            assert!(candidate.starts_with(&home));
         }
     }
 
@@ -968,35 +976,39 @@ mod tests {
 
     #[test]
     fn opencode_db_prefers_an_absolute_data_home() {
+        let data = absolute_fixture_root("data");
+        let home = absolute_fixture_root("home");
         assert_eq!(
-            Harness::opencode_db_path(
-                Some(Path::new("/tmp/example/data")),
-                Some(Path::new("/tmp/example/home"))
-            ),
-            Some(PathBuf::from("/tmp/example/data/opencode/opencode.db"))
+            Harness::opencode_db_path(Some(&data), Some(&home)),
+            Some(data.join("opencode").join("opencode.db"))
         );
     }
 
     #[test]
     fn opencode_db_falls_back_to_the_home_share_dir() {
+        let home = absolute_fixture_root("home");
         assert_eq!(
-            Harness::opencode_db_path(None, Some(Path::new("/tmp/example/home"))),
-            Some(PathBuf::from(
-                "/tmp/example/home/.local/share/opencode/opencode.db"
-            ))
+            Harness::opencode_db_path(None, Some(&home)),
+            Some(
+                home.join(".local")
+                    .join("share")
+                    .join("opencode")
+                    .join("opencode.db")
+            )
         );
     }
 
     #[test]
     fn opencode_db_ignores_a_relative_data_home() {
+        let home = absolute_fixture_root("home");
         assert_eq!(
-            Harness::opencode_db_path(
-                Some(Path::new("relative/data")),
-                Some(Path::new("/tmp/example/home"))
-            ),
-            Some(PathBuf::from(
-                "/tmp/example/home/.local/share/opencode/opencode.db"
-            ))
+            Harness::opencode_db_path(Some(Path::new("relative/data")), Some(&home)),
+            Some(
+                home.join(".local")
+                    .join("share")
+                    .join("opencode")
+                    .join("opencode.db")
+            )
         );
     }
 
@@ -1007,20 +1019,20 @@ mod tests {
 
     #[test]
     fn opencode_config_prefers_an_absolute_config_home() {
+        let config = absolute_fixture_root("config");
+        let home = absolute_fixture_root("home");
         assert_eq!(
-            Harness::opencode_config_dir(
-                Some(Path::new("/tmp/example/config")),
-                Some(Path::new("/tmp/example/home"))
-            ),
-            Some(PathBuf::from("/tmp/example/config/opencode"))
+            Harness::opencode_config_dir(Some(&config), Some(&home)),
+            Some(config.join("opencode"))
         );
     }
 
     #[test]
     fn opencode_config_falls_back_to_home_dot_config() {
+        let home = absolute_fixture_root("home");
         assert_eq!(
-            Harness::opencode_config_dir(None, Some(Path::new("/tmp/example/home"))),
-            Some(PathBuf::from("/tmp/example/home/.config/opencode"))
+            Harness::opencode_config_dir(None, Some(&home)),
+            Some(home.join(".config").join("opencode"))
         );
         assert_eq!(Harness::opencode_config_dir(None, None), None);
     }

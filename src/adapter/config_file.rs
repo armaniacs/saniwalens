@@ -208,9 +208,13 @@ db = "work.db"
 
     #[test]
     fn absolute_db_in_file_is_taken_as_is() {
-        let file: FileConfig = toml::from_str(r#"db = "/tmp/abs.db""#).unwrap();
+        // Absolute on every OS: `/tmp/...` is not absolute on Windows, so a
+        // spelled-out fixture would be treated as relative and rebased.
+        let abs = std::env::temp_dir().join("saniwalens-abs.db");
+        let file: FileConfig =
+            toml::from_str(&format!("db = {:?}", abs.to_str().unwrap())).unwrap();
         let resolved = resolve(None, None, None, Some(&file), Some(&example_dir())).unwrap();
-        assert_eq!(resolved.db, Some(PathBuf::from("/tmp/abs.db")));
+        assert_eq!(resolved.db, Some(abs));
     }
 
     #[test]

@@ -6,15 +6,23 @@
 //! No process spawns here; the fixtures are synthetic and the streams they
 //! stand for never touch real data.
 
+#[cfg(unix)]
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::RecvTimeoutError;
 use std::time::{Duration, Instant};
 
-use anyhow::Result;
-use saniwalens::adapter::harness::{Harness, RunLine, RunLineRenderer};
 use saniwalens::cli::heartbeat;
+// Everything below is the quiet-headless seam: the recorder, the launch, and
+// the renderer assertion only exist under `unix` (process-spawn doubles need
+// `ExitStatusExt`), so the imports go with them. The heartbeat observation
+// below is cross-platform and keeps only the shared imports above.
+#[cfg(unix)]
+use anyhow::Result;
+#[cfg(unix)]
+use saniwalens::adapter::harness::{Harness, RunLine, RunLineRenderer};
+#[cfg(unix)]
 use saniwalens::cli::{AdvisorLaunch, DeliveryMode, DeliveryPlan, deliver};
 
 /// A synthetic `--format json` line: the tool event a headless run streams.

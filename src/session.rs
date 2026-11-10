@@ -542,15 +542,17 @@ mod tests {
 
     #[test]
     fn config_file_path_defaults_under_the_user_config_dir() {
+        // Absolute on every OS: a spelled-out `/tmp/...` is not absolute on
+        // Windows, and these resolvers ignore non-absolute inputs.
+        let config = std::env::temp_dir().join("saniwalens-fixture-config");
+        let home = std::env::temp_dir().join("saniwalens-fixture-home");
         assert_eq!(
-            config_file_path(Some(Path::new("/tmp/example/config")), None),
-            Some(PathBuf::from("/tmp/example/config/saniwalens/config.toml"))
+            config_file_path(Some(&config), None),
+            Some(config.join("saniwalens/config.toml"))
         );
         assert_eq!(
-            config_file_path(None, Some("/tmp/example/home")),
-            Some(PathBuf::from(
-                "/tmp/example/home/.config/saniwalens/config.toml"
-            ))
+            config_file_path(None, Some(home.to_str().unwrap())),
+            Some(home.join(".config/saniwalens/config.toml"))
         );
     }
 
@@ -1056,25 +1058,19 @@ mod tests {
 
     #[test]
     fn store_path_defaults_under_the_user_state_dir() {
+        // Temp-dir roots: absolute on every OS, unlike `/tmp/...`.
+        let state = std::env::temp_dir().join("saniwalens-fixture-state");
+        let home = std::env::temp_dir().join("saniwalens-fixture-home");
         assert_eq!(
-            store_path(
-                None,
-                &Harness::Claude,
-                Some(Path::new("/tmp/example/state")),
-                None
-            )
-            .unwrap(),
-            PathBuf::from("/tmp/example/state/saniwalens/saniwalens.db")
+            store_path(None, &Harness::Claude, Some(&state), None).unwrap(),
+            state.join("saniwalens").join("saniwalens.db")
         );
         assert_eq!(
-            store_path(
-                None,
-                &Harness::Claude,
-                None,
-                Some(Path::new("/tmp/example/home"))
-            )
-            .unwrap(),
-            PathBuf::from("/tmp/example/home/.local/state/saniwalens/saniwalens.db")
+            store_path(None, &Harness::Claude, None, Some(&home)).unwrap(),
+            home.join(".local")
+                .join("state")
+                .join("saniwalens")
+                .join("saniwalens.db")
         );
     }
 
@@ -1082,15 +1078,10 @@ mod tests {
     fn store_path_gives_each_harness_its_own_file() {
         // One store per harness: an opencode run never lands in the Claude
         // file, so an old store is never reinterpreted as another harness.
+        let state = std::env::temp_dir().join("saniwalens-fixture-state");
         assert_eq!(
-            store_path(
-                None,
-                &Harness::Opencode,
-                Some(Path::new("/tmp/example/state")),
-                None
-            )
-            .unwrap(),
-            PathBuf::from("/tmp/example/state/saniwalens/saniwalens-opencode.db")
+            store_path(None, &Harness::Opencode, Some(&state), None).unwrap(),
+            state.join("saniwalens").join("saniwalens-opencode.db")
         );
     }
 
@@ -1098,15 +1089,19 @@ mod tests {
     fn store_path_ignores_a_relative_xdg_state_home() {
         // XDG: a non-absolute XDG_STATE_HOME is invalid and must be ignored —
         // honoring it would put the store back under the current directory.
+        let home = std::env::temp_dir().join("saniwalens-fixture-home");
         assert_eq!(
             store_path(
                 None,
                 &Harness::Claude,
                 Some(Path::new("relative/state")),
-                Some(Path::new("/tmp/example/home"))
+                Some(&home)
             )
             .unwrap(),
-            PathBuf::from("/tmp/example/home/.local/state/saniwalens/saniwalens.db")
+            home.join(".local")
+                .join("state")
+                .join("saniwalens")
+                .join("saniwalens.db")
         );
     }
 
