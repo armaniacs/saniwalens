@@ -506,7 +506,7 @@ impl<'a> IngestBatch<'a> {
 /// `create_dir_all` with owner-only permissions on every directory it creates —
 /// the mode the XDG Base Directory spec prescribes for a directory a program
 /// creates on the user's behalf. Directories that already exist keep theirs.
-fn create_private_dir_all(dir: &std::path::Path) -> std::io::Result<()> {
+pub(crate) fn create_private_dir_all(dir: &std::path::Path) -> std::io::Result<()> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::DirBuilderExt;

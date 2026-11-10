@@ -1534,6 +1534,7 @@ mod tests {
             harness: Harness::Claude,
             db_path: PathBuf::new(),
             store: two_window_store(),
+            language: crate::core::optimize::AdvisorLanguage::default(),
         };
         trend(&two.store, &two.harness, trend_pair(), Format::Table).unwrap();
         trend(&two.store, &two.harness, trend_pair(), Format::Markdown).unwrap();
@@ -1542,6 +1543,7 @@ mod tests {
             harness: Harness::Claude,
             db_path: PathBuf::new(),
             store: Store::in_memory().unwrap(),
+            language: crate::core::optimize::AdvisorLanguage::default(),
         };
         trend(&empty.store, &empty.harness, trend_pair(), Format::Table).unwrap();
         trend(&empty.store, &empty.harness, trend_pair(), Format::Json).unwrap();

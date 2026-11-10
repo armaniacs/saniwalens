@@ -19,6 +19,11 @@ pub struct FileConfig {
     /// Used when neither `--harness` nor a profile supplies one.
     #[serde(default)]
     pub default_harness: Option<String>,
+    /// The advisor's output language (`en` | `ja`), overridden by
+    /// `--language`. A top-level item like `default_harness` — profiles never
+    /// carry it.
+    #[serde(default)]
+    pub language: Option<String>,
     /// Used when neither `--db` nor a profile supplies one. A relative path
     /// resolves against the directory holding the config file, never the
     /// current working directory.
@@ -91,6 +96,17 @@ pub fn resolve(
         (None, None, None) => None,
     };
     Ok(ResolvedConfig { harness, db })
+}
+
+/// Merge one invocation's language, strongest first: the explicit `--language`
+/// flag, then the file's top-level default, then nothing (the caller falls
+/// back to English). The same strongest-first shape as [`resolve`], minus the
+/// profile layer — `language` is a top-level item only (PBI 2026-11-10-07),
+/// so a profile never supplies it but also never blocks the file default.
+pub fn resolve_language(cli_language: Option<&str>, file: Option<&FileConfig>) -> Option<String> {
+    cli_language
+        .map(str::to_string)
+        .or_else(|| file.and_then(|f| f.language.clone()))
 }
 
 fn unknown_profile(name: &str, profiles: &HashMap<String, ProfileConfig>) -> String {
@@ -267,5 +283,37 @@ db = "work.db"
         let resolved = resolve(None, None, None, None, Some(&example_dir())).unwrap();
         assert_eq!(resolved.harness, None);
         assert_eq!(resolved.db, None);
+    }
+
+    #[test]
+    fn language_flag_beats_the_file() {
+        let file: FileConfig = toml::from_str("language = \"ja\"").unwrap();
+        assert_eq!(
+            resolve_language(Some("en"), Some(&file)),
+            Some("en".to_string())
+        );
+    }
+
+    #[test]
+    fn language_falls_back_to_the_file_top_level() {
+        let file: FileConfig = toml::from_str("language = \"ja\"").unwrap();
+        assert_eq!(resolve_language(None, Some(&file)), Some("ja".to_string()));
+    }
+
+    #[test]
+    fn language_unset_means_no_resolution() {
+        let file: FileConfig = toml::from_str("default_harness = \"claude\"").unwrap();
+        assert_eq!(resolve_language(None, Some(&file)), None);
+        assert_eq!(resolve_language(None, None), None);
+    }
+
+    #[test]
+    fn language_sits_beside_default_harness_at_the_top_level() {
+        // PBI 2026-11-10-07: `language` is a top-level item like
+        // `default_harness` — never inside a profile.
+        let file: FileConfig =
+            toml::from_str("language = \"ja\"\n[profiles.work]\nharness = \"claude\"").unwrap();
+        assert_eq!(file.language.as_deref(), Some("ja"));
+        assert_eq!(resolve_language(None, Some(&file)), Some("ja".to_string()));
     }
 }

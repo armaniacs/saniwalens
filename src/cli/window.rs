@@ -785,6 +785,7 @@ mod tests {
             Command::Analyze { .. }
             | Command::Sql { .. }
             | Command::Optimize { .. }
+            | Command::Cleanup { .. }
             | Command::Tui => {
                 unreachable!("the whole-history commands take no period flags")
             }

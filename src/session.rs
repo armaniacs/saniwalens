@@ -13,6 +13,7 @@ use anyhow::{Context, Result};
 
 use crate::adapter::config_file;
 use crate::adapter::harness::Harness;
+use crate::core::optimize::AdvisorLanguage;
 use crate::store::{OpenMode, Store};
 
 /// The environment `Session` resolution reads. The caller supplies both
@@ -39,20 +40,35 @@ pub fn env_roots() -> EnvRoots {
     }
 }
 
-/// What `--harness` / `--profile` plus the config file resolve to, before any
-/// store is opened.
+/// What `--harness` / `--profile` / `--language` plus the config file resolve
+/// to, before any store is opened.
 #[derive(Debug, PartialEq)]
 pub struct ResolvedCli {
     pub harness: Harness,
     pub config_db: Option<PathBuf>,
+    pub language: AdvisorLanguage,
 }
 
 /// Resolve one invocation's harness and default store from flags plus the
 /// tool's own config file. Pure over the supplied environment: tests pass
-/// temp dirs, production passes the live roots.
+/// temp dirs, production passes the live roots. The language keeps its
+/// default here — the flag-carrying entry is [`resolve_cli_with_language`];
+/// the guided TUI resolves through that one and carries the language into
+/// its inline next-step session.
 pub fn resolve_cli(
     cli_harness: Option<&str>,
     cli_profile: Option<&str>,
+    env: &SessionEnv,
+) -> Result<ResolvedCli> {
+    resolve_cli_with_language(cli_harness, cli_profile, None, env)
+}
+
+/// [`resolve_cli`] with an explicit `--language` flag. Resolution order,
+/// strongest first: the flag, the file's top-level `language`, then English.
+pub fn resolve_cli_with_language(
+    cli_harness: Option<&str>,
+    cli_profile: Option<&str>,
+    cli_language: Option<&str>,
     env: &SessionEnv,
 ) -> Result<ResolvedCli> {
     let config_path = config_file_path(env.config_home, env.home);
@@ -63,10 +79,25 @@ pub fn resolve_cli(
         .transpose()?
         .flatten();
     let resolved = config_file::resolve(cli_harness, cli_profile, None, file.as_ref(), config_dir)?;
+    let language =
+        parse_language(config_file::resolve_language(cli_language, file.as_ref()).as_deref())?;
     Ok(ResolvedCli {
         harness: parse_harness(resolved.harness.as_deref())?,
         config_db: resolved.db,
+        language,
     })
+}
+
+/// Parse `language` after resolution. Absent means English — every
+/// pre-language invocation keeps its behavior. An unknown value fails naming
+/// the valid list, whether it came from `--language` or the config file.
+pub fn parse_language(value: Option<&str>) -> Result<AdvisorLanguage> {
+    match value {
+        None => Ok(AdvisorLanguage::default()),
+        Some(v) => {
+            AdvisorLanguage::parse(v).with_context(|| format!("unknown language '{v}' (en | ja)"))
+        }
+    }
 }
 
 /// Parse `--harness`. Absent means Claude Code — every pre-flag invocation
@@ -100,10 +131,17 @@ pub use crate::adapter::harness::AnalyzeStats;
 /// One invocation's resolved world: which harness, which store file, and the
 /// opened, harness-guarded store. Every command builds exactly this and
 /// nothing else before doing its own work.
+///
+/// `language` is the advisor's output language (resolved flags > file >
+/// builtin, English by default). It lives on the session so the `optimize`
+/// family reads it without another parameter — including the guided TUI's
+/// inline next step, which builds its session the same way and therefore
+/// renders the same language without naming the flag.
 pub struct Session {
     pub harness: Harness,
     pub db_path: PathBuf,
     pub store: Store,
+    pub language: AdvisorLanguage,
 }
 
 impl std::fmt::Debug for Session {
@@ -142,6 +180,7 @@ impl Session {
             harness: *harness,
             db_path: path,
             store,
+            language: AdvisorLanguage::default(),
         })
     }
 
@@ -191,6 +230,7 @@ impl Session {
             harness: *harness,
             db_path: path,
             store,
+            language: AdvisorLanguage::default(),
         })
     }
 
@@ -216,6 +256,7 @@ impl Session {
             harness: *harness,
             db_path: path,
             store,
+            language: AdvisorLanguage::default(),
         })
     }
 
@@ -539,7 +580,8 @@ mod tests {
             resolved,
             ResolvedCli {
                 harness: Harness::Claude,
-                config_db: None
+                config_db: None,
+                language: AdvisorLanguage::En,
             }
         );
     }
@@ -625,6 +667,87 @@ mod tests {
         };
         let err = resolve_cli(None, None, &env).unwrap_err();
         assert!(format!("{err:#}").contains("unknown --harness 'auto'"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    fn write_config(dir: &Path, content: &str) {
+        let cfg = dir.join("saniwalens");
+        std::fs::create_dir_all(&cfg).unwrap();
+        std::fs::write(cfg.join("config.toml"), content).unwrap();
+    }
+
+    #[test]
+    fn parse_language_defaults_to_en_and_accepts_ja() {
+        assert_eq!(parse_language(None).unwrap(), AdvisorLanguage::En);
+        assert_eq!(parse_language(Some("en")).unwrap(), AdvisorLanguage::En);
+        assert_eq!(parse_language(Some("ja")).unwrap(), AdvisorLanguage::Ja);
+    }
+
+    #[test]
+    fn parse_language_rejects_unknown_values_with_the_valid_list() {
+        // PBI 2026-11-10-07: an unknown value fails naming the valid ones.
+        for bad in ["jp", "EN", ""] {
+            let err = parse_language(Some(bad)).unwrap_err();
+            let msg = format!("{err:#}");
+            assert!(msg.contains(bad), "{msg}");
+            assert!(msg.contains("en"), "{msg}");
+            assert!(msg.contains("ja"), "{msg}");
+        }
+    }
+
+    #[test]
+    fn resolve_cli_language_flag_beats_the_file() {
+        let dir = example_dir("file-language-override");
+        let _ = std::fs::remove_dir_all(&dir);
+        write_config(&dir, "language = \"ja\"\n");
+        let env = SessionEnv {
+            state_home: Some(&dir),
+            home: None,
+            config_home: Some(&dir),
+        };
+        let resolved = resolve_cli_with_language(None, None, Some("en"), &env).unwrap();
+        assert_eq!(resolved.language, AdvisorLanguage::En);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn resolve_cli_language_falls_back_to_the_file_then_english() {
+        let dir = example_dir("file-language-default");
+        let _ = std::fs::remove_dir_all(&dir);
+        write_config(&dir, "language = \"ja\"\n");
+        let env = SessionEnv {
+            state_home: Some(&dir),
+            home: None,
+            config_home: Some(&dir),
+        };
+        let resolved = resolve_cli_with_language(None, None, None, &env).unwrap();
+        assert_eq!(resolved.language, AdvisorLanguage::Ja);
+        let _ = std::fs::remove_dir_all(&dir);
+
+        let bare = example_dir("file-language-unset");
+        let env = SessionEnv {
+            state_home: Some(&bare),
+            home: None,
+            config_home: Some(&bare),
+        };
+        let resolved = resolve_cli_with_language(None, None, None, &env).unwrap();
+        assert_eq!(resolved.language, AdvisorLanguage::En);
+    }
+
+    #[test]
+    fn resolve_cli_language_rejects_an_unknown_file_value() {
+        let dir = example_dir("file-language-bad");
+        let _ = std::fs::remove_dir_all(&dir);
+        write_config(&dir, "language = \"jp\"\n");
+        let env = SessionEnv {
+            state_home: Some(&dir),
+            home: None,
+            config_home: Some(&dir),
+        };
+        let err = resolve_cli_with_language(None, None, None, &env).unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(msg.contains("jp"), "{msg}");
+        assert!(msg.contains("en") && msg.contains("ja"), "{msg}");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

@@ -60,6 +60,7 @@ invocation behaves exactly as before.
 
 ```toml
 default_harness = "kilocode"   # claude | opencode | kilocode
+language = "ja"                # en (the default) | ja
 
 [profiles.work]
 harness = "claude"
@@ -69,7 +70,10 @@ db = "work.db"                 # relative to the config file's directory
 It holds two kinds of defaults plus named profiles `--profile` selects.
 Resolution order, strongest first: explicit flags, the selected profile, the
 file's top-level defaults, then the builtins (`claude`, the per-harness store
-path). Flag *values* (`--scope`, `--format`) are parsed before the session is
+path). `language` follows the same strongest-first shape minus the profile
+layer: `--language`, then the file's top-level `language`, then English.
+Profiles never carry it, so selecting a profile never blocks the file default.
+Flag *values* (`--scope`, `--format`) are parsed before the session is
 built, so an invalid flag fails on its own ― no store open, no freshness line
 ahead of the error. The report views resolve those flags through the
 windowed dispatch in `cli/window.rs`: `WindowedDispatch::open` for the four
@@ -87,9 +91,10 @@ first, exactly as the pre-`Session` dispatch did. A relative `db` joins the dire
 current working directory ― while an explicit `--db` is taken as is, even
 when relative; `~` is not expanded. Unknown keys are ignored so a newer file
 never breaks an older binary. A missing file is silence, not an error; anything
-else wrong with the file (unparsable TOML, unknown harness, missing profile)
-fails the invocation with the file named, and an unknown `--profile` lists the
-available ones.
+else wrong with the file (unparsable TOML, unknown harness, missing profile,
+unknown language) fails the invocation with the file named, and an unknown
+`--profile` lists the available ones while an unknown `language` lists the
+valid values (`en | ja`).
 
 ## Views ― read the store
 
@@ -222,17 +227,25 @@ runs the equivalent report command. The implementation lives in
 
 Entry conditions: no subcommand *and* stdin and stdout both TTYs, or the
 explicit `tui` subcommand. A `--harness` (or `--profile`) flag given with
-either entry is a preset: step 1 is skipped and the named value is used. Any
-other token ― a real subcommand, `--help`, `--version` ― belongs to clap,
+either entry is a preset: step 1 is skipped and the named value is used. A
+`--language` flag given with either entry is also a preset and rides the
+entry into the inline next step below, but it selects no harness, so step 1
+is still asked. Any other token ― a real subcommand, `--help`, `--version` ― belongs to clap,
 and the guide never intercepts it.
 
-The four steps, each defaulting to its first choice (empty input keeps it,
-`q` quits the guide): (1) confirm the harness (the resolved default is
-shown); (2) pick the purpose ― `doctor` (health check), `waste` (prune
+The four steps, each with a default (empty input keeps it,
+`q` quits the guide): (1) pick the harness ― `claude`, `opencode`, or
+`kilocode`, defaulting to the resolved value; with a `--harness` (or
+`--profile`) preset this step is skipped and the resolved value is used;
+(2) pick the purpose ― `doctor` (health check), `waste` (prune
 candidates), or `failures` (recurring friction); (3) pick the scope ― all
 history (no `--scope` flag), `global`, or `project`; (4) after the report,
-answer the config save question below. After each report the guide asks
-whether to look at one more (default no) and loops on `y`.
+then the guide offers to run the printed optimize command inline (default
+no), then answer the config save question below. At the inline-run question
+`q` counts as no rather than quitting the guide. The chosen harness is kept
+for the whole invocation: after each report the guide asks whether to look
+at one more (default no) and loops on `y` back to the purpose, never
+re-asking the harness.
 
 Output is always the table form: the guide takes no `--format` and no period
 flags. Before running, it echoes the equivalent command line (e.g.
@@ -263,8 +276,20 @@ the variable is test-only and unsupported, and must never be set by users.
 v0.5.4 scope is `doctor` / `waste` / `failures` plus the config save above.
 `optimize` itself stays out of the guide, but after each report the guide
 prints a next-step line pointing at it with the matching scope
-(e.g. `saniwalens optimize --scope global`); the remaining reports, period
-flags, and `sql` stay out. The candidates and their order are declared in
+(e.g. `saniwalens optimize --scope global`); the line is harness-aware, so on
+a headless harness it carries `--apply` (e.g.
+`saniwalens optimize --scope global --apply`), matching the handoff the
+inline run actually performs; the remaining reports, period
+flags, and `sql` stay out. The inline run branches on the harness's run mode:
+a headless harness has no dialog partner in the seeded session, so the guide
+hands off (`--apply`: the plan is saved and the harness's own interactive
+session opens on it); an interactive harness already sits in a dialog, so the
+plain inline optimize applies its own plan. The inline run carries the
+resolved advisor language into the prompt in the same flag-beats-file order
+as `optimize` (`--language`, then the file's top-level `language`, then
+English); with no language set the prompt renders byte-identical to before.
+The candidates and their order are
+declared in
 the design doc's post-v0.5.5 expansion note
 (`docs/exploration/2026-11-06-guided-tui-design.md`).
 
@@ -533,7 +558,8 @@ an amplification: only fetched rows balloon memory, and those are capped.
 
 ```
 saniwalens optimize [--projects <dir>] [--db <path>] [--scope global|project[:<slug>]]
-                [--frozen] [--print] [--verbose] [--timeout <DURATION>]
+                [--frozen] [--print] [--verbose] [--timeout <DURATION>] [--apply]
+                [--language en|ja]
 ```
 
 The AI-proposal consumer (`architecture.md`): rather than emit static
@@ -543,7 +569,7 @@ launches the harness's agent seeded with it ― `claude` for an interactive
 session that applies edits on agreement, `opencode run --format json` for a
 headless run that streams only the agent's text while the raw tool output
 logs to a private file (`--verbose` restores the raw stream) and prints the
-plan without editing. The private log lives for the whole run; a failure
+plan without editing. The headless output opens with a proposal-only status line stating no files were changed, so a truncated read still shows it. The private log lives for the whole run; a failure
 keeps it and is named in the error, so a failed advisor still leaves its full
 output reachable, while a success removes it (the raw stream may echo
 secrets) unless `SANIWALENS_KEEP_RUN_LOG=1` keeps it for post-mortem
@@ -564,6 +590,22 @@ plan, gate only on applying it" shape is the design; if it changes, update
 `instructions` renders from the harness copy (`HarnessCopy`), not a constant,
 so the advisor identity, config locations, and raw-input pointers name the
 harness whose rows the briefing renders.
+
+`--language en|ja` (and the `language` config key, same flag-beats-file order)
+switches the advisor's output language. The instruction is one sentence from a
+single source (`AdvisorLanguage::instruction_sentence` in `core::optimize`,
+carried on the same `HarnessCopy`): the briefing instructions, the headless
+instructions, the apply instructions, and the launch pointer all route through
+`instructions_for`, so every advisor-facing prompt carries it. The unset
+default is English and carries no sentence, so unset output is byte-identical
+to before; the report tables stay English either way. The guided entry passes
+its `--language` preset (or the file default when no preset names one)
+through to the inline next-step run, so the guide renders the same language
+as the equivalent `optimize` invocation. Fixed TUI protocol tokens
+are deliberately not translated: the `y`/`n`/`q` choice lines, the
+display-recovery line, and the headless proposal-only status line stay
+byte-identical in both languages, so the `y`/`n`/`q` parse contract never
+depends on the language setting.
 
 Crucially the briefing is the **complete** analysis, not a headline ― every
 project's friction breakdown, the full Bash/hotspot/thrash detail, and the actual
@@ -648,3 +690,79 @@ shell edit. `deliver` returns `Result<()>`, not a typed outcome: its only caller
 (`optimize`) needs success/failure, and a non-zero exit is already turned into
 an error naming the raw log; a `DeliveryOutcome` is deferred until a consumer
 needs the status or the log. PBI 57 records this decision.
+
+`--apply` hands a headless run's plan to the harness's own interactive
+session in one command (headless harnesses only): the advisor runs headless
+as usual, but its raw log is kept, the agent-text lines (`Text` only, never
+the JSON event lines) are extracted into the plan, and the plan is saved as
+`$XDG_STATE_HOME/saniwalens/plans/plan-<time>-<pid>-<seq>.md` with private
+(`0600`, exclusive creation, like the briefing temp files) permissions. The
+path is printed, with a note that pruning saved plans is a separate
+command's job: a handoff run always leaves its plan file behind and always
+shows its path, while a normal `optimize` leaves nothing. The harness's own
+TUI then opens on an apply-ordering prompt (`core::optimize::apply_prompt`)
+naming the plan file and the store, so the dialog digs out each step's
+evidence with `saniwalens sql` instead of re-parsing raw input:
+`opencode --prompt` for opencode (the expected shape: flag acceptance
+verified, with its TUI prompt injection still awaiting one confirmation on a
+real TTY), `kilo --prompt` and
+bare `claude` as before (`Harness::interactive_launch_command` in
+`adapter::harness`). `--apply` refuses `--print` (printing ends the run
+instead of handing it off), `--verbose` (the handoff reads the logged stream
+that verbose mode does not keep), and interactive harnesses (their session
+already applies its own plan); the flag checks run before any store work.
+When the dialog launch fails, the error names the kept plan file; when the
+headless run yields no readable text, nothing is saved and the error says
+so, and the raw log is removed either way once its text is read (it may echo
+secrets). The dialog prompt carries the apply safety contract - per-item backup,
+planned diff, explanation, choice, apply-on-y, result summary (`core::optimize::apply_prompt`).
+The session walks the plan one item at a time and never moves to the next item
+without an explicit choice on the current one: the former single approval gate
+is now per-item approval, with no whole-plan batch approval. Before
+touching an item the session copies every target file's pre-edit bytes into
+`$XDG_STATE_HOME/saniwalens/backups/<timestamp>/` (dir 0700, files 0600;
+backups are kept like plans and their path is always reported), covering
+git-tracked and untracked files alike, and additionally records
+`git status --short` for tracked ones. It then shows the item's planned diff
+(`diff -u` old-to-new; the file stays unchanged until the choice), explains
+the item briefly (why, what it fixes, its risk), and asks the item's choice on
+three short fixed lines of at most 24 characters each (`y`: Apply this item /
+`n`: Skip to next / `q`: Quit applying) with no file names, line numbers, or
+gist in them: the file, line numbers, and gist stay in the diff and
+explanation above, never in the choice lines. `y` applies it, `n` skips to the
+next item, `q` aborts the whole session. If the choice display looks wrapped
+or broken, one line tells the user to resize the terminal and ask for the same
+item again.
+Only `y` edits the file. On refusal nothing changes - files stay
+byte-identical, backups are kept, and the session says so with the backup path.
+A blanket instruction such as "do the rest" never counts as a choice: unchosen
+items stay unapplied, and the session restates that each item needs its own
+`y`/`n`/`q`. On `q` the session lists every unprocessed item and declares the
+rest unapplied.
+The session closes with a result summary in up to two sections (`## Applied changes`, omitted when nothing was applied, and `## Proposal only (not applied)`), where items skipped via `n`, aborted via `q`, never reached, or refusing the actual config are listed with why, so
+applied stays distinguishable from proposal-only without re-reading the plan.
+
+Saved plans and their backups accumulate without bound, so `saniwalens
+cleanup` lists and prunes them (the implementation lives in
+`cli/cleanup.rs`, beside the handoff seam in `cli/handoff.rs`). A bare run
+(or `--list`) prints every plan file and backup generation with its size
+(a generation dir lists its recursive total over the files under it;
+links never resolve, so a link counts as a link) and modification time;
+`cleanup --keep N` (a bare `--keep` keeps 10) deletes all but the newest N
+generations in each area, snapshotting every area and printing the count
+and total size before deleting anything, then reporting every removed path
+through the shared table renderer, so the sweep shows its evidence before
+it deletes and the deletion stays inside the generation rule. Only
+`$XDG_STATE_HOME/saniwalens/plans/` and `.../backups/` are ever touched:
+every victim is resolved (symlinks followed) and checked against those
+roots right before the delete, so an entry pointing outside is reported
+skipped and never followed out; a dangling link counts by its own parent
+dir and its link is removed; and a victim that vanished between the
+listing and the delete is ignored, not an error and not reported skipped.
+The command needs no store and opens none, so it works on a fresh machine;
+its `--format` is the shared `table | markdown | json` vocabulary, with
+the machine contract (`removed_total`, per-area `removed` / `kept` /
+`skipped`) on `--format json`. The default keep of 10 generations per area
+is a starting proposal (a handoff run is manual and infrequent, so 10
+covers weeks of iterations while bounding the secret-bearing files);
+tightening it is a review call.
