@@ -40,6 +40,72 @@ pub fn env_roots() -> EnvRoots {
     }
 }
 
+/// The locale variables one invocation falls back to when neither
+/// `--language` nor the config file names a language. Read once at the call
+/// site ([`locale_env`]); resolved purely by [`resolve_locale_language`] —
+/// the same read-here/resolve-pure split as [`EnvRoots`] / [`SessionEnv`].
+pub struct LocaleEnv {
+    pub lc_all: Option<String>,
+    pub lc_messages: Option<String>,
+    pub lang: Option<String>,
+}
+
+/// Read the process locale for advisor-language resolution. Owned here so
+/// `run()` and the guide entry share one read site; resolved at each use
+/// site with [`resolve_locale_language`], never inside the resolver.
+pub fn locale_env() -> LocaleEnv {
+    LocaleEnv {
+        lc_all: std::env::var("LC_ALL").ok(),
+        lc_messages: std::env::var("LC_MESSAGES").ok(),
+        lang: std::env::var("LANG").ok(),
+    }
+}
+
+/// Read the process locale and resolve the advisor-language fallback in one
+/// call, for the two production wiring sites (`run()` and the guide entry).
+/// Tests use [`locale_env`] plus [`resolve_locale_language`] directly with
+/// synthetic values instead, so the precedence stays unit-testable.
+pub fn process_locale_language() -> Option<AdvisorLanguage> {
+    let locale = locale_env();
+    resolve_locale_language(
+        locale.lc_all.as_deref(),
+        locale.lc_messages.as_deref(),
+        locale.lang.as_deref(),
+    )
+}
+
+/// Whether one locale value names Japanese: lowercase it, drop the encoding
+/// (`.UTF-8`) and any `@` modifier, then match the first `_`/`-`-separated
+/// subtag against `ja`. `C`, `POSIX`, and the empty value sit on the
+/// English side (`false`) — a strange value falls back to the default, it
+/// never fails the invocation.
+pub fn locale_is_japanese(value: &str) -> bool {
+    let lower = value.trim().to_lowercase();
+    let base = lower.split(['.', '@']).next().unwrap_or("");
+    base.split(['_', '-'])
+        .next()
+        .is_some_and(|subtag| subtag == "ja")
+}
+
+/// Resolve the locale fallback with POSIX precedence: `LC_ALL` wins over
+/// `LC_MESSAGES`, which wins over `LANG`; an empty value counts as unset.
+/// Yields `Some(Ja)` exactly when the winner is Japanese, `None` otherwise —
+/// the caller falls back to the English default, so `C`/`en_US`/unset all
+/// render byte-identical to before.
+pub fn resolve_locale_language(
+    lc_all: Option<&str>,
+    lc_messages: Option<&str>,
+    lang: Option<&str>,
+) -> Option<AdvisorLanguage> {
+    [lc_all, lc_messages, lang]
+        .into_iter()
+        .flatten()
+        .map(str::trim)
+        .find(|value| !value.is_empty())
+        .filter(|winner| locale_is_japanese(winner))
+        .map(|_| AdvisorLanguage::Ja)
+}
+
 /// What `--harness` / `--profile` / `--language` plus the config file resolve
 /// to, before any store is opened.
 #[derive(Debug, PartialEq)]
@@ -52,7 +118,8 @@ pub struct ResolvedCli {
 /// Resolve one invocation's harness and default store from flags plus the
 /// tool's own config file. Pure over the supplied environment: tests pass
 /// temp dirs, production passes the live roots. The language keeps its
-/// default here — the flag-carrying entry is [`resolve_cli_with_language`];
+/// default here — the flag-carrying entry is [`resolve_cli_with_language`],
+/// which additionally applies the locale fallback;
 /// the guided TUI resolves through that one and carries the language into
 /// its inline next-step session.
 pub fn resolve_cli(
@@ -60,15 +127,19 @@ pub fn resolve_cli(
     cli_profile: Option<&str>,
     env: &SessionEnv,
 ) -> Result<ResolvedCli> {
-    resolve_cli_with_language(cli_harness, cli_profile, None, env)
+    resolve_cli_with_language(cli_harness, cli_profile, None, None, env)
 }
 
 /// [`resolve_cli`] with an explicit `--language` flag. Resolution order,
-/// strongest first: the flag, the file's top-level `language`, then English.
+/// strongest first: the flag, the file's top-level `language`, the locale
+/// fallback ([`resolve_locale_language`]), then English. The locale is
+/// already resolved by the caller — this function never reads the process
+/// environment, so tests pass synthetic values.
 pub fn resolve_cli_with_language(
     cli_harness: Option<&str>,
     cli_profile: Option<&str>,
     cli_language: Option<&str>,
+    locale: Option<AdvisorLanguage>,
     env: &SessionEnv,
 ) -> Result<ResolvedCli> {
     let config_path = config_file_path(env.config_home, env.home);
@@ -79,8 +150,16 @@ pub fn resolve_cli_with_language(
         .transpose()?
         .flatten();
     let resolved = config_file::resolve(cli_harness, cli_profile, None, file.as_ref(), config_dir)?;
-    let language =
-        parse_language(config_file::resolve_language(cli_language, file.as_ref()).as_deref())?;
+    // Some(En) carries no opinion, same as None — the locale only ever votes Ja.
+    let locale_code = match locale {
+        Some(AdvisorLanguage::Ja) => Some("ja"),
+        Some(AdvisorLanguage::En) | None => None,
+    };
+    let language = parse_language(
+        config_file::resolve_language(cli_language, file.as_ref())
+            .as_deref()
+            .or(locale_code),
+    )?;
     Ok(ResolvedCli {
         harness: parse_harness(resolved.harness.as_deref())?,
         config_db: resolved.db,
@@ -707,7 +786,7 @@ mod tests {
             home: None,
             config_home: Some(&dir),
         };
-        let resolved = resolve_cli_with_language(None, None, Some("en"), &env).unwrap();
+        let resolved = resolve_cli_with_language(None, None, Some("en"), None, &env).unwrap();
         assert_eq!(resolved.language, AdvisorLanguage::En);
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -722,7 +801,7 @@ mod tests {
             home: None,
             config_home: Some(&dir),
         };
-        let resolved = resolve_cli_with_language(None, None, None, &env).unwrap();
+        let resolved = resolve_cli_with_language(None, None, None, None, &env).unwrap();
         assert_eq!(resolved.language, AdvisorLanguage::Ja);
         let _ = std::fs::remove_dir_all(&dir);
 
@@ -732,7 +811,7 @@ mod tests {
             home: None,
             config_home: Some(&bare),
         };
-        let resolved = resolve_cli_with_language(None, None, None, &env).unwrap();
+        let resolved = resolve_cli_with_language(None, None, None, None, &env).unwrap();
         assert_eq!(resolved.language, AdvisorLanguage::En);
     }
 
@@ -746,11 +825,114 @@ mod tests {
             home: None,
             config_home: Some(&dir),
         };
-        let err = resolve_cli_with_language(None, None, None, &env).unwrap_err();
+        let err = resolve_cli_with_language(None, None, None, None, &env).unwrap_err();
         let msg = format!("{err:#}");
         assert!(msg.contains("jp"), "{msg}");
         assert!(msg.contains("en") && msg.contains("ja"), "{msg}");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn locale_is_japanese_matches_the_leading_subtag_only() {
+        // PBI 2026-11-11-01: normalize by lowercasing, dropping the
+        // encoding (`.UTF-8`) and `@` modifier, then reading the first
+        // `_`/`-`-separated subtag — `ja_JP.UTF-8` is Japanese, `C` is not.
+        for ja in [
+            "ja",
+            "ja_JP",
+            "ja_JP.UTF-8",
+            "JA-jp",
+            "ja@tokyo",
+            "ja_JP.UTF-8@modifier",
+        ] {
+            assert!(locale_is_japanese(ja), "{ja}");
+        }
+        for not_ja in [
+            "",
+            "C",
+            "POSIX",
+            "en",
+            "en_US",
+            "en_US.UTF-8",
+            "japanese",
+            "de_JA",
+        ] {
+            assert!(!locale_is_japanese(not_ja), "{not_ja}");
+        }
+    }
+
+    #[test]
+    fn resolve_locale_language_follows_posix_precedence() {
+        // PBI 2026-11-11-01: `LC_ALL` > `LC_MESSAGES` > `LANG`; an empty
+        // value counts as unset. A non-Japanese winner carries no opinion
+        // (`None`), so the caller falls back to the English default.
+        use AdvisorLanguage::Ja;
+        assert_eq!(
+            resolve_locale_language(Some("ja_JP.UTF-8"), None, None),
+            Some(Ja)
+        );
+        assert_eq!(resolve_locale_language(None, Some("ja"), None), Some(Ja));
+        assert_eq!(
+            resolve_locale_language(None, None, Some("ja_JP.UTF-8")),
+            Some(Ja)
+        );
+        assert_eq!(resolve_locale_language(None, None, None), None);
+        assert_eq!(resolve_locale_language(Some(""), Some(""), Some("")), None);
+        // Boundary: `LC_ALL=C` silences `LANG=ja`; `LC_MESSAGES` wins over
+        // `LANG` the same way; a `ja` `LC_ALL` wins over everything below.
+        assert_eq!(
+            resolve_locale_language(Some("C"), None, Some("ja_JP.UTF-8")),
+            None
+        );
+        assert_eq!(resolve_locale_language(None, Some("C"), Some("ja")), None);
+        assert_eq!(
+            resolve_locale_language(Some("ja"), Some("C"), Some("C")),
+            Some(Ja)
+        );
+        assert_eq!(
+            resolve_locale_language(None, None, Some("en_US.UTF-8")),
+            None
+        );
+    }
+
+    #[test]
+    fn resolve_cli_language_prefers_flag_over_file_over_locale_over_english() {
+        // PBI 2026-11-11-01: the full order — `--language` > config >
+        // locale > En — as one table over the file-backed and bare dirs.
+        use AdvisorLanguage::{En, Ja};
+        let dir = example_dir("file-language-locale-order");
+        let _ = std::fs::remove_dir_all(&dir);
+        write_config(&dir, "language = \"ja\"\n");
+        let env = SessionEnv {
+            state_home: Some(&dir),
+            home: None,
+            config_home: Some(&dir),
+        };
+        // The flag beats the file even with a Japanese locale behind it.
+        let resolved = resolve_cli_with_language(None, None, Some("en"), Some(Ja), &env).unwrap();
+        assert_eq!(resolved.language, En);
+        // The file beats a non-Japanese (`C`) locale: `config ja` +
+        // `LANG=C` stays Japanese.
+        let resolved = resolve_cli_with_language(None, None, None, None, &env).unwrap();
+        assert_eq!(resolved.language, Ja);
+        let _ = std::fs::remove_dir_all(&dir);
+
+        let bare = example_dir("file-language-locale-bare");
+        let bare_env = SessionEnv {
+            state_home: Some(&bare),
+            home: None,
+            config_home: Some(&bare),
+        };
+        // The locale fills the gap the flag and the file leave.
+        let resolved = resolve_cli_with_language(None, None, None, Some(Ja), &bare_env).unwrap();
+        assert_eq!(resolved.language, Ja);
+        // ... and the default is still English with no locale behind it.
+        let resolved = resolve_cli_with_language(None, None, None, None, &bare_env).unwrap();
+        assert_eq!(resolved.language, En);
+        // The flag beats the locale with no file in play either.
+        let resolved =
+            resolve_cli_with_language(None, None, Some("en"), Some(Ja), &bare_env).unwrap();
+        assert_eq!(resolved.language, En);
     }
 
     fn store_with_harness(dir: &Path, file: &str, label: Option<&str>) -> PathBuf {
