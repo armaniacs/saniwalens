@@ -2087,9 +2087,13 @@ mod tests {
         );
 
         // The session row carries the new start, not the stale first pass.
-        let store = Store::open(&db, OpenMode::ReadOnly).unwrap();
-        let (_, rows) = store.query("SELECT started_at FROM sessions").unwrap();
-        assert_eq!(rows, vec![vec!["2023-11-14T22:13:25+00:00".to_string()]]);
+        // Scoped so the store handle is released before the temp dir is
+        // removed (Windows holds file locks on open handles).
+        {
+            let store = Store::open(&db, OpenMode::ReadOnly).unwrap();
+            let (_, rows) = store.query("SELECT started_at FROM sessions").unwrap();
+            assert_eq!(rows, vec![vec!["2023-11-14T22:13:25+00:00".to_string()]]);
+        }
 
         unsafe { std::env::remove_var("XDG_CONFIG_HOME") };
         std::fs::remove_dir_all(&dir).unwrap();

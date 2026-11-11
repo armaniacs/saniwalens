@@ -66,7 +66,10 @@
           # `CARGO_MANIFEST_DIR` (line 19, `.expect` at line 28), so the
           # package build needs that one file - not the whole `scripts/`
           # tree (`flaky_repeat.sh` is a dev helper no test reads).
-          || rel == "scripts/pr_scaffold.py";
+          || rel == "scripts/pr_scaffold.py"
+          # The `scripts` dir itself must pass the filter for traversal to
+          # reach the file above; children are still filtered individually.
+          || rel == "scripts";
 
         commonArgs = {
           src = pkgs.lib.cleanSourceWith {
