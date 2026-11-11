@@ -1396,8 +1396,19 @@ mod tests {
         fs::remove_dir_all(&dir).ok();
 
         // Terminating at all is the regression: before the visited-set this
-        // recursed until the stack gave out.
-        assert!(surfaces.iter().any(|s| s.id == "real/tdd"));
+        // recursed until the stack gave out. Which alias wins (`real/tdd`
+        // vs `link-back/tdd`) depends on `read_dir` order, which the OS
+        // does not guarantee — so pin single-cataloguing, not the alias.
+        let tdds: Vec<_> = surfaces
+            .iter()
+            .filter(|s| s.id == "real/tdd" || s.id == "link-back/tdd")
+            .collect();
+        assert_eq!(
+            tdds.len(),
+            1,
+            "the file is catalogued exactly once, under one alias: {:?}",
+            surfaces.iter().map(|s| s.id.as_str()).collect::<Vec<_>>()
+        );
     }
 
     #[test]

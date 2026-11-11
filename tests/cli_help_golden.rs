@@ -374,6 +374,9 @@ fn every_windowed_views_help_is_pinned_byte_for_byte() {
             String::from_utf8_lossy(&out.stderr)
         );
         let actual = String::from_utf8(out.stdout).unwrap();
+        // clap names the binary file stem: `saniwalens.exe` on Windows.
+        // The goldens pin the portable spelling.
+        let actual = actual.replace("saniwalens.exe", "saniwalens");
         assert_eq!(
             actual, expected,
             "{view} --help drifted from its capture — actual:\n{actual}"
