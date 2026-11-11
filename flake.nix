@@ -61,7 +61,12 @@
           # `tests/mod_split_views_golden.rs`), so the package build - which
           # runs those tests - needs the tree, not just Cargo sources.
           || rel == "tests/golden"
-          || pkgs.lib.hasPrefix "tests/golden/" rel;
+          || pkgs.lib.hasPrefix "tests/golden/" rel
+          # `tests/pr_scaffold.rs` executes `scripts/pr_scaffold.py` via
+          # `CARGO_MANIFEST_DIR` (line 19, `.expect` at line 28), so the
+          # package build needs that one file - not the whole `scripts/`
+          # tree (`flaky_repeat.sh` is a dev helper no test reads).
+          || rel == "scripts/pr_scaffold.py";
 
         commonArgs = {
           src = pkgs.lib.cleanSourceWith {
