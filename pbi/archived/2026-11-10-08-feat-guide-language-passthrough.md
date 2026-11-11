@@ -26,12 +26,12 @@ Scenario: 未設定では従来どおり
   Then  従来出力とバイト同一である
 
 ## 受け入れ基準
-- [ ] `mod.rs` の `Tui` arm が言語を `run_guide_entry` に通す
-- [ ] `run_guide_entry` が言語つき解決に切り替わり、`run_guide` に渡す
-- [ ] ガイド内の `Session::open_resolved` 後に `sess.language` を設定する (通常 arm と鏡像)
-- [ ] `language = "ja"` のスクリプトテストでハンドオフプロンプトへの到達を固定する
-- [ ] `cargo test` と `cargo clippy --all-targets -- -D warnings` が green
-- [ ] `docs/specs/cli.md` のガイド節が同一変更で更新されている
+- [x] `mod.rs` の `Tui` arm が言語を `run_guide_entry` に通す
+- [x] `run_guide_entry` が言語つき解決に切り替わり、`run_guide` に渡す
+- [x] ガイド内の `Session::open_resolved` 後に `sess.language` を設定する (通常 arm と鏡像)
+- [x] `language = "ja"` のスクリプトテストでハンドオフプロンプトへの到達を固定する
+- [x] `cargo test` と `cargo clippy --all-targets -- -D warnings` が green
+- [x] `docs/specs/cli.md` のガイド節が同一変更で更新されている
 
 ## テスト戦略 (t_wadaスタイル)
 
@@ -45,6 +45,6 @@ Scenario: 未設定では従来どおり
 1 (要チームでの見積もり。配線のみで新規ロジックなし)
 
 ## Definition of Done
-- [ ] 全BDDシナリオが自動テストとして実装されパスする
-- [ ] コードレビュー完了
-- [ ] ドキュメント更新済み
+- [x] 全BDDシナリオが自動テストとして実装されパスする
+- [x] コードレビュー完了
+- [x] ドキュメント更新済み

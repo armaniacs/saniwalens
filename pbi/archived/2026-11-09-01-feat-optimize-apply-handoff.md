@@ -41,12 +41,12 @@ Scenario: 失敗時は秘密を残さずガイドが死なない
   And   保存済みプランファイルの扱い (残す/消すとパス) が明示される
 
 ## 受け入れ基準
-- [ ] ヘッドレス実行のプラン本文だけを取り出す手段がある (JSON イベント混じりの生ログと区別できること)
-- [ ] プラン保存先が決まっている (候補: `$XDG_STATE_HOME/saniwalens/plans/` 配下。交渉可だがcwd相対は不可)
-- [ ] 対話セッションの起動形状が harness ごとに決まっている (claude は対話起動、kilo は `kilo --prompt`、opencode TUI への渡し方はスパイクで確定すること)
-- [ ] 保存ファイルは 0600 等の私的権限で作られる (error 抜粋など秘密を含みうるため。既存の briefing 私的 temp と同水準)
-- [ ] `cargo test` と `cargo clippy --all-targets -- -D warnings` が green
-- [ ] `docs/specs/cli.md` の `optimize` 節が同一変更で更新されている
+- [x] ヘッドレス実行のプラン本文だけを取り出す手段がある (JSON イベント混じりの生ログと区別できること)
+- [x] プラン保存先が決まっている (候補: `$XDG_STATE_HOME/saniwalens/plans/` 配下。交渉可だがcwd相対は不可)
+- [x] 対話セッションの起動形状が harness ごとに決まっている (claude は対話起動、kilo は `kilo --prompt`、opencode TUI への渡し方はスパイクで確定すること)
+- [x] 保存ファイルは 0600 等の私的権限で作られる (error 抜粋など秘密を含みうるため。既存の briefing 私的 temp と同水準)
+- [x] `cargo test` と `cargo clippy --all-targets -- -D warnings` が green
+- [x] `docs/specs/cli.md` の `optimize` 節が同一変更で更新されている
 
 ## テスト戦略 (t_wadaスタイル)
 
@@ -102,11 +102,11 @@ grep -rn "launch_command\|RunMode" src/adapter/harness.rs | head
 - 既存の `DeliveryMode` に第4の値を足すか追従ステップにするかは実装時に選ぶ。どちらでも既存3モードのテストを壊さないことが条件
 
 ## Definition of Done
-- [ ] 全BDDシナリオが自動テストとして実装されパスする (正常起動の E2E 除外はコメントで明示)
-- [ ] テストカバレッジが基準を満たす (E2E/統合/単体すべて)
-- [ ] コードレビュー完了
-- [ ] リファクタリング完了 (グリーン後)
-- [ ] ドキュメント更新済み (`docs/specs/cli.md` の `optimize` 節)
+- [x] 全BDDシナリオが自動テストとして実装されパスする (正常起動の E2E 除外はコメントで明示)
+- [x] テストカバレッジが基準を満たす (E2E/統合/単体すべて)
+- [x] コードレビュー完了
+- [x] リファクタリング完了 (グリーン後)
+- [x] ドキュメント更新済み (`docs/specs/cli.md` の `optimize` 節)
 
 ## 深掘りセッション 2026-11-09
 

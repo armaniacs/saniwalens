@@ -25,10 +25,10 @@ Scenario: 対話実行行は変わらない
   Then  `実行:` 行は従来どおりである
 
 ## 受け入れ基準
-- [ ] `next_step_line` が harness と実行形態を受け取り、ヘッドレス時は `--apply` 付きを返す
-- [ ] E2E golden が更新されている (表示変更のため)
-- [ ] `cargo test` と `cargo clippy --all-targets -- -D warnings` が green
-- [ ] `docs/specs/cli.md` の該当箇所が同一変更で更新されている
+- [x] `next_step_line` が harness と実行形態を受け取り、ヘッドレス時は `--apply` 付きを返す
+- [x] E2E golden が更新されている (表示変更のため)
+- [x] `cargo test` と `cargo clippy --all-targets -- -D warnings` が green
+- [x] `docs/specs/cli.md` の該当箇所が同一変更で更新されている
 
 ## テスト戦略 (t_wadaスタイル)
 
@@ -42,6 +42,6 @@ Scenario: 対話実行行は変わらない
 1 (要チームでの見積もり。小規模な表示修正＋golden 更新)
 
 ## Definition of Done
-- [ ] 全BDDシナリオが自動テストとして実装されパスする (E2E 除外はコメントで明示)
-- [ ] コードレビュー完了
-- [ ] ドキュメント更新済み
+- [x] 全BDDシナリオが自動テストとして実装されパスする (E2E 除外はコメントで明示)
+- [x] コードレビュー完了
+- [x] ドキュメント更新済み
