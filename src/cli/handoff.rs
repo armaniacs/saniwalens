@@ -324,11 +324,14 @@ mod tests {
     /// A synthetic `--format json` tool-event line: the noise a headless run
     /// streams around the agent's text. The real envelope shape, never a
     /// harvested line.
+    #[cfg(unix)]
     const TOOL_LINE: &str = r#"{"type":"tool_use","timestamp":1792904532992,"sessionID":"ses_demo","part":{"partID":"prt_demo","type":"tool","tool":"read","state":{"status":"completed"}}}"#;
 
     /// A synthetic text-event line carrying plan prose.
+    #[cfg(unix)]
     const TEXT_LINE: &str = r#"{"type":"text","timestamp":1792904882135,"sessionID":"ses_demo","part":{"id":"prt_demo","type":"text","text":"1. Add a file map to AGENTS.md"}}"#;
 
+    #[cfg(unix)]
     fn opencode_copy() -> optimize_mod::HarnessCopy {
         Harness::Opencode.copy()
     }

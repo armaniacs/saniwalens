@@ -28,6 +28,7 @@ use saniwalens::cli::{AdvisorLaunch, DeliveryMode, DeliveryPlan, deliver};
 /// A synthetic `--format json` line: the tool event a headless run streams.
 /// The real envelope shape (an event naming the kind, wrapping the part),
 /// never a harvested line.
+#[cfg(unix)]
 const TOOL_LINE: &str = r#"{"type":"tool_use","timestamp":1792904532992,"sessionID":"ses_demo","part":{"partID":"prt_demo","type":"tool","tool":"read","state":{"status":"completed"}}}"#;
 
 #[cfg(unix)]

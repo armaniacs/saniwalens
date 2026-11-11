@@ -77,6 +77,9 @@
             filter = proseSources;
           };
           strictDeps = true;
+          # The pr-scaffold e2e test spawns `python3 scripts/pr_scaffold.py`;
+          # without it on PATH the spawn itself fails in the sandbox.
+          nativeBuildInputs = [ pkgs.python3 ];
           # rusqlite is built with the `bundled` feature, so SQLite compiles from
           # C against the stdenv C toolchain - no system sqlite/pkg-config needed.
         };
