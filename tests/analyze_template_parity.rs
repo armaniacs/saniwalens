@@ -53,7 +53,10 @@ fn clear_env(key: &str) {
 }
 
 fn normalize(root: &Path, text: &str) -> String {
+    // Golden files name paths with `/`; a native separator on Windows would
+    // otherwise pin a platform-specific dump. Normalize after the ROOT swap.
     text.replace(&root.display().to_string(), "<ROOT>")
+        .replace('\\', "/")
 }
 
 /// The stable meta rows: every key except the wall-clock `analyzed_at`.

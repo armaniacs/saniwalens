@@ -340,6 +340,10 @@ pub(crate) fn write_private_file(path: &Path, contents: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    // `Harness::run_line_renderer` only appears in the `#[cfg(unix)]` delivery
+    // tests below (process-spawn doubles need `ExitStatusExt`); ungated, the
+    // import is unused on Windows and `-D warnings` fails the lint job.
+    #[cfg(unix)]
     use crate::adapter::harness::Harness;
 
     /// A path in the temp dir that no other test uses, removed on drop so a

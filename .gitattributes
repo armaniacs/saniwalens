@@ -1,3 +1,6 @@
+# Golden files are byte-compared against `\n`-joined dumps, so a CRLF
+# checkout on Windows would break every comparison. Keep them as-is.
+tests/golden/** -text
 # GitHub runs `git describe` into VERSION when it serves an archive, which is
 # how a flake fetched at a tag learns the tag (see flake.nix).
 VERSION export-subst

@@ -32,7 +32,7 @@ exclude = [
 ]
 
 [dependencies]
-anyhow = "1.0.102"
+anyhow = "1.0.104"
 chrono = { version = "0.4.45", default-features = false, features = ["std", "clock"] }
 clap = { version = "4.6.1", features = ["derive"] }
 # Pinned to 0.32: newer rusqlite pulls libsqlite3-sys >= 0.38, whose build

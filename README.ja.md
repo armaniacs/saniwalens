@@ -89,8 +89,10 @@ saniwalens doctor
 saniwalens doctor --scope global
 saniwalens doctor --scope project:<slug>
 
-# 3. 見つけた点を動かす:対話 `claude` セッションに渡し、
-#    原因を調べて具体策を出させる。
+# 3. 見つけた点を動かす:分析ぜんぶを積んだ advisor セッションに渡し、
+#    原因を調べて具体策を出させる。既定は対話 (`claude`、`kilo --prompt`)。
+#    headless harness (opencode) は計画文だけ出し、変えない ― `--apply` で
+#    保存して harness 自前の対話を開き、1 件ずつ適用する。
 saniwalens optimize --scope global
 ```
 
@@ -144,6 +146,7 @@ DSH 対応が次の候補。[`CONTRIBUTING.ja.md`](CONTRIBUTING.ja.md) に新 ha
 
 ```toml
 default_harness = "kilocode"
+language = "ja"   # advisor の出力言語 (optimize のみ)。表本体は英語のまま
 
 [profiles.work]
 harness = "claude"
@@ -151,7 +154,9 @@ db = "work.db"   # 設定ファイルのあるディレクトリ基準
 ```
 
 `saniwalens --profile work doctor` でその profile 動作。明示フラグは常に
-ファイルより勝つ。解決順は [`docs/specs/cli.md`](docs/specs/cli.md)。
+ファイルより勝つ。`language` も旗がファイルより勝つ順 (`--language`、
+ファイル直下の `language`、英語) で、今日のところ促し文にするのは
+`optimize` だけ。解決順は [`docs/specs/cli.md`](docs/specs/cli.md)。
 
 ## コマンド
 
@@ -162,7 +167,24 @@ db = "work.db"   # 設定ファイルのあるディレクトリ基準
 | `saniwalens doctor` | 健康診断。全体 / プロジェクト別に分ける ― **まずここ**。 |
 | `saniwalens analyze` | transcript + 設定をストアに展開（増分）。読み取りは自動で走る。 |
 | `saniwalens sql '<query>'` | ストアへの任意の読み取り専用 SQL（後述）。 |
-| `saniwalens optimize` | 所見を対話 `claude` セッションに渡して動かす。 |
+| `saniwalens optimize` | 所見を advisor セッションに渡して動かす (headless harness の `--apply` は計画を保存して対話を開き適用)。 |
+| `saniwalens cleanup` | 保存した `--apply` 計画と backup の一覧 (`--list`、既定)・掃除 (`--keep [N]`、10 残す)。ストアは要らない。 |
+
+### ガイド入力
+
+対話端末で引数なし `saniwalens` (または `saniwalens tui`) は旗の代わりに
+段取りを聞く:使う agent harness (`claude`・`opencode`・`kilocode`。既定は
+解決値。`--harness` / `--profile` で聞かない) → 見るもの (`doctor` /
+`waste` / `failures`) → 範囲、の順で相当の報告コマンドを動かす。再現できる
+成果物は出たコマンド行:動かす前に出し (例 `saniwalens --harness kilocode
+waste --scope global`)、報告の後にも出した行をもう一度出す。headless
+harness では出した行に `--apply` が付く (例 `saniwalens optimize --scope
+global --apply`)。これはガイドが出す次の一手の実行と同じで、報告の後に
+同じ harness・scope の `optimize` をその場で動かすか聞き、`y` で実行する
+(`--language` の解決値〈フラグかファイル既定か〉は持ち込む)。そこで失敗してもガイドは続く。その後、
+使った harness を `config.toml` に残すか聞く (`使っているエージェント (<harness名>) の設定を保存しますか? (config: <path>)`):やめるか `default_harness` にするか
+`名前付きで保存する (--profile 名 で呼び出せる)` で `[profiles.<name>]`
+に入れて `--profile <name>` で呼ぶか ― 書く前に確認する。
 
 `--scope global | project | project:<slug>`（`doctor`、`failures`、
 `waste`、`inventory`、`optimize`）は報告を直す層に絞る:未使用・重い設定の
@@ -240,7 +262,17 @@ saniwalens sql "SELECT sql FROM sqlite_master"
   読みを速くする index は次回読み書き open 時にストア自身が作る。
   `--frozen` / `sql`（読み取り専用）は作らない。大きさは
   `saniwalens sql "SELECT COUNT(*) FROM events"` で見る。
-- `optimize` は harness 自前の対話セッションを上げる（既定 `claude`、
-  `--harness kilocode` で `kilo --prompt`)。所見を種にし、briefing は
-  非公開 temp ファイルに書く。コマンドラインには載せない。
+- `optimize` は harness 自前の advisor を上げる:対話セッション (既定
+  `claude`、`--harness kilocode` で `kilo --prompt`) は合意の上で直しを
+  当て、headless 実行 (opencode) は計画文だけ出して変えない ― 出力は先頭に
+  提案のみの宣言を出す。所見の種は非公開 temp ファイルに書き、
+  コマンドラインには載せない。`--apply` (headless のみ) は計画本文を取り
+  出して `$XDG_STATE_HOME/saniwalens/plans/` に残し、harness 自前の対話を
+  その計画で開く:1 件ずつ予定 diff と短い解説を出し `y` (当てる) / `n`
+  (次へ) / `q` (やめる) を聞く。触る前に全対象を `.../backups/` に写し、
+  最後は当てた分と提案のみのサマリで閉じる。溜まった計画と backup は
+  `saniwalens cleanup --keep [N]` で掃除 (`--keep` だけは各 10 残す)。
+  引数なし `saniwalens cleanup` (または `--list`) は出すだけで消さない。
+- `--language en|ja` は advisor の出力言語を替える (`optimize` の促し文)。
+  表本体はどちらでも英語のまま。
 - 意図的に flat（[`docs/specs/`](docs/specs/) 参照):meta-skill（`loop`）の入れ子は推定しない ― transcript には入れ子と並列を区別する手がかりが無いので、各呼び出しはそれぞれの span のまま。

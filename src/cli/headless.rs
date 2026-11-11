@@ -722,8 +722,11 @@ mod tests {
 
     // Moved from `super` (the `mod.rs` shell carries a line budget —
     // `tests/cli_mod_line_budget.rs`): the failing-advisor delivery test lives
-    // with the headless code it exercises.
+    // with the headless code it exercises. Unix-only like the test (process
+    // doubles need `ExitStatusExt`); ungated, `-D warnings` fails on Windows.
+    #[cfg(unix)]
     use super::super::{AdvisorLaunch, DeliveryMode, DeliveryPlan, deliver};
+    #[cfg(unix)]
     use crate::adapter::harness::Harness;
 
     #[cfg(unix)]

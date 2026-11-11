@@ -7,6 +7,29 @@
 形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に従い、
 バージョンは [Semantic Versioning](https://semver.org/lang/ja/) に従う。
 
+## [0.6.0] - 2026-11-10
+
+### Added
+
+- 対話ガイドの最初にエージェント選択を追加。使う harness (claude /
+  opencode / kilocode) を聞き、既定は解決値。`--harness` / `--profile`
+  指定時は聞かずにその値を使う。
+- ガイドの報告後に次の一手の実行を選べるようにした。`y` で同じ
+  harness・scope の `optimize` をその場で実行し、失敗してもガイドは続く。
+- ガイドの保存確認の文面を明確化。使っているエージェント名を添えて保存
+  可否を尋ね、名前付き保存は `--profile` 名での呼び出しとして説明する。
+- `optimize --apply` (headless のみ)。headless 実行の計画本文を取り出し
+  て 0600 で保存し、同 harness の対話を開いて適用する。適用は項目ごとの
+  予定 diff・解説・`y` / `n` / `q` で進み、触る前に backup を取り、最後に
+  適用済みと提案のみのサマリを出す。headless 出力は先頭に提案のみの宣言を
+  出す。
+- `cleanup`: 保存プランと backup の一覧 (`--list`、引数なしも同じ) と世代
+  掃除 (`--keep [N]`、`--keep` だけは既定 10)。ストアを開かずに動く。
+- `--language en|ja`: advisor 指示文の出力言語を切り替える。表本体は英語
+  のまま。ガイド内実行にも効く。
+- ガイドの実行行を再現可能に。headless 時は実行行に `--apply` を含めて
+  出す (`saniwalens optimize ... --apply`)。
+
 ## [0.5.4] - 2026-11-07
 
 ### Added

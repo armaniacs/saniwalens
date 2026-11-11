@@ -2065,22 +2065,26 @@ mod run_event_tests {
         let stats = analyze(Some(input), &db).unwrap();
         assert_eq!((stats.sessions, stats.skipped), (2, 0));
 
-        let store = Store::open(&db, OpenMode::ReadWrite).unwrap();
-        let (cols, rows) = store
-            .query("SELECT agent, agent_id, out_tokens, spawn_depth FROM subagent_runs ORDER BY agent_id")
-            .unwrap();
-        assert_eq!(cols, vec!["agent", "agent_id", "out_tokens", "spawn_depth"]);
-        assert_eq!(rows.len(), 1, "exactly the joined spawn: {rows:?}");
-        assert_eq!(
-            rows[0],
-            vec!["Explore", "call_9", "40", "1"],
-            "the run carries the child's own cost"
-        );
-        // The parent span absorbed the run: its own 10 plus the 40 it spawned.
-        let (_, spans) = store
-            .query("SELECT sub_tokens, out_tokens FROM events WHERE kind = 'skill_invocation'")
-            .unwrap();
-        assert_eq!(spans, vec![vec!["40", "10"]]);
+        // Scoped so the store handle is released before the temp dir is
+        // removed (Windows holds file locks on open handles).
+        {
+            let store = Store::open(&db, OpenMode::ReadWrite).unwrap();
+            let (cols, rows) = store
+                .query("SELECT agent, agent_id, out_tokens, spawn_depth FROM subagent_runs ORDER BY agent_id")
+                .unwrap();
+            assert_eq!(cols, vec!["agent", "agent_id", "out_tokens", "spawn_depth"]);
+            assert_eq!(rows.len(), 1, "exactly the joined spawn: {rows:?}");
+            assert_eq!(
+                rows[0],
+                vec!["Explore", "call_9", "40", "1"],
+                "the run carries the child's own cost"
+            );
+            // The parent span absorbed the run: its own 10 plus the 40 it spawned.
+            let (_, spans) = store
+                .query("SELECT sub_tokens, out_tokens FROM events WHERE kind = 'skill_invocation'")
+                .unwrap();
+            assert_eq!(spans, vec![vec!["40", "10"]]);
+        }
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }

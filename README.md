@@ -91,8 +91,11 @@ saniwalens doctor
 saniwalens doctor --scope global
 saniwalens doctor --scope project:<slug>
 
-# 3. Act on the findings: hand them to an interactive `claude` session that
-#    investigates each root cause and proposes concrete fixes.
+# 3. Act on the findings: hand them to an advisor session seeded with the
+#    full analysis, which investigates each root cause and proposes fixes.
+#    Interactive (`claude`, `kilo --prompt`) by default; headless harnesses
+#    (opencode) print a plan instead ― add `--apply` to save it and open the
+#    harness's own interactive session to apply it item by item.
 saniwalens optimize --scope global
 ```
 
@@ -149,6 +152,7 @@ everything behaves as before):
 
 ```toml
 default_harness = "kilocode"
+language = "ja"   # advisor output language (optimize only); report tables stay English
 
 [profiles.work]
 harness = "claude"
@@ -156,7 +160,9 @@ db = "work.db"   # relative to the config file's directory
 ```
 
 `saniwalens --profile work doctor` runs under that profile; explicit flags
-always win over the file. See [`docs/specs/cli.md`](docs/specs/cli.md) for
+always win over the file. `language` follows the same flag-beats-file order
+(`--language`, then the file's top-level `language`, then English) and only
+`optimize` renders it into a prompt today. See [`docs/specs/cli.md`](docs/specs/cli.md) for
 the resolution order.
 
 ## Commands
@@ -168,7 +174,28 @@ the resolution order.
 | `saniwalens doctor` | The health check, split global / per-project ― **start here**. |
 | `saniwalens analyze` | Extract transcripts + config into the store (incremental). Reads run it automatically. |
 | `saniwalens sql '<query>'` | Run an arbitrary read-only SQL query against the store (see below). |
-| `saniwalens optimize` | Hand the findings to an interactive `claude` session to act on. |
+| `saniwalens optimize` | Hand the findings to an advisor session to act on (`--apply` on headless harnesses saves the plan and opens an interactive session to apply it). |
+| `saniwalens cleanup` | List (`--list`, the default) or prune (`--keep [N]`, keeps 10) saved `--apply` plans and backups. Needs no store. |
+
+### Guided entry
+
+Running `saniwalens` with no subcommand on an interactive terminal (or
+`saniwalens tui`) walks the typical patterns step by step instead of taking
+flags: it asks which agent harness you use ― `claude`, `opencode`, or
+`kilocode`, defaulting to the resolved value (`--harness` / `--profile` skips
+the question) ― then what to look at (`doctor` / `waste` / `failures`) and
+which scope, and runs the equivalent report command. The printed command line
+is the reproducible artifact: the guide echoes it before running (e.g.
+`saniwalens --harness kilocode waste --scope global`) and echoes the executed
+command again afterwards; on a headless harness the executed line carries
+`--apply` (e.g. `saniwalens optimize --scope global --apply`), matching the
+inline next step the guide offers. After each report the guide offers to run
+that same harness-and-scope `optimize` right there ― answer `y` and it runs
+inline (the resolved `--language`, flag or file default, rides along), and a failure there never stops
+the guide. Then it asks whether to save the harness you used to `config.toml`:
+skip, set it as `default_harness`, or store it under a named
+`[profiles.<name>]` profile you can call with `--profile <name>` ― confirming
+before it writes.
 
 `--scope global | project | project:<slug>` (on `doctor`, `failures`,
 `waste`, `inventory`, `optimize`) restricts a report to the config layer being
@@ -250,10 +277,22 @@ derived store.
   The index that keeps those reads fast is created by the store itself on the
   next read-write open; `--frozen` / `sql` (read-only) never create it. Watch
   the size with `saniwalens sql "SELECT COUNT(*) FROM events"`.
-- `optimize` launches the harness's own interactive session (`claude` by
-  default, `kilo --prompt` under `--harness kilocode`) seeded with the
-  findings; the briefing is written to a private temp file, never passed on
-  the command line.
+- `optimize` launches the harness's own advisor: an interactive session
+  (`claude` by default, `kilo --prompt` under `--harness kilocode`), which
+  applies edits on agreement, or a headless run (opencode), which streams
+  only the plan and changes nothing ― its output opens with a proposal-only
+  line saying so. The briefing is written to a private temp file, never
+  passed on the command line. With `--apply` (headless only) the plan text is
+  extracted, saved under `$XDG_STATE_HOME/saniwalens/plans/`, and the
+  harness's own interactive session opens on it: each item shows its planned
+  diff with a short explanation and asks `y` (apply) / `n` (skip) / `q`
+  (quit), one item at a time; every target file is backed up first under
+  `.../backups/`, and the session closes with an applied vs proposal-only
+  summary. Prune saved plans and backups with `saniwalens cleanup --keep
+  [N]` (a bare `--keep` keeps 10 per area); a bare `saniwalens cleanup` (or
+  `--list`) only lists them.
+- `--language en|ja` switches the advisor's output language (the `optimize`
+  prompt); the report tables stay English either way.
 - Deliberately flat (see [`docs/specs/`](docs/specs/)): meta-skill (`loop`)
   nesting is not inferred ― transcripts carry no signal that distinguishes
   nesting from sequencing, so each invocation stays its own span.

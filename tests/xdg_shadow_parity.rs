@@ -23,27 +23,41 @@ fn opt(path: &str) -> Option<&Path> {
 
 // ---- BDD 1: the XDG combination table resolves byte-identically ----
 
+// Absolute fixtures come from the temp dir so the table runs on every OS:
+// what the table pins is the absolute-vs-relative-vs-unset combination,
+// not any particular root. Expected values are built with the same joins
+// the resolvers use.
+fn abs(parts: &[&str]) -> PathBuf {
+    let mut p = std::env::temp_dir();
+    for part in parts {
+        p.push(part);
+    }
+    p
+}
+
 #[test]
 fn opencode_db_path_resolves_the_xdg_table() {
+    let xdg = abs(&["saniwalens-xdg", "data"]);
+    let home = abs(&["saniwalens-home", "u"]);
     // Absolute data home wins over everything.
     assert_eq!(
-        Harness::opencode_db_path(opt("/xdg/data"), opt("/home/u")),
-        Some(PathBuf::from("/xdg/data/opencode/opencode.db"))
+        Harness::opencode_db_path(Some(xdg.as_path()), Some(home.as_path())),
+        Some(xdg.join("opencode/opencode.db"))
     );
     // A relative data home is invalid per the XDG spec and ignored.
     assert_eq!(
-        Harness::opencode_db_path(opt("relative/data"), opt("/home/u")),
-        Some(PathBuf::from("/home/u/.local/share/opencode/opencode.db"))
+        Harness::opencode_db_path(opt("relative/data"), Some(home.as_path())),
+        Some(home.join(".local/share/opencode/opencode.db"))
     );
     // Unset falls back to the home-anchored share dir.
     assert_eq!(
-        Harness::opencode_db_path(None, opt("/home/u")),
-        Some(PathBuf::from("/home/u/.local/share/opencode/opencode.db"))
+        Harness::opencode_db_path(None, Some(home.as_path())),
+        Some(home.join(".local/share/opencode/opencode.db"))
     );
     // An absolute data home needs no home at all.
     assert_eq!(
-        Harness::opencode_db_path(opt("/xdg/data"), None),
-        Some(PathBuf::from("/xdg/data/opencode/opencode.db"))
+        Harness::opencode_db_path(Some(xdg.as_path()), None),
+        Some(xdg.join("opencode/opencode.db"))
     );
     // Without an absolute home there is no fallback answer.
     assert_eq!(Harness::opencode_db_path(None, None), None);
@@ -53,21 +67,23 @@ fn opencode_db_path_resolves_the_xdg_table() {
 
 #[test]
 fn opencode_config_dir_resolves_the_xdg_table() {
+    let xdg = abs(&["saniwalens-xdg", "config"]);
+    let home = abs(&["saniwalens-home", "u"]);
     assert_eq!(
-        Harness::opencode_config_dir(opt("/xdg/config"), opt("/home/u")),
-        Some(PathBuf::from("/xdg/config/opencode"))
+        Harness::opencode_config_dir(Some(xdg.as_path()), Some(home.as_path())),
+        Some(xdg.join("opencode"))
     );
     assert_eq!(
-        Harness::opencode_config_dir(opt("relative/config"), opt("/home/u")),
-        Some(PathBuf::from("/home/u/.config/opencode"))
+        Harness::opencode_config_dir(opt("relative/config"), Some(home.as_path())),
+        Some(home.join(".config/opencode"))
     );
     assert_eq!(
-        Harness::opencode_config_dir(None, opt("/home/u")),
-        Some(PathBuf::from("/home/u/.config/opencode"))
+        Harness::opencode_config_dir(None, Some(home.as_path())),
+        Some(home.join(".config/opencode"))
     );
     assert_eq!(
-        Harness::opencode_config_dir(opt("/xdg/config"), None),
-        Some(PathBuf::from("/xdg/config/opencode"))
+        Harness::opencode_config_dir(Some(xdg.as_path()), None),
+        Some(xdg.join("opencode"))
     );
     assert_eq!(Harness::opencode_config_dir(None, None), None);
     assert_eq!(
@@ -82,21 +98,23 @@ fn opencode_config_dir_resolves_the_xdg_table() {
 
 #[test]
 fn kilocode_config_dir_resolves_the_xdg_table() {
+    let xdg = abs(&["saniwalens-xdg", "config"]);
+    let home = abs(&["saniwalens-home", "u"]);
     assert_eq!(
-        Harness::kilocode_config_dir(opt("/xdg/config"), opt("/home/u")),
-        Some(PathBuf::from("/xdg/config/kilo"))
+        Harness::kilocode_config_dir(Some(xdg.as_path()), Some(home.as_path())),
+        Some(xdg.join("kilo"))
     );
     assert_eq!(
-        Harness::kilocode_config_dir(opt("relative/config"), opt("/home/u")),
-        Some(PathBuf::from("/home/u/.config/kilo"))
+        Harness::kilocode_config_dir(opt("relative/config"), Some(home.as_path())),
+        Some(home.join(".config/kilo"))
     );
     assert_eq!(
-        Harness::kilocode_config_dir(None, opt("/home/u")),
-        Some(PathBuf::from("/home/u/.config/kilo"))
+        Harness::kilocode_config_dir(None, Some(home.as_path())),
+        Some(home.join(".config/kilo"))
     );
     assert_eq!(
-        Harness::kilocode_config_dir(opt("/xdg/config"), None),
-        Some(PathBuf::from("/xdg/config/kilo"))
+        Harness::kilocode_config_dir(Some(xdg.as_path()), None),
+        Some(xdg.join("kilo"))
     );
     assert_eq!(Harness::kilocode_config_dir(None, None), None);
     assert_eq!(
