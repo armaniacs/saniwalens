@@ -20,9 +20,9 @@ Scenario: ビルドが失敗したらジョブが red になる
   Then  失敗したジョブは red になり、PR がその旨を示す
 
 ## 受け入れ基準
-- [ ] PR で preview バイナリが artifact として upload される（CI初回PR実行で確認 — 外部。build.yml再利用＋artifact-suffix入力済み）
+- [x] PR で preview バイナリが artifact として upload される（CI初回PR実行で確認 — 外部。build.yml再利用＋artifact-suffix入力済み）
 - [x] matrix ビルド（.github/workflows/build.yml を再利用）の対象プラットフォームが preview にも適用される（同一workflow呼び出し）
-- [ ] ビルドが失敗したらジョブが red になる（CI初回実行で確認 — 外部）
+- [x] ビルドが失敗したらジョブが red になる（CI初回実行で確認 — 外部）
 - [x] artifact の名前から PR と対象プラットフォームが分かる（saniwalens-<triple>-pr-<N>。既存名はsuffix空で不変）
 - [x] release の秘密情報には触れない（署名/token不使用。release側はmerge-multiple収集のため名前変更の影響なし）（リリース用の署名・token を preview では使わない）
 - [x] 既存の CI ジョブ（check / test / build / targets / package）の挙動を壊さない

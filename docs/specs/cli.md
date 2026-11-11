@@ -71,7 +71,12 @@ It holds two kinds of defaults plus named profiles `--profile` selects.
 Resolution order, strongest first: explicit flags, the selected profile, the
 file's top-level defaults, then the builtins (`claude`, the per-harness store
 path). `language` follows the same strongest-first shape minus the profile
-layer: `--language`, then the file's top-level `language`, then English.
+layer: `--language`, then the file's top-level `language`, then the locale
+fallback, then English. The locale fallback reads `LC_ALL` over
+`LC_MESSAGES` over `LANG` (POSIX order, empty counts as unset) and is
+Japanese only when the leading subtag is `ja` (`ja`, `ja_JP`,
+`ja_JP.UTF-8`); `C`, an empty value, and anything else keep the English
+default, byte-identical to before.
 Profiles never carry it, so selecting a profile never blocks the file default.
 Flag *values* (`--scope`, `--format`) are parsed before the session is
 built, so an invalid flag fails on its own ― no store open, no freshness line
@@ -285,9 +290,10 @@ a headless harness has no dialog partner in the seeded session, so the guide
 hands off (`--apply`: the plan is saved and the harness's own interactive
 session opens on it); an interactive harness already sits in a dialog, so the
 plain inline optimize applies its own plan. The inline run carries the
-resolved advisor language into the prompt in the same flag-beats-file order
-as `optimize` (`--language`, then the file's top-level `language`, then
-English); with no language set the prompt renders byte-identical to before.
+resolved advisor language into the prompt in the same order
+as `optimize` (`--language`, then the file's top-level `language`, then the
+locale fallback, then English); with no language set anywhere the prompt
+renders byte-identical to before.
 The candidates and their order are
 declared in
 the design doc's post-v0.5.5 expansion note
@@ -591,7 +597,8 @@ plan, gate only on applying it" shape is the design; if it changes, update
 so the advisor identity, config locations, and raw-input pointers name the
 harness whose rows the briefing renders.
 
-`--language en|ja` (and the `language` config key, same flag-beats-file order)
+`--language en|ja` (and the `language` config key, the same flag-beats-file
+order with the locale fallback beneath them)
 switches the advisor's output language. The instruction is one sentence from a
 single source (`AdvisorLanguage::instruction_sentence` in `core::optimize`,
 carried on the same `HarnessCopy`): the briefing instructions, the headless

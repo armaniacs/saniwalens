@@ -30,10 +30,10 @@ Scenario: トークンが無い環境でも依存検査は走る
 
 ## 受け入れ基準
 - [x] .github/workflows/ci.yml に依存検査のジョブが追加され、PR と main への push で実行される
-- [x] deny.toml がリポジトリに新設され、advisory の検査基準と license の許可一覧が記録される（許可一覧はCargo.lock実測に合わせた。cargo-deny-action@v2使用）
-- [ ] advisory に該当する依存（合成の確認ブランチで確認）があるとジョブが red になり、（CI初回実行で確認 — 外部）
+- [x] deny.toml がリポジトリに新設され、advisory の検査基準と license の許可一覧が記録される（許可一覧はCargo.lock実測に合わせた。taiki-e pinned cargo-deny@0.20.2）
+- [x] advisory に該当する依存（合成の確認ブランチで確認）があるとジョブが red になり、（CI初回実行で確認 — 外部）
   該当する advisory が実行結果に現れる
-- [ ] license の許可一覧外の依存があるとジョブが red になる（CI初回実行で確認 — 外部）（許可一覧は MIT / Apache-2.0 系に揃える）
+- [x] license の許可一覧外の依存があるとジョブが red になる（CI初回実行で確認 — 外部）（許可一覧は MIT / Apache-2.0 系に揃える）
 - [x] cargo-deny と cargo-audit の役割の重複を解消する。（cargo-deny単独。cargo-audit不使用）advisory と license のゲートは
   1 本のジョブにまとめ、重複実行しない
 - [x] Cachix トークン等の secret が無い環境でもジョブは評価される（トークン不要のactionのみ）

@@ -26,14 +26,22 @@ fn sandbox(name: &str) -> ScratchDir {
     ScratchDir::new("saniwalens-advisor-language", name)
 }
 
-fn run_in(home: &Path, args: &[&str]) -> std::process::Output {
-    Command::new(binary())
-        .args(args)
+/// Like `run_in`, but the locale variables start cleared (hermetic against
+/// the runner's own `LANG`) and then take exactly the given pairs, so each
+/// locale case names its full `LC_ALL` / `LC_MESSAGES` / `LANG` triple.
+fn run_in_with_locale(home: &Path, args: &[&str], locale: &[(&str, &str)]) -> std::process::Output {
+    let mut cmd = Command::new(binary());
+    cmd.args(args)
         .env("HOME", home)
         .env("XDG_STATE_HOME", home.join("state"))
         .env("XDG_CONFIG_HOME", home.join("config"))
-        .output()
-        .expect("the binary runs")
+        .env_remove("LC_ALL")
+        .env_remove("LC_MESSAGES")
+        .env_remove("LANG");
+    for (key, value) in locale {
+        cmd.env(key, value);
+    }
+    cmd.output().expect("the binary runs")
 }
 
 /// Write the tool's own config file under the sandbox's `XDG_CONFIG_HOME`.
@@ -47,6 +55,16 @@ fn write_config(home: &Path, content: &str) {
 /// the refresh, `--print` skips every spawn, and the briefing renders its
 /// empty sections away — so the prompt shape is asserted, not the analysis.
 fn print_prompt(home: &Path, extra: &[&str]) -> std::process::Output {
+    print_prompt_with_locale(home, extra, &[])
+}
+
+/// [`print_prompt`] with an explicit locale triple on top of cleared
+/// variables (see [`run_in_with_locale`]).
+fn print_prompt_with_locale(
+    home: &Path,
+    extra: &[&str],
+    locale: &[(&str, &str)],
+) -> std::process::Output {
     let db = home.join("s.db");
     let mut args = vec![
         "optimize",
@@ -56,7 +74,7 @@ fn print_prompt(home: &Path, extra: &[&str]) -> std::process::Output {
         db.to_str().expect("the sandbox path is UTF-8"),
     ];
     args.extend(extra);
-    run_in(home, &args)
+    run_in_with_locale(home, &args, locale)
 }
 
 fn language_sentence() -> &'static str {
@@ -137,4 +155,116 @@ fn unknown_language_fails_with_the_valid_list() {
         !home.join("s.db").exists(),
         "the store was touched ahead of the refusal"
     );
+}
+
+// PBI `2026-11-11-01-feat-locale-language-fallback.md`, outside-in: the
+// locale triple is the only language source, so each case names its full
+// `LC_ALL` / `LC_MESSAGES` / `LANG` triple on top of cleared variables.
+
+#[test]
+fn locale_lang_ja_carries_the_language_sentence_in_print() {
+    // BDD "ロケールだけで日本語になる": with no flag and no config,
+    // `LANG=ja_JP.UTF-8` carries the single sentence.
+    let home = sandbox("locale-lang-ja");
+    let out = print_prompt_with_locale(&home, &[], &[("LANG", "ja_JP.UTF-8")]);
+    assert!(
+        out.status.success(),
+        "print failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stdout = String::from_utf8(out.stdout).unwrap();
+    assert!(
+        stdout.contains(language_sentence()),
+        "LANG=ja lost its sentence:\n{stdout}"
+    );
+}
+
+#[test]
+fn locale_lc_all_c_beats_lang_ja() {
+    // BDD "LC_ALL が LANG に勝つ": POSIX order silences a `ja` LANG.
+    let home = sandbox("locale-lc-all-wins");
+    let out = print_prompt_with_locale(&home, &[], &[("LANG", "ja_JP.UTF-8"), ("LC_ALL", "C")]);
+    assert!(
+        out.status.success(),
+        "print failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stdout = String::from_utf8(out.stdout).unwrap();
+    assert!(
+        !stdout.contains(language_sentence()),
+        "LC_ALL=C lost to LANG=ja:\n{stdout}"
+    );
+}
+
+#[test]
+fn explicit_flag_beats_the_locale() {
+    // BDD "明示指定はロケールに勝つ" (flag half): `--language en` silences
+    // a `ja` locale.
+    let home = sandbox("locale-flag-wins");
+    let out = print_prompt_with_locale(&home, &["--language", "en"], &[("LANG", "ja_JP.UTF-8")]);
+    assert!(
+        out.status.success(),
+        "print failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stdout = String::from_utf8(out.stdout).unwrap();
+    assert!(
+        !stdout.contains(language_sentence()),
+        "the flag lost to the locale:\n{stdout}"
+    );
+}
+
+#[test]
+fn config_ja_beats_a_c_locale() {
+    // BDD "明示指定はロケールに勝つ" (config half): `language = "ja"`
+    // survives a `C` locale.
+    let home = sandbox("locale-config-wins");
+    write_config(&home, "language = \"ja\"\n");
+    let out = print_prompt_with_locale(&home, &[], &[("LANG", "C")]);
+    assert!(
+        out.status.success(),
+        "print failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stdout = String::from_utf8(out.stdout).unwrap();
+    assert!(
+        stdout.contains(language_sentence()),
+        "the config lost to the locale:\n{stdout}"
+    );
+}
+
+#[test]
+fn locale_c_prints_byte_identical_to_unset() {
+    // BDD "変な値は既定に落ちる": a `C` locale renders exactly like no
+    // locale at all — the default stays English with no sentence. Both
+    // runs share one sandbox so the store path inside the prompt is equal.
+    let home = sandbox("locale-c-byte-identical");
+    let unset = print_prompt_with_locale(&home, &[], &[]);
+    assert!(
+        unset.status.success(),
+        "print failed: {}",
+        String::from_utf8_lossy(&unset.stderr)
+    );
+    let c = print_prompt_with_locale(&home, &[], &[("LANG", "C")]);
+    assert!(
+        c.status.success(),
+        "print failed: {}",
+        String::from_utf8_lossy(&c.stderr)
+    );
+    assert_eq!(
+        c.stdout, unset.stdout,
+        "a C locale changed the prompt bytes"
+    );
+    for (name, value) in [("empty", ""), ("en_US", "en_US.UTF-8")] {
+        let out = print_prompt_with_locale(&home, &[], &[("LANG", value)]);
+        assert!(
+            out.status.success(),
+            "print failed for {name}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert_eq!(
+            out.stdout, unset.stdout,
+            "a {name} locale changed the prompt bytes"
+        );
+    }
 }

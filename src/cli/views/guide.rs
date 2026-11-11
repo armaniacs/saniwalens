@@ -5,7 +5,10 @@ use crate::adapter::harness::{Harness, home_dir};
 use crate::core::optimize::{AdvisorLanguage, RunMode};
 use crate::core::period::TimeRange;
 use crate::core::scope::ScopeFilter;
-use crate::session::{Session, SessionEnv, config_file_path, env_roots, resolve_cli_with_language};
+use crate::session::{
+    Session, SessionEnv, config_file_path, env_roots, process_locale_language,
+    resolve_cli_with_language,
+};
 use crate::store::Store;
 
 use super::super::report::Format;
@@ -713,6 +716,7 @@ pub(crate) fn run_guide_entry(entry: Entry) -> anyhow::Result<()> {
         harness.as_deref(),
         profile.as_deref(),
         language.as_deref(),
+        process_locale_language(),
         &env,
     )?;
     let has_preset = harness.is_some() || profile.is_some();
@@ -1538,7 +1542,7 @@ mod tests {
             home: None,
             config_home: None,
         };
-        let resolved = resolve_cli_with_language(None, None, Some("ja"), &env).unwrap();
+        let resolved = resolve_cli_with_language(None, None, Some("ja"), None, &env).unwrap();
         assert_eq!(resolved.language, AdvisorLanguage::Ja);
         let sess = guide_session(&resolved.harness, resolved.language, None, &env).unwrap();
         assert_eq!(sess.language, AdvisorLanguage::Ja);
@@ -1576,7 +1580,7 @@ mod tests {
             home: None,
             config_home: None,
         };
-        let resolved = resolve_cli_with_language(None, None, None, &env).unwrap();
+        let resolved = resolve_cli_with_language(None, None, None, None, &env).unwrap();
         assert_eq!(resolved.language, AdvisorLanguage::En);
         let sess = guide_session(&resolved.harness, resolved.language, None, &env).unwrap();
         assert_eq!(sess.language, AdvisorLanguage::En);

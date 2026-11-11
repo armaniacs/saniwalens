@@ -16,7 +16,7 @@ use crate::core::subagent::SplitCoverage;
 use crate::core::surface::{StartupSavings, Wedge};
 use crate::session::{
     AnalyzeStats, Session, SessionEnv, Style, env_roots, eprint_freshness, freshness_line,
-    guard_harness, resolve_cli_with_language,
+    guard_harness, process_locale_language, resolve_cli_with_language,
 };
 use crate::store::{OpenMode, Store};
 
@@ -318,6 +318,7 @@ pub fn run() -> Result<()> {
         cli.harness.as_deref(),
         cli.profile.as_deref(),
         cli.language.as_deref(),
+        process_locale_language(),
         &env,
     )?;
     let harness = resolved.harness;

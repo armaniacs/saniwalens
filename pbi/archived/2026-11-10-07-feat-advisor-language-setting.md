@@ -27,13 +27,13 @@ Scenario: 不正値はエラーになる
   Then  有効値の一覧つきで失敗する
 
 ## 受け入れ基準
-- [ ] 設定項目 `language` が config.toml のトップレベルにある (`default_harness` と同列)
-- [ ] `--language` グローバルフラグで上書きできる (フラグ > ファイル > 既定の解決順)
-- [ ] 有効値は `en` / `ja` から始める (拡張は別 PBI)。未知値は有効値つきエラー
-- [ ] 対象は advisor 向け指示文のみ (briefing 指示・ヘッドレス指示・apply 指示・起動ポインタの言語行)。
+- [x] 設定項目 `language` が config.toml のトップレベルにある (`default_harness` と同列)
+- [x] `--language` グローバルフラグで上書きできる (フラグ > ファイル > 既定の解決順)
+- [x] 有効値は `en` / `ja` から始める (拡張は別 PBI)。未知値は有効値つきエラー
+- [x] 対象は advisor 向け指示文のみ (briefing 指示・ヘッドレス指示・apply 指示・起動ポインタの言語行)。
   レポートの表自体は英語のまま (非目標として明示)
-- [ ] `cargo test` と `cargo clippy --all-targets -- -D warnings` が green
-- [ ] `docs/specs/cli.md` の config 節と optimize 節が同一変更で更新されている
+- [x] `cargo test` と `cargo clippy --all-targets -- -D warnings` が green
+- [x] `docs/specs/cli.md` の config 節と optimize 節が同一変更で更新されている
 
 ## テスト戦略 (t_wadaスタイル)
 
@@ -70,8 +70,8 @@ grep -n "instructions\|launch_prompt" src/core/optimize.rs | head -n 20
 - 実 transcripts / 実 config をテストに使わない。fixture は合成のみ
 
 ## Definition of Done
-- [ ] 全BDDシナリオが自動テストとして実装されパスする
-- [ ] テストカバレッジが基準を満たす (E2E/統合/単体すべて)
-- [ ] コードレビュー完了
-- [ ] リファクタリング完了 (グリーン後)
-- [ ] ドキュメント更新済み
+- [x] 全BDDシナリオが自動テストとして実装されパスする
+- [x] テストカバレッジが基準を満たす (E2E/統合/単体すべて)
+- [x] コードレビュー完了
+- [x] リファクタリング完了 (グリーン後)
+- [x] ドキュメント更新済み

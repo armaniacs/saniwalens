@@ -20,11 +20,11 @@ Scenario: 互換変更のみの PR は green になる
   Then  CI は green になり、非互換の指摘は何も出ない
 
 ## 受け入れ基準
-- [ ] 非互換な公開 API 変更を含むブランチで CI が red になる（CI初回実行で確認 — 外部。baseline=最新タグ、fetch-tags付き）（検証は合成の非互換変更で行い、検証後に変更は戻してマージしない）
-- [ ] 互換変更のみのブランチでは CI が green になる（CI初回実行で確認 — 外部）
-- [ ] 指摘は CI ログで読める形で出る（CI初回実行で確認 — 外部）（どの API が壊れたか、どう壊れたか）
+- [x] 非互換な公開 API 変更を含むブランチで CI が red になる（CI初回実行で確認 — 外部。baseline=最新タグ、fetch-tags付き）（検証は合成の非互換変更で行い、検証後に変更は戻してマージしない）
+- [x] 互換変更のみのブランチでは CI が green になる（CI初回実行で確認 — 外部）
+- [x] 指摘は CI ログで読める形で出る（CI初回実行で確認 — 外部）（どの API が壊れたか、どう壊れたか）
 - [x] 既存の CI ジョブ（lint + format / test）の内容と結果は変わらない
-- [ ] 検証コマンド（cargo fmt --check、cargo clippy --all-targets --all-features -- -D warnings、cargo test）は従来どおり green
+- [x] 検証コマンド（cargo fmt --check、cargo clippy --all-targets --all-features -- -D warnings、cargo test）は従来どおり green
 - [x] secret（トークン等）が無い環境でも CI が green を出せる（トークン不要のactionのみ）（トークン不要のジョブにする）
 
 ## テスト戦略
