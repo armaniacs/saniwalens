@@ -27,6 +27,21 @@ use super::deliver::{BriefingFile, ProcessAdvisor, write_private_tempfile};
 use super::headless::{Beat, run_headless};
 use super::{AdvisorLaunch, collect_findings, run_analyze, write_private_file};
 
+/// Fail unless the harness runs headless: `--apply` hands a headless run's
+/// plan to an interactive dialog, so an already-interactive session has
+/// nothing to hand off. Shared by the flag pre-check and `run_apply`'s
+/// defense-in-depth arm, so both refuse with the same wording.
+fn require_headless(harness: &Harness) -> Result<()> {
+    if harness.launch_command().2 == optimize_mod::RunMode::Interactive {
+        anyhow::bail!(
+            "`--apply` needs a headless harness (opencode): the {} session is already \
+             interactive and applies its own plan",
+            harness.display_name()
+        );
+    }
+    Ok(())
+}
+
 /// Flag-level pre-checks, before any store work: `--apply` conflicts and the
 /// harness-mode gate. Pure over its inputs; the shell calls it at the arm top
 /// so a conflict fails before a store is even resolved. A non-apply run
@@ -47,14 +62,7 @@ pub fn check_apply_args(apply: bool, print: bool, verbose: bool, harness: &Harne
              plan from the logged stream, which verbose mode does not keep"
         );
     }
-    if harness.launch_command().2 == optimize_mod::RunMode::Interactive {
-        anyhow::bail!(
-            "`--apply` needs a headless harness (opencode): the {} session is already \
-             interactive and applies its own plan",
-            harness.display_name()
-        );
-    }
-    Ok(())
+    require_headless(harness)
 }
 
 /// The state-home side both handoff dirs live under:
@@ -163,7 +171,8 @@ pub fn complete_handoff(
         .map(|line| {
             handoff
                 .render
-                .map_or(RunLine::Silent, |render| render(line))
+                .map(|render| render(line))
+                .unwrap_or(RunLine::Silent)
         })
         .collect();
     let plan = extract_plan_text(&rendered);
@@ -246,14 +255,8 @@ pub fn run_apply(
     timeout: Option<std::time::Duration>,
     env: &SessionEnv,
 ) -> Result<()> {
-    let (binary, leading, run_mode) = sess.harness.launch_command();
-    if run_mode != optimize_mod::RunMode::Headless {
-        anyhow::bail!(
-            "`--apply` needs a headless harness (opencode): the {} session is already \
-             interactive and applies its own plan",
-            sess.harness.display_name()
-        );
-    }
+    require_headless(&sess.harness)?;
+    let (binary, leading, _) = sess.harness.launch_command();
     // Fail fast before the expensive store refresh: without a writable plans
     // home there is nothing to hand off to.
     let plans = plans_dir(env.state_home, env.home.map(Path::new))?;
@@ -294,15 +297,10 @@ pub fn run_apply(
         &copy,
         optimize_mod::RunMode::Headless,
     );
-    let (_, _, log_text) = capture_headless_log(
-        binary,
-        leading,
-        &prompt,
-        sess.harness.run_line_renderer(),
-        timeout,
-    )?;
+    let render = sess.harness.run_line_renderer();
+    let (_, _, log_text) = capture_headless_log(binary, leading, &prompt, render, timeout)?;
     let handoff = Handoff {
-        render: sess.harness.run_line_renderer(),
+        render,
         plans: &plans,
         db_display: &db_display,
         filter,
@@ -726,20 +724,27 @@ mod tests {
         assert!(rendered.contains("no plan file"), "{rendered}");
     }
 
+    /// A session over a scratch store under `dir`, for the `run_apply`
+    /// refusal tests: they fail before any spawn, so the store's contents
+    /// never matter — only the harness and the env do.
+    fn session_with_store(harness: Harness, dir: &PlansDir) -> Session {
+        fs::create_dir_all(dir.path()).unwrap();
+        let db = dir.path().join("s.db");
+        let store = Store::open(&db, OpenMode::ReadWrite).unwrap();
+        Session {
+            harness,
+            db_path: db,
+            store,
+            language: optimize_mod::AdvisorLanguage::default(),
+        }
+    }
+
     #[test]
     fn run_apply_refuses_interactive_harnesses_before_any_spawn() {
         // Defense in depth behind the arm's pre-check: an interactive harness
         // fails here without spawning anything and without touching the store.
         let dir = PlansDir::new("refuse");
-        fs::create_dir_all(dir.path()).unwrap();
-        let db = dir.path().join("s.db");
-        let store = Store::open(&db, OpenMode::ReadWrite).unwrap();
-        let sess = Session {
-            harness: Harness::Claude,
-            db_path: db,
-            store,
-            language: optimize_mod::AdvisorLanguage::default(),
-        };
+        let sess = session_with_store(Harness::Claude, &dir);
         let env = SessionEnv {
             state_home: None,
             home: None,
@@ -755,15 +760,7 @@ mod tests {
         // there is nothing to hand off to. The short timeout is only a
         // backstop — a regression that spawns anyway must still end the test.
         let dir = PlansDir::new("nohome");
-        fs::create_dir_all(dir.path()).unwrap();
-        let db = dir.path().join("s.db");
-        let store = Store::open(&db, OpenMode::ReadWrite).unwrap();
-        let sess = Session {
-            harness: Harness::Opencode,
-            db_path: db,
-            store,
-            language: optimize_mod::AdvisorLanguage::default(),
-        };
+        let sess = session_with_store(Harness::Opencode, &dir);
         let env = SessionEnv {
             state_home: Some(Path::new("relative/state")),
             home: None,
@@ -788,15 +785,7 @@ mod tests {
         // runs. The bogus projects path would fail the refresh with "no
         // opencode database" if it ran — the HOME error proves it never did.
         let dir = PlansDir::new("nohome-unfrozen");
-        fs::create_dir_all(dir.path()).unwrap();
-        let db = dir.path().join("s.db");
-        let store = Store::open(&db, OpenMode::ReadWrite).unwrap();
-        let sess = Session {
-            harness: Harness::Opencode,
-            db_path: db,
-            store,
-            language: optimize_mod::AdvisorLanguage::default(),
-        };
+        let sess = session_with_store(Harness::Opencode, &dir);
         let env = SessionEnv {
             state_home: Some(Path::new("relative/state")),
             home: None,

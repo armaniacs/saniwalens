@@ -13,6 +13,7 @@
 //! (what counts as inside) are pure over their inputs and unit-tested; only
 //! the directory walk and the deletes are I/O.
 
+use std::cmp::Ordering;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
@@ -36,18 +37,22 @@ pub struct Entry {
     pub modified: SystemTime,
 }
 
+/// Newest-first entry order: a newer mtime wins, and an mtime tie breaks on
+/// the path so the choice stays deterministic even when two generations land
+/// in the same timestamp tick. Shared by the sweep's victim choice and the
+/// listing's display order — the sweep keeps what the listing shows first.
+fn newest_first_cmp(left: &Entry, right: &Entry) -> Ordering {
+    right
+        .modified
+        .cmp(&left.modified)
+        .then_with(|| left.path.cmp(&right.path))
+}
+
 /// Split `entries` into (kept, victims): the newest `keep` generations stay,
-/// the rest go. Newest-first is `(modified, path)`: a newer mtime wins, and
-/// an mtime tie breaks on the path so the choice is deterministic even when
-/// two generations land in the same timestamp tick.
+/// the rest go.
 pub fn select_victims(entries: Vec<Entry>, keep: usize) -> (Vec<Entry>, Vec<Entry>) {
     let mut ordered = entries;
-    ordered.sort_by(|left, right| {
-        right
-            .modified
-            .cmp(&left.modified)
-            .then_with(|| left.path.cmp(&right.path))
-    });
+    ordered.sort_by(newest_first_cmp);
     let split = keep.min(ordered.len());
     let victims = ordered.split_off(split);
     (ordered, victims)
@@ -120,6 +125,17 @@ pub(crate) fn run_cleanup(
 /// the recursive total over the files under it; symlinks never resolve, so
 /// a link counts as a link instead of pulling its target's size (or its
 /// target at all) into the listing.
+/// One path's listed size: a real subdir counts its recursive total, anything
+/// else (file, link) its own length. Symlinks never resolve, so a link counts
+/// as a link instead of pulling its target's size in.
+fn sized_path(path: &Path, meta: &fs::Metadata) -> u64 {
+    if meta.file_type().is_dir() {
+        dir_size(path)
+    } else {
+        meta.len()
+    }
+}
+
 pub fn collect_entries(dir: &Path) -> Vec<Entry> {
     let Ok(read) = fs::read_dir(dir) else {
         return Vec::new();
@@ -130,10 +146,7 @@ pub fn collect_entries(dir: &Path) -> Vec<Entry> {
         let Ok(meta) = fs::symlink_metadata(&path) else {
             continue;
         };
-        let bytes = match meta.file_type().is_dir() {
-            true => dir_size(&path),
-            false => meta.len(),
-        };
+        let bytes = sized_path(&path, &meta);
         entries.push(Entry {
             path,
             bytes,
@@ -157,10 +170,7 @@ fn dir_size(dir: &Path) -> u64 {
         let Ok(meta) = fs::symlink_metadata(&path) else {
             continue;
         };
-        total = total.saturating_add(match meta.file_type().is_dir() {
-            true => dir_size(&path),
-            false => meta.len(),
-        });
+        total = total.saturating_add(sized_path(&path, &meta));
     }
     total
 }
@@ -233,12 +243,7 @@ fn remove_victim(path: &Path) -> Result<bool> {
 
 /// Newest-first for display: the same order the sweep keeps in.
 fn newest_first(entries: &mut [Entry]) {
-    entries.sort_by(|left, right| {
-        right
-            .modified
-            .cmp(&left.modified)
-            .then_with(|| left.path.cmp(&right.path))
-    });
+    entries.sort_by(newest_first_cmp);
 }
 
 fn format_time(modified: SystemTime) -> String {
@@ -495,49 +500,32 @@ mod tests {
 
     #[test]
     fn a_child_of_the_root_is_within() {
-        let dir = std::env::temp_dir().join(format!(
-            "saniwalens-cleanup-within-{}-{}",
-            std::process::id(),
-            "child"
-        ));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(dir.join("plans")).unwrap();
-        let child = dir.join("plans").join("plan-x.md");
+        let area = Area::new("within-child");
+        let plans = area.path().join("plans");
+        std::fs::create_dir_all(&plans).unwrap();
+        let child = plans.join("plan-x.md");
         std::fs::write(&child, "plan").unwrap();
-        assert!(is_within(&dir.join("plans"), &child));
-        let _ = std::fs::remove_dir_all(&dir);
+        assert!(is_within(&plans, &child));
     }
 
     #[test]
     fn a_sibling_of_the_root_is_not_within() {
-        let dir = std::env::temp_dir().join(format!(
-            "saniwalens-cleanup-within-{}-{}",
-            std::process::id(),
-            "sibling"
-        ));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(dir.join("plans")).unwrap();
-        std::fs::create_dir_all(dir.join("elsewhere")).unwrap();
-        let outside = dir.join("elsewhere").join("plan-x.md");
+        let area = Area::new("within-sibling");
+        let plans = area.path().join("plans");
+        std::fs::create_dir_all(&plans).unwrap();
+        let elsewhere = area.path().join("elsewhere");
+        std::fs::create_dir_all(&elsewhere).unwrap();
+        let outside = elsewhere.join("plan-x.md");
         std::fs::write(&outside, "plan").unwrap();
-        assert!(!is_within(&dir.join("plans"), &outside));
-        let _ = std::fs::remove_dir_all(&dir);
+        assert!(!is_within(&plans, &outside));
     }
 
     #[test]
     fn a_vanished_candidate_is_not_within() {
-        let dir = std::env::temp_dir().join(format!(
-            "saniwalens-cleanup-within-{}-{}",
-            std::process::id(),
-            "vanished"
-        ));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(dir.join("plans")).unwrap();
-        assert!(!is_within(
-            &dir.join("plans"),
-            &dir.join("plans").join("gone.md")
-        ));
-        let _ = std::fs::remove_dir_all(&dir);
+        let area = Area::new("within-vanished");
+        let plans = area.path().join("plans");
+        std::fs::create_dir_all(&plans).unwrap();
+        assert!(!is_within(&plans, &plans.join("gone.md")));
     }
 
     #[cfg(unix)]
@@ -546,19 +534,14 @@ mod tests {
         // BDD "対象外は触らない": a symlink inside plans/ pointing outside
         // must never read as inside, or the sweep would follow it out.
         use std::os::unix::fs::symlink;
-        let dir = std::env::temp_dir().join(format!(
-            "saniwalens-cleanup-within-{}-{}",
-            std::process::id(),
-            "escape"
-        ));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(dir.join("plans")).unwrap();
-        let target = dir.join("secret.md");
+        let area = Area::new("within-escape");
+        let plans = area.path().join("plans");
+        std::fs::create_dir_all(&plans).unwrap();
+        let target = area.path().join("secret.md");
         std::fs::write(&target, "secret").unwrap();
-        let link = dir.join("plans").join("plan-link.md");
+        let link = plans.join("plan-link.md");
         symlink(&target, &link).unwrap();
-        assert!(!is_within(&dir.join("plans"), &link));
-        let _ = std::fs::remove_dir_all(&dir);
+        assert!(!is_within(&plans, &link));
     }
 
     #[test]

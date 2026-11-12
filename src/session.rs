@@ -150,16 +150,14 @@ pub fn resolve_cli_with_language(
         .transpose()?
         .flatten();
     let resolved = config_file::resolve(cli_harness, cli_profile, None, file.as_ref(), config_dir)?;
-    // Some(En) carries no opinion, same as None — the locale only ever votes Ja.
-    let locale_code = match locale {
-        Some(AdvisorLanguage::Ja) => Some("ja"),
-        Some(AdvisorLanguage::En) | None => None,
+    // The locale only ever votes Ja: Some(En) carries no opinion, same as
+    // None — so the enum feeds the default directly instead of round-tripping
+    // through a "ja" string and the parser.
+    let language = match config_file::resolve_language(cli_language, file.as_ref()) {
+        Some(code) => parse_language(Some(&code))?,
+        None if locale == Some(AdvisorLanguage::Ja) => AdvisorLanguage::Ja,
+        None => AdvisorLanguage::default(),
     };
-    let language = parse_language(
-        config_file::resolve_language(cli_language, file.as_ref())
-            .as_deref()
-            .or(locale_code),
-    )?;
     Ok(ResolvedCli {
         harness: parse_harness(resolved.harness.as_deref())?,
         config_db: resolved.db,
