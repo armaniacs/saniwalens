@@ -27,19 +27,29 @@ use super::deliver::{BriefingFile, ProcessAdvisor, write_private_tempfile};
 use super::headless::{Beat, run_headless};
 use super::{AdvisorLaunch, collect_findings, run_analyze, write_private_file};
 
-/// Fail unless the harness runs headless: `--apply` hands a headless run's
+/// Fail unless the run mode is headless: `--apply` hands a headless run's
 /// plan to an interactive dialog, so an already-interactive session has
-/// nothing to hand off. Shared by the flag pre-check and `run_apply`'s
-/// defense-in-depth arm, so both refuse with the same wording.
-fn require_headless(harness: &Harness) -> Result<()> {
-    if harness.launch_command().2 == optimize_mod::RunMode::Interactive {
-        anyhow::bail!(
+/// nothing to hand off. An exhaustive match with no wildcard (like
+/// `delivery_mode`): a future third run mode fails to compile here instead
+/// of slipping through the handoff at runtime. This is the predicate both
+/// the flag pre-check and `run_apply`'s defense-in-depth arm share, so both
+/// refuse with the same wording.
+fn require_headless_mode(run_mode: optimize_mod::RunMode, harness_name: &str) -> Result<()> {
+    match run_mode {
+        optimize_mod::RunMode::Headless => Ok(()),
+        optimize_mod::RunMode::Interactive => anyhow::bail!(
             "`--apply` needs a headless harness (opencode): the {} session is already \
              interactive and applies its own plan",
-            harness.display_name()
-        );
+            harness_name
+        ),
     }
-    Ok(())
+}
+
+/// The flag pre-check's thin wrapper over [`require_headless_mode`]: it pulls
+/// the run mode out of the harness's launch shape and refuses with the same
+/// wording as `run_apply`'s arm.
+fn require_headless(harness: &Harness) -> Result<()> {
+    require_headless_mode(harness.launch_command().2, harness.display_name())
 }
 
 /// Flag-level pre-checks, before any store work: `--apply` conflicts and the
@@ -255,8 +265,8 @@ pub fn run_apply(
     timeout: Option<std::time::Duration>,
     env: &SessionEnv,
 ) -> Result<()> {
-    require_headless(&sess.harness)?;
-    let (binary, leading, _) = sess.harness.launch_command();
+    let (binary, leading, run_mode) = sess.harness.launch_command();
+    require_headless_mode(run_mode, sess.harness.display_name())?;
     // Fail fast before the expensive store refresh: without a writable plans
     // home there is nothing to hand off to.
     let plans = plans_dir(env.state_home, env.home.map(Path::new))?;
@@ -317,6 +327,7 @@ pub fn run_apply(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::scratch::ScratchDir;
     use crate::store::{OpenMode, Store};
 
     /// A synthetic `--format json` tool-event line: the noise a headless run
@@ -334,30 +345,14 @@ mod tests {
         Harness::Opencode.copy()
     }
 
-    /// A plans sandbox under the temp dir, removed on drop so a failure does
-    /// not leak plan files into the runner's temp dir.
-    struct PlansDir(PathBuf);
-
-    impl PlansDir {
-        fn new(tag: &str) -> Self {
-            let dir = std::env::temp_dir().join(format!(
-                "saniwalens-handoff-test-{tag}-{}-{:?}",
-                std::process::id(),
-                std::thread::current().id()
-            ));
-            let _ = fs::remove_dir_all(&dir);
-            Self(dir)
-        }
-
-        fn path(&self) -> &Path {
-            &self.0
-        }
-    }
-
-    impl Drop for PlansDir {
-        fn drop(&mut self) {
-            let _ = fs::remove_dir_all(&self.0);
-        }
+    #[test]
+    fn require_headless_mode_accepts_only_the_headless_run() {
+        // The gate's contract, pinned directly: Headless passes, Interactive
+        // fails. A future third run mode must extend this table — and the
+        // exhaustive match below forces that extension at compile time.
+        assert!(require_headless_mode(optimize_mod::RunMode::Headless, "opencode").is_ok());
+        let err = require_headless_mode(optimize_mod::RunMode::Interactive, "claude").unwrap_err();
+        assert!(format!("{err:#}").contains("headless"), "{err:#}");
     }
 
     #[test]
@@ -497,9 +492,9 @@ mod tests {
     fn plan_filenames_are_unique_per_call() {
         // Exclusive creation fails the second save on a reused name, so two
         // saves into one directory must land on two files.
-        let dir = PlansDir::new("unique");
-        let first = save_plan(dir.path(), "plan one").unwrap();
-        let second = save_plan(dir.path(), "plan two").unwrap();
+        let dir = ScratchDir::new("saniwalens-handoff", "unique");
+        let first = save_plan(&dir, "plan one").unwrap();
+        let second = save_plan(&dir, "plan two").unwrap();
         assert_ne!(first, second);
         assert_eq!(fs::read_to_string(&first).unwrap(), "plan one");
         assert_eq!(fs::read_to_string(&second).unwrap(), "plan two");
@@ -510,8 +505,8 @@ mod tests {
     fn save_plan_is_readable_only_by_its_owner() {
         use std::os::unix::fs::PermissionsExt;
 
-        let dir = PlansDir::new("mode");
-        let path = save_plan(dir.path(), "secret plan").unwrap();
+        let dir = ScratchDir::new("saniwalens-handoff", "mode");
+        let path = save_plan(&dir, "secret plan").unwrap();
         let mode = fs::metadata(&path).unwrap().permissions().mode();
         assert_eq!(mode & 0o777, 0o600);
     }
@@ -523,8 +518,8 @@ mod tests {
         // store's rule: freshly created dirs are 0700, like the store dir.
         use std::os::unix::fs::PermissionsExt;
 
-        let base = PlansDir::new("dir-mode");
-        let nested = base.path().join("nested").join("plans");
+        let base = ScratchDir::new("saniwalens-handoff", "dir-mode");
+        let nested = base.join("nested").join("plans");
         save_plan(&nested, "secret plan").unwrap();
         let mode = fs::metadata(&nested).unwrap().permissions().mode();
         assert_eq!(mode & 0o777, 0o700, "the plans dir must be owner-only");
@@ -615,10 +610,10 @@ mod tests {
         // BDD: the headless plan is saved and the dialog opens on it. The
         // raw log mixes JSON event lines with the agent's text; only the
         // Text lines reach the plan file.
-        let dir = PlansDir::new("complete");
+        let dir = ScratchDir::new("saniwalens-handoff", "complete");
         let filter = ScopeFilter::All;
         let copy = opencode_copy();
-        let ctx = handoff(dir.path(), &filter, &copy);
+        let ctx = handoff(&dir, &filter, &copy);
         let log_text = format!("{TOOL_LINE}\n{TEXT_LINE}\nnot json at all\n");
         let mut advisor = DialogRecorder {
             launches: Vec::new(),
@@ -650,10 +645,10 @@ mod tests {
     fn complete_handoff_refuses_an_empty_plan() {
         // JSON-only output yields no plan text: nothing is saved and the
         // error says so, instead of leaving an empty plan file behind.
-        let dir = PlansDir::new("empty");
+        let dir = ScratchDir::new("saniwalens-handoff", "empty");
         let filter = ScopeFilter::All;
         let copy = opencode_copy();
-        let ctx = handoff(dir.path(), &filter, &copy);
+        let ctx = handoff(&dir, &filter, &copy);
         let mut advisor = DialogRecorder {
             launches: Vec::new(),
             status: success_status(),
@@ -665,7 +660,7 @@ mod tests {
         assert!(format!("{err:#}").contains("no plan file"), "{err:#}");
         assert!(advisor.launches.is_empty(), "the dialog never opened");
         assert!(
-            fs::read_dir(dir.path())
+            fs::read_dir(&*dir)
                 .map(|mut entries| entries.next().is_none())
                 .unwrap_or(true),
             "an empty plan left a trace behind"
@@ -677,10 +672,10 @@ mod tests {
     fn complete_handoff_failure_keeps_the_plan_and_names_it() {
         // BDD: the dialog launch fails. The saved plan stays, and the error
         // names its path and says it is kept.
-        let dir = PlansDir::new("dialog-fail");
+        let dir = ScratchDir::new("saniwalens-handoff", "dialog-fail");
         let filter = ScopeFilter::All;
         let copy = opencode_copy();
-        let ctx = handoff(dir.path(), &filter, &copy);
+        let ctx = handoff(&dir, &filter, &copy);
         let mut advisor = DialogRecorder {
             launches: Vec::new(),
             status: failure_status(),
@@ -690,7 +685,7 @@ mod tests {
 
         let rendered = format!("{err:#}");
         assert!(rendered.contains("kept"), "{rendered}");
-        let saved: PathBuf = fs::read_dir(dir.path())
+        let saved: PathBuf = fs::read_dir(&*dir)
             .unwrap()
             .map(|entry| entry.unwrap().path())
             .collect::<Vec<_>>()
@@ -727,9 +722,8 @@ mod tests {
     /// A session over a scratch store under `dir`, for the `run_apply`
     /// refusal tests: they fail before any spawn, so the store's contents
     /// never matter — only the harness and the env do.
-    fn session_with_store(harness: Harness, dir: &PlansDir) -> Session {
-        fs::create_dir_all(dir.path()).unwrap();
-        let db = dir.path().join("s.db");
+    fn session_with_store(harness: Harness, dir: &Path) -> Session {
+        let db = dir.join("s.db");
         let store = Store::open(&db, OpenMode::ReadWrite).unwrap();
         Session {
             harness,
@@ -741,17 +735,27 @@ mod tests {
 
     #[test]
     fn run_apply_refuses_interactive_harnesses_before_any_spawn() {
-        // Defense in depth behind the arm's pre-check: an interactive harness
-        // fails here without spawning anything and without touching the store.
-        let dir = PlansDir::new("refuse");
-        let sess = session_with_store(Harness::Claude, &dir);
-        let env = SessionEnv {
-            state_home: None,
-            home: None,
-            config_home: None,
-        };
-        let err = run_apply(&sess, None, &ScopeFilter::All, true, None, &env).unwrap_err();
-        assert!(format!("{err:#}").contains("headless"), "{err:#}");
+        // Defense in depth behind the arm's pre-check: an interactive
+        // harness fails here without spawning anything and without touching
+        // the store. Both interactive harnesses are wired: if a harness's
+        // `launch_command` mapping ever drifted toward Headless, this table
+        // (not just the mode predicate's own test) would catch it. A new
+        // harness must extend this table.
+        for harness in [Harness::Claude, Harness::Kilocode] {
+            let dir = ScratchDir::new("saniwalens-handoff", "refuse");
+            let sess = session_with_store(harness, &dir);
+            let env = SessionEnv {
+                state_home: None,
+                home: None,
+                config_home: None,
+            };
+            let err = run_apply(&sess, None, &ScopeFilter::All, true, None, &env).unwrap_err();
+            assert!(
+                format!("{err:#}").contains("headless"),
+                "{}: {err:#}",
+                harness.label()
+            );
+        }
     }
 
     #[test]
@@ -759,7 +763,7 @@ mod tests {
         // Fail fast before the expensive headless run: without a plans home
         // there is nothing to hand off to. The short timeout is only a
         // backstop — a regression that spawns anyway must still end the test.
-        let dir = PlansDir::new("nohome");
+        let dir = ScratchDir::new("saniwalens-handoff", "nohome");
         let sess = session_with_store(Harness::Opencode, &dir);
         let env = SessionEnv {
             state_home: Some(Path::new("relative/state")),
@@ -784,7 +788,7 @@ mod tests {
         // the store refresh, so an unresolvable home errors before analyze
         // runs. The bogus projects path would fail the refresh with "no
         // opencode database" if it ran — the HOME error proves it never did.
-        let dir = PlansDir::new("nohome-unfrozen");
+        let dir = ScratchDir::new("saniwalens-handoff", "nohome-unfrozen");
         let sess = session_with_store(Harness::Opencode, &dir);
         let env = SessionEnv {
             state_home: Some(Path::new("relative/state")),

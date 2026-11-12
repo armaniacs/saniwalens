@@ -119,12 +119,6 @@ pub(crate) fn run_cleanup(
     }
 }
 
-/// The area's direct children as entries: plan files and backup generation
-/// dirs alike, never the area dir itself. A missing area lists as empty ― a
-/// fresh machine simply has nothing saved yet. A generation dir's size is
-/// the recursive total over the files under it; symlinks never resolve, so
-/// a link counts as a link instead of pulling its target's size (or its
-/// target at all) into the listing.
 /// One path's listed size: a real subdir counts its recursive total, anything
 /// else (file, link) its own length. Symlinks never resolve, so a link counts
 /// as a link instead of pulling its target's size in.
@@ -136,6 +130,12 @@ fn sized_path(path: &Path, meta: &fs::Metadata) -> u64 {
     }
 }
 
+/// The area's direct children as entries: plan files and backup generation
+/// dirs alike, never the area dir itself. A missing area lists as empty ― a
+/// fresh machine simply has nothing saved yet. A generation dir's size is
+/// the recursive total over the files under it; symlinks never resolve, so
+/// a link counts as a link instead of pulling its target's size (or its
+/// target at all) into the listing.
 pub fn collect_entries(dir: &Path) -> Vec<Entry> {
     let Ok(read) = fs::read_dir(dir) else {
         return Vec::new();
@@ -241,11 +241,6 @@ fn remove_victim(path: &Path) -> Result<bool> {
     }
 }
 
-/// Newest-first for display: the same order the sweep keeps in.
-fn newest_first(entries: &mut [Entry]) {
-    entries.sort_by(newest_first_cmp);
-}
-
 fn format_time(modified: SystemTime) -> String {
     chrono::DateTime::<chrono::Local>::from(modified)
         .format("%Y-%m-%d %H:%M:%S%:z")
@@ -264,7 +259,8 @@ fn list_areas(areas: &[(&str, PathBuf)], format: Format) -> Result<()> {
     let mut total = 0u64;
     for (area, dir) in areas {
         let mut entries = collect_entries(dir);
-        newest_first(&mut entries);
+        // Newest-first for display: the same order the sweep keeps in.
+        entries.sort_by(newest_first_cmp);
         total += entries.iter().map(|entry| entry.bytes).sum::<u64>();
         listed.push((area, entries));
     }
@@ -401,6 +397,7 @@ fn sweep_areas(areas: &[(&str, PathBuf)], keep: usize, format: Format) -> Result
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::scratch::ScratchDir;
 
     fn entry(name: &str, secs: u64) -> Entry {
         Entry {
@@ -500,8 +497,8 @@ mod tests {
 
     #[test]
     fn a_child_of_the_root_is_within() {
-        let area = Area::new("within-child");
-        let plans = area.path().join("plans");
+        let area = ScratchDir::new("saniwalens-cleanup", "within-child");
+        let plans = area.join("plans");
         std::fs::create_dir_all(&plans).unwrap();
         let child = plans.join("plan-x.md");
         std::fs::write(&child, "plan").unwrap();
@@ -510,10 +507,10 @@ mod tests {
 
     #[test]
     fn a_sibling_of_the_root_is_not_within() {
-        let area = Area::new("within-sibling");
-        let plans = area.path().join("plans");
+        let area = ScratchDir::new("saniwalens-cleanup", "within-sibling");
+        let plans = area.join("plans");
         std::fs::create_dir_all(&plans).unwrap();
-        let elsewhere = area.path().join("elsewhere");
+        let elsewhere = area.join("elsewhere");
         std::fs::create_dir_all(&elsewhere).unwrap();
         let outside = elsewhere.join("plan-x.md");
         std::fs::write(&outside, "plan").unwrap();
@@ -522,8 +519,8 @@ mod tests {
 
     #[test]
     fn a_vanished_candidate_is_not_within() {
-        let area = Area::new("within-vanished");
-        let plans = area.path().join("plans");
+        let area = ScratchDir::new("saniwalens-cleanup", "within-vanished");
+        let plans = area.join("plans");
         std::fs::create_dir_all(&plans).unwrap();
         assert!(!is_within(&plans, &plans.join("gone.md")));
     }
@@ -534,10 +531,10 @@ mod tests {
         // BDD "対象外は触らない": a symlink inside plans/ pointing outside
         // must never read as inside, or the sweep would follow it out.
         use std::os::unix::fs::symlink;
-        let area = Area::new("within-escape");
-        let plans = area.path().join("plans");
+        let area = ScratchDir::new("saniwalens-cleanup", "within-escape");
+        let plans = area.join("plans");
         std::fs::create_dir_all(&plans).unwrap();
-        let target = area.path().join("secret.md");
+        let target = area.join("secret.md");
         std::fs::write(&target, "secret").unwrap();
         let link = plans.join("plan-link.md");
         symlink(&target, &link).unwrap();
@@ -565,40 +562,15 @@ mod tests {
         assert!(Cli::try_parse_from(["saniwalens", "cleanup", "--list", "--keep", "3"]).is_err());
     }
 
-    /// A scratch area with real files, removed on drop so a failure does not
-    /// leak plan files into the runner's temp dir.
-    struct Area(PathBuf);
-
-    impl Area {
-        fn new(tag: &str) -> Self {
-            let dir = std::env::temp_dir().join(format!(
-                "saniwalens-cleanup-area-{tag}-{}-{:?}",
-                std::process::id(),
-                std::thread::current().id()
-            ));
-            let _ = std::fs::remove_dir_all(&dir);
-            std::fs::create_dir_all(&dir).unwrap();
-            Self(dir)
-        }
-
-        fn path(&self) -> &Path {
-            &self.0
-        }
-
-        fn file(&self, name: &str, body: &str, secs: u64) -> Entry {
-            let path = self.0.join(name);
-            std::fs::write(&path, body).unwrap();
-            Entry {
-                path,
-                bytes: body.len() as u64,
-                modified: SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(secs),
-            }
-        }
-    }
-
-    impl Drop for Area {
-        fn drop(&mut self) {
-            let _ = std::fs::remove_dir_all(&self.0);
+    /// A real file under the scratch area with an explicit mtime, for tests
+    /// that need listed entries without sleeping.
+    fn area_file(dir: &Path, name: &str, body: &str, secs: u64) -> Entry {
+        let path = dir.join(name);
+        std::fs::write(&path, body).unwrap();
+        Entry {
+            path,
+            bytes: body.len() as u64,
+            modified: SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(secs),
         }
     }
 
@@ -606,13 +578,13 @@ mod tests {
     fn sweep_deletes_only_the_oldest_generations() {
         // BDD "新しい N 世代だけが残り古いものが消える", through real
         // deletes: the listed entries carry explicit times, so no sleeps.
-        let area = Area::new("sweep");
-        let oldest = area.file("plan-oldest.md", "old", 100);
-        let mid = area.file("plan-mid.md", "mid!", 200);
-        let newest = area.file("plan-newest.md", "newest!", 300);
+        let area = ScratchDir::new("saniwalens-cleanup", "sweep");
+        let oldest = area_file(&area, "plan-oldest.md", "old", 100);
+        let mid = area_file(&area, "plan-mid.md", "mid!", 200);
+        let newest = area_file(&area, "plan-newest.md", "newest!", 300);
         let entries = vec![oldest.clone(), mid.clone(), newest.clone()];
 
-        let report = sweep_area(area.path(), entries, 2).unwrap();
+        let report = sweep_area(&area, entries, 2).unwrap();
 
         assert_eq!(report.kept, 2);
         assert!(report.skipped.is_empty());
@@ -624,11 +596,11 @@ mod tests {
 
     #[test]
     fn sweep_with_room_to_spare_deletes_nothing() {
-        let area = Area::new("spare");
-        let first = area.file("plan-a.md", "a", 100);
-        let second = area.file("plan-b.md", "b", 200);
+        let area = ScratchDir::new("saniwalens-cleanup", "spare");
+        let first = area_file(&area, "plan-a.md", "a", 100);
+        let second = area_file(&area, "plan-b.md", "b", 200);
 
-        let report = sweep_area(area.path(), vec![first.clone(), second.clone()], 5).unwrap();
+        let report = sweep_area(&area, vec![first.clone(), second.clone()], 5).unwrap();
 
         assert_eq!(report.kept, 2);
         assert!(report.removed.is_empty());
@@ -639,16 +611,16 @@ mod tests {
     fn sweep_tolerates_a_victim_that_vanished_first() {
         // BDD落とし穴 "列挙してから消すだけ": a file deleted between the
         // listing and the sweep is not an error and is not reported removed.
-        let area = Area::new("vanished");
-        let gone = area.file("plan-gone.md", "gone", 100);
+        let area = ScratchDir::new("saniwalens-cleanup", "vanished");
+        let gone = area_file(&area, "plan-gone.md", "gone", 100);
         let stale = Entry {
             bytes: 99,
             ..gone.clone()
         };
         std::fs::remove_file(&gone.path).unwrap();
-        let kept = area.file("plan-kept.md", "kept", 200);
+        let kept = area_file(&area, "plan-kept.md", "kept", 200);
 
-        let report = sweep_area(area.path(), vec![stale], 0).unwrap();
+        let report = sweep_area(&area, vec![stale], 0).unwrap();
 
         assert!(
             report.removed.is_empty(),
@@ -667,20 +639,14 @@ mod tests {
         // BDD "対象外は触らない": the link resolves outside, so the sweep
         // skips the link itself and never touches the target.
         use std::os::unix::fs::symlink;
-        let area = Area::new("escape-sweep");
-        let outside = std::env::temp_dir().join(format!(
-            "saniwalens-cleanup-outside-{}-{:?}",
-            std::process::id(),
-            std::thread::current().id()
-        ));
-        let _ = std::fs::remove_dir_all(&outside);
-        std::fs::create_dir_all(&outside).unwrap();
+        let area = ScratchDir::new("saniwalens-cleanup", "escape-sweep");
+        let outside = ScratchDir::new("saniwalens-cleanup", "escape-outside");
         let target = outside.join("secret.md");
         std::fs::write(&target, "secret").unwrap();
-        let link = area.path().join("plan-link.md");
+        let link = area.join("plan-link.md");
         symlink(&target, &link).unwrap();
-        let victim_old = area.file("plan-old.md", "old", 100);
-        let victim_new = area.file("plan-new.md", "new", 300);
+        let victim_old = area_file(&area, "plan-old.md", "old", 100);
+        let victim_new = area_file(&area, "plan-new.md", "new", 300);
         let link_entry = Entry {
             path: link.clone(),
             bytes: 6,
@@ -688,7 +654,7 @@ mod tests {
         };
 
         let report = sweep_area(
-            area.path(),
+            &area,
             vec![link_entry, victim_old.clone(), victim_new.clone()],
             1,
         )
@@ -700,16 +666,15 @@ mod tests {
         assert!(link.exists(), "the escaping link itself stays");
         assert!(victim_new.path.exists(), "the kept generation stays");
         assert_eq!(std::fs::read_to_string(&target).unwrap(), "secret");
-        let _ = std::fs::remove_dir_all(&outside);
     }
 
     #[test]
     fn collect_lists_children_with_sizes_and_skips_a_missing_dir() {
-        let area = Area::new("collect");
-        area.file("plan-a.md", "12345", 100);
-        assert!(collect_entries(&area.path().join("no-such-dir")).is_empty());
+        let area = ScratchDir::new("saniwalens-cleanup", "collect");
+        area_file(&area, "plan-a.md", "12345", 100);
+        assert!(collect_entries(&area.join("no-such-dir")).is_empty());
 
-        let mut listed = collect_entries(area.path());
+        let mut listed = collect_entries(&area);
         listed.sort_by(|left, right| left.path.cmp(&right.path));
         assert_eq!(listed.len(), 1);
         assert_eq!(listed[0].bytes, 5);
@@ -720,14 +685,14 @@ mod tests {
     fn collect_sums_a_generation_dir_recursively() {
         // I-1: a backup generation lists its contents' total, not the dir
         // entry's own bytes.
-        let area = Area::new("collect-recursive");
-        let generation = area.path().join("2026-01-01T00-00-00");
+        let area = ScratchDir::new("saniwalens-cleanup", "collect-recursive");
+        let generation = area.join("2026-01-01T00-00-00");
         std::fs::create_dir_all(&generation).unwrap();
         std::fs::write(generation.join("a.md"), "12345").unwrap();
         std::fs::create_dir_all(generation.join("nested")).unwrap();
         std::fs::write(generation.join("nested").join("b.md"), "1234567").unwrap();
 
-        let mut listed = collect_entries(area.path());
+        let mut listed = collect_entries(&area);
         assert_eq!(listed.len(), 1);
         assert_eq!(listed.pop().unwrap().bytes, 5 + 7);
     }
@@ -737,15 +702,15 @@ mod tests {
     fn collect_never_follows_a_link_for_sizes() {
         // A link inside a generation counts as a link, never its target.
         use std::os::unix::fs::symlink;
-        let area = Area::new("collect-link");
-        let generation = area.path().join("2026-01-01T00-00-00");
+        let area = ScratchDir::new("saniwalens-cleanup", "collect-link");
+        let generation = area.join("2026-01-01T00-00-00");
         std::fs::create_dir_all(&generation).unwrap();
         std::fs::write(generation.join("real.md"), "12345").unwrap();
-        let target = area.path().join("big.md");
+        let target = area.join("big.md");
         std::fs::write(&target, "x".repeat(4096)).unwrap();
         symlink(&target, generation.join("link.md")).unwrap();
 
-        let listed = collect_entries(area.path());
+        let listed = collect_entries(&area);
         let generation_entry = listed
             .iter()
             .find(|entry| entry.path == generation)
@@ -763,19 +728,19 @@ mod tests {
         // M-2: a link whose target is gone resolves nowhere but still sits
         // inside the area, so the sweep removes the link itself.
         use std::os::unix::fs::symlink;
-        let area = Area::new("dangling-sweep");
-        let target = area.path().join("target-gone.md");
-        let link = area.path().join("plan-link.md");
+        let area = ScratchDir::new("saniwalens-cleanup", "dangling-sweep");
+        let target = area.join("target-gone.md");
+        let link = area.join("plan-link.md");
         symlink(&target, &link).unwrap();
         assert!(!target.exists(), "the fixture is dangling");
-        assert!(is_within(area.path(), &link));
+        assert!(is_within(&area, &link));
 
         let victim = Entry {
             path: link.clone(),
             bytes: 1,
             modified: SystemTime::UNIX_EPOCH,
         };
-        let report = sweep_area(area.path(), vec![victim.clone()], 0).unwrap();
+        let report = sweep_area(&area, vec![victim.clone()], 0).unwrap();
 
         assert_eq!(report.removed, vec![victim]);
         assert!(report.skipped.is_empty());
@@ -789,9 +754,9 @@ mod tests {
     #[test]
     fn a_dangling_link_counts_as_within_by_its_parent() {
         use std::os::unix::fs::symlink;
-        let area = Area::new("dangling-within");
-        let link = area.path().join("plan-link.md");
-        symlink(area.path().join("no-such-target.md"), &link).unwrap();
-        assert!(is_within(area.path(), &link));
+        let area = ScratchDir::new("saniwalens-cleanup", "dangling-within");
+        let link = area.join("plan-link.md");
+        symlink(area.join("no-such-target.md"), &link).unwrap();
+        assert!(is_within(&area, &link));
     }
 }
