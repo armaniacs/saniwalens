@@ -514,18 +514,22 @@ mod tests {
             std::env::temp_dir().join(format!("saniwalens-timeout-pid-{}", std::process::id()));
         let script = format!("echo $$ > '{}'; exec sleep 5", pid_file.display());
         let started = Instant::now();
+        // Generous against slow CI spawn: the deadline covers process start,
+        // and sleep 5 still outlives it by far, so the timeout path always
+        // fires. A 100 ms budget flakes when scheduling stalls the child
+        // past the deadline (observed on loaded macOS runners).
         let err = run_headless(
             "/bin/sh",
             &["-c", script.as_str()],
             "ignored",
             None,
             fast_beat(),
-            Some(Duration::from_millis(100)),
+            Some(Duration::from_secs(2)),
             false,
         )
         .expect_err("the silent child times out");
         assert!(
-            started.elapsed() < Duration::from_secs(2),
+            started.elapsed() < Duration::from_secs(5),
             "the timeout did not return promptly: {:?}",
             started.elapsed()
         );
