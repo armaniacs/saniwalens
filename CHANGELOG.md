@@ -6,6 +6,29 @@
 
 形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に従い、
 バージョンは [Semantic Versioning](https://semver.org/lang/ja/) に従う。
+各節はタグ間差分単位で記録する（ブランチ差分単位ではない）。
+
+## [0.6.1] - 2026-11-12
+
+### Added
+
+- advisor 言語の最終フォールバックとして locale 解決を追加。
+  `--language` も設定ファイルも言語を名指ししないときは `LC_ALL` >
+  `LC_MESSAGES` > `LANG` を見て、先頭が `ja` なら日本語、それ以外は
+  従来どおりバイト同一の英語になる。
+
+### Changed
+
+- 内部整理（出力は不変）。`--apply` の headless ガード・順序比較子・
+  サイズ計算・テスト用スクラッチ配置をヘルパーに集約し、locale 解決の
+  文字列往復をやめた。ガードは deny-by-default（ワイルドカードなしの
+  網羅 `match`）に戻し、公開 doc の帰属も正した。全テスト green。
+
+### Fixed
+
+- CI の flake とクロスプラットフォーム不整合を修正（タイムアウトテスト
+  の余裕、XDG fixture の temp dir 化、golden の LF 固定ほか）。
+  公開物・出力に変更はない。
 
 ## [0.6.0] - 2026-11-10
 

@@ -334,10 +334,11 @@ decision specifically and keep going on everything else — do not hand the whol
         // The language instruction is the single wording source above
         // (`AdvisorLanguage::instruction_sentence`): English carries none, so
         // unset output renders byte-identical to before.
-        language_sentence_block = match copy.language.instruction_sentence() {
-            Some(sentence) => format!("\n{sentence}"),
-            None => String::new(),
-        },
+        language_sentence_block = copy
+            .language
+            .instruction_sentence()
+            .map(|sentence| format!("\n{sentence}"))
+            .unwrap_or_default(),
     )
 }
 
