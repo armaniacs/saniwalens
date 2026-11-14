@@ -30,8 +30,8 @@ pub struct Entry {
     /// The entry's own path (a generation dir itself, not its children).
     pub path: PathBuf,
     /// The entry's size in bytes: a file's own length, a generation dir's
-    /// recursive total over the files under it. Symlinks never resolve:
-    /// a link counts as a link instead of pulling its target's size in.
+    /// recursive total over the files under it. Symlink handling follows
+    /// [`sized_path`]: links never resolve to their targets.
     pub bytes: u64,
     /// The entry's own modification time, for newest-first ordering.
     pub modified: SystemTime,
@@ -119,60 +119,91 @@ pub(crate) fn run_cleanup(
     }
 }
 
-/// One path's listed size: a real subdir counts its recursive total, anything
-/// else (file, link) its own length. Symlinks never resolve, so a link counts
-/// as a link instead of pulling its target's size in.
-fn sized_path(path: &Path, meta: &fs::Metadata) -> u64 {
+/// One path's listed size plus what could not be read below it: a real
+/// subdir counts its recursive total, anything else (file, link) its own
+/// length.
+///
+/// The symlink policy, canonical for the whole listing: links never
+/// resolve. Every path is read with [`fs::symlink_metadata`] and the walk
+/// never follows a link, so a link counts as a link instead of pulling its
+/// target's size in ― including a dangling link, which counts its own
+/// length rather than its (missing) target.
+fn sized_path(path: &Path, meta: &fs::Metadata) -> (u64, usize) {
     if meta.file_type().is_dir() {
         dir_size(path)
     } else {
-        meta.len()
+        (meta.len(), 0)
     }
+}
+
+/// What one area's listing found: the readable children as entries, plus
+/// how many children could not be listed at all. The count is list-side
+/// only ― a generation dir whose contents cannot be read still lists (with
+/// an unknown, zero size) and adds one skip, so the total's undercount
+/// stays visible. It is never the sweep's [`SweepReport::skipped`]
+/// (victims outside the area), which rides a separate path.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct CollectedEntries {
+    /// The readable children, as entries.
+    pub entries: Vec<Entry>,
+    /// How many children could not be read (unreadable metadata or sizes).
+    pub skipped: usize,
 }
 
 /// The area's direct children as entries: plan files and backup generation
 /// dirs alike, never the area dir itself. A missing area lists as empty ― a
-/// fresh machine simply has nothing saved yet. A generation dir's size is
-/// the recursive total over the files under it; symlinks never resolve, so
-/// a link counts as a link instead of pulling its target's size (or its
-/// target at all) into the listing.
-pub fn collect_entries(dir: &Path) -> Vec<Entry> {
+/// fresh machine simply has nothing saved yet. An area that cannot be read
+/// at all also lists as empty with no count: with no children enumerable,
+/// there is nothing to count. A generation dir's size is
+/// the recursive total over the files under it, with symlink handling per
+/// [`sized_path`]: a link never pulls its target into the listing.
+pub fn collect_entries(dir: &Path) -> CollectedEntries {
     let Ok(read) = fs::read_dir(dir) else {
-        return Vec::new();
+        return CollectedEntries::default();
     };
     let mut entries = Vec::new();
+    let mut skipped = 0usize;
     for child in read.flatten() {
         let path = child.path();
         let Ok(meta) = fs::symlink_metadata(&path) else {
+            skipped += 1;
             continue;
         };
-        let bytes = sized_path(&path, &meta);
+        let (bytes, nested) = sized_path(&path, &meta);
+        skipped += nested;
         entries.push(Entry {
             path,
             bytes,
             modified: meta.modified().unwrap_or(SystemTime::UNIX_EPOCH),
         });
     }
-    entries
+    CollectedEntries { entries, skipped }
 }
 
-/// The recursive total over the files under `dir`, links never followed:
-/// a real subdir recurses, anything else (file, link) counts its own
-/// length. Unreadable children are skipped, so a listing never fails over
-/// one bad entry.
-fn dir_size(dir: &Path) -> u64 {
+/// The recursive total over the files under `dir` plus the count of what
+/// could not be read below it: a real subdir recurses, anything else
+/// (file, link) counts its own length, with symlink handling per
+/// [`sized_path`]. Unreadable children are counted, not hidden, so a listing never
+/// fails over one bad entry and never silently undercounts one either ―
+/// the count rides back through [`sized_path`] to [`collect_entries`],
+/// which reports it.
+fn dir_size(dir: &Path) -> (u64, usize) {
     let Ok(read) = fs::read_dir(dir) else {
-        return 0;
+        return (0, 1);
     };
     let mut total = 0u64;
+    let mut skipped = 0usize;
     for child in read.flatten() {
         let path = child.path();
         let Ok(meta) = fs::symlink_metadata(&path) else {
+            skipped += 1;
             continue;
         };
-        total = total.saturating_add(sized_path(&path, &meta));
+        let (bytes, nested) = sized_path(&path, &meta);
+        total = total.saturating_add(bytes);
+        skipped += nested;
     }
-    total
+    (total, skipped)
 }
 
 /// What one area's sweep did: victims deleted, outsiders skipped. `removed`
@@ -253,16 +284,28 @@ fn format_time_rfc3339(modified: SystemTime) -> String {
 }
 
 /// List both areas: path, size, and modification time per entry, with the
-/// per-area counts and the total underneath. BDD "一覧できる".
+/// per-area counts and the total underneath. BDD "一覧できる". Unreadable
+/// entries never fail the listing; their count goes to stderr as a warning,
+/// so the table and JSON on stdout stay byte-identical to a fully readable
+/// run's shape (the machine contract), while the undercount stays visible.
 fn list_areas(areas: &[(&str, PathBuf)], format: Format) -> Result<()> {
     let mut listed: Vec<(&str, Vec<Entry>)> = Vec::new();
     let mut total = 0u64;
+    let mut skipped_total = 0usize;
     for (area, dir) in areas {
-        let mut entries = collect_entries(dir);
+        let collected = collect_entries(dir);
+        skipped_total += collected.skipped;
+        let mut entries = collected.entries;
         // Newest-first for display: the same order the sweep keeps in.
         entries.sort_by(newest_first_cmp);
         total += entries.iter().map(|entry| entry.bytes).sum::<u64>();
         listed.push((area, entries));
+    }
+    if skipped_total > 0 {
+        eprintln!(
+            "warning: skipped {skipped_total} unreadable entrie(s) under the listed areas; \
+             listed sizes cover only what could be read"
+        );
     }
     if format == Format::Json {
         let areas_json: Vec<serde_json::Value> = listed
@@ -316,7 +359,9 @@ fn sweep_areas(areas: &[(&str, PathBuf)], keep: usize, format: Format) -> Result
     // Snapshot first so the intent printout precedes every delete.
     let mut snapshots: Vec<(&str, PathBuf, Vec<Entry>)> = Vec::new();
     for (area, dir) in areas {
-        snapshots.push((area, dir.clone(), collect_entries(dir)));
+        // The sweep owns its own skipped set (victims outside the area);
+        // the listing's unreadable count stays out of it.
+        snapshots.push((area, dir.clone(), collect_entries(dir).entries));
     }
     for (area, _dir, entries) in &snapshots {
         let (kept, victims) = select_victims(entries.clone(), keep);
@@ -672,9 +717,13 @@ mod tests {
     fn collect_lists_children_with_sizes_and_skips_a_missing_dir() {
         let area = ScratchDir::new("saniwalens-cleanup", "collect");
         area_file(&area, "plan-a.md", "12345", 100);
-        assert!(collect_entries(&area.join("no-such-dir")).is_empty());
+        assert!(
+            collect_entries(&area.join("no-such-dir"))
+                .entries
+                .is_empty()
+        );
 
-        let mut listed = collect_entries(&area);
+        let mut listed = collect_entries(&area).entries;
         listed.sort_by(|left, right| left.path.cmp(&right.path));
         assert_eq!(listed.len(), 1);
         assert_eq!(listed[0].bytes, 5);
@@ -692,7 +741,7 @@ mod tests {
         std::fs::create_dir_all(generation.join("nested")).unwrap();
         std::fs::write(generation.join("nested").join("b.md"), "1234567").unwrap();
 
-        let mut listed = collect_entries(&area);
+        let mut listed = collect_entries(&area).entries;
         assert_eq!(listed.len(), 1);
         assert_eq!(listed.pop().unwrap().bytes, 5 + 7);
     }
@@ -710,7 +759,7 @@ mod tests {
         std::fs::write(&target, "x".repeat(4096)).unwrap();
         symlink(&target, generation.join("link.md")).unwrap();
 
-        let listed = collect_entries(&area);
+        let listed = collect_entries(&area).entries;
         let generation_entry = listed
             .iter()
             .find(|entry| entry.path == generation)
@@ -758,5 +807,96 @@ mod tests {
         let link = area.join("plan-link.md");
         symlink(area.join("no-such-target.md"), &link).unwrap();
         assert!(is_within(&area, &link));
+    }
+
+    #[test]
+    fn collect_reports_no_skips_for_a_fully_readable_area() {
+        // PBI-04: a clean area carries an explicit zero, not an absent count.
+        let area = ScratchDir::new("saniwalens-cleanup", "collect-skips-none");
+        area_file(&area, "plan-a.md", "12345", 100);
+        let collected = collect_entries(&area);
+        assert_eq!(collected.entries.len(), 1);
+        assert_eq!(collected.skipped, 0);
+    }
+
+    #[test]
+    fn collect_lists_a_missing_dir_as_empty_without_skips() {
+        // A missing area stays silent: nothing enumerable, nothing to count.
+        let area = ScratchDir::new("saniwalens-cleanup", "collect-skips-missing");
+        let collected = collect_entries(&area.join("no-such-dir"));
+        assert!(collected.entries.is_empty());
+        assert_eq!(collected.skipped, 0);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn collect_counts_an_unreadable_generation_dir_as_skipped() {
+        // PBI-04 E2E "読めないエントリがあっても一覧は失敗しない": the
+        // unreadable generation still lists (with unknown size) and the
+        // skip is counted instead of silently dropped.
+        use std::os::unix::fs::PermissionsExt;
+        let area = ScratchDir::new("saniwalens-cleanup", "collect-skips-one");
+        area_file(&area, "plan-a.md", "12345", 100);
+        let generation = area.join("2026-01-01T00-00-00");
+        std::fs::create_dir_all(&generation).unwrap();
+        std::fs::write(generation.join("big.md"), "x".repeat(4096)).unwrap();
+        std::fs::set_permissions(&generation, std::fs::Permissions::from_mode(0o000)).unwrap();
+        let collected = collect_entries(&area);
+        std::fs::set_permissions(&generation, std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert_eq!(
+            collected.entries.len(),
+            2,
+            "the listing never fails over one bad entry"
+        );
+        assert_eq!(collected.skipped, 1);
+        let listed = collected
+            .entries
+            .iter()
+            .find(|entry| entry.path == generation)
+            .expect("the unreadable generation still lists");
+        assert_eq!(listed.bytes, 0, "its size is unknown, not its real total");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn collect_counts_every_unreadable_generation() {
+        // PBI-04境界値: several unreadable generations (here: all of them)
+        // each add one skip while still listing.
+        use std::os::unix::fs::PermissionsExt;
+        let area = ScratchDir::new("saniwalens-cleanup", "collect-skips-all");
+        let mut generations = Vec::new();
+        for name in ["2026-01-01T00-00-00", "2026-01-02T00-00-00"] {
+            let generation = area.join(name);
+            std::fs::create_dir_all(&generation).unwrap();
+            std::fs::write(generation.join("big.md"), "x".repeat(4096)).unwrap();
+            std::fs::set_permissions(&generation, std::fs::Permissions::from_mode(0o000)).unwrap();
+            generations.push(generation);
+        }
+        let collected = collect_entries(&area);
+        for generation in &generations {
+            std::fs::set_permissions(generation, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        assert_eq!(collected.entries.len(), 2);
+        assert_eq!(collected.skipped, 2);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn dir_size_counts_unreadable_nested_children() {
+        // The nested half of the PBI-04 count: an unreadable child dir hides
+        // its bytes (counted once) while readable siblings still total.
+        use std::os::unix::fs::PermissionsExt;
+        let area = ScratchDir::new("saniwalens-cleanup", "dir-size-skips");
+        let generation = area.join("2026-01-01T00-00-00");
+        std::fs::create_dir_all(&generation).unwrap();
+        std::fs::write(generation.join("a.md"), "12345").unwrap();
+        let locked = generation.join("nested");
+        std::fs::create_dir_all(&locked).unwrap();
+        std::fs::write(locked.join("big.md"), "x".repeat(4096)).unwrap();
+        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000)).unwrap();
+        let (bytes, skipped) = dir_size(&generation);
+        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert_eq!(bytes, 5);
+        assert_eq!(skipped, 1);
     }
 }
