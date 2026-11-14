@@ -44,13 +44,13 @@ Scenario: 変な値は既定に落ちる
 ```
 
 ## 受け入れ基準
-- [ ] 解決順が `LC_ALL` > `LC_MESSAGES` > `LANG` である (POSIX 準拠)
-- [ ] 言語判定は先頭サブタグのみを見る (小文字化し、エンコーディング
+- [x] 解決順が `LC_ALL` > `LC_MESSAGES` > `LANG` である (POSIX 準拠)
+- [x] 言語判定は先頭サブタグのみを見る (小文字化し、エンコーディング
   `.UTF-8` や `@` 修飾を除いた先頭が `ja` のとき日本語。`ja` /
   `ja_JP` / `ja_JP.UTF-8` が日本語、`en_US` / `C` / 空が英語)
-- [ ] 全体の優先順位が `--language` フラグ > config > ロケール > 既定 (En) である
-- [ ] `cargo test` と `cargo clippy --all-targets -- -D warnings` が green
-- [ ] `docs/specs/cli.md` の config 節と言語の段落が同一変更で更新されている
+- [x] 全体の優先順位が `--language` フラグ > config > ロケール > 既定 (En) である
+- [x] `cargo test` と `cargo clippy --all-targets -- -D warnings` が green
+- [x] `docs/specs/cli.md` の config 節と言語の段落が同一変更で更新されている
 
 ## テスト戦略（t_wadaスタイル）
 
@@ -106,8 +106,8 @@ grep -n "resolve_cli_with_language\|AdvisorLanguage" src/session.rs | head -n 20
 - 実 transcripts / 実 config をテストに使わない。fixture は合成のみ
 
 ## Definition of Done
-- [ ] 全BDDシナリオが自動テストとして実装されパスする
-- [ ] テストカバレッジが基準を満たす (E2E/統合/単体すべて)
-- [ ] コードレビュー完了
-- [ ] リファクタリング完了 (グリーン後)
-- [ ] ドキュメント更新済み
+- [x] 全BDDシナリオが自動テストとして実装されパスする
+- [x] テストカバレッジが基準を満たす (E2E/統合/単体すべて)
+- [x] コードレビュー完了
+- [x] リファクタリング完了 (グリーン後)
+- [x] ドキュメント更新済み
