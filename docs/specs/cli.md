@@ -761,6 +761,9 @@ cleanup` lists and prunes them (the implementation lives in
 (or `--list`) prints every plan file and backup generation with its size
 (a generation dir lists its recursive total over the files under it;
 links never resolve, so a link counts as a link) and modification time;
+entries that cannot be read are skipped without failing the listing and
+their count goes to stderr as a warning, so stdout and JSON stay
+byte-identical;
 `cleanup --keep N` (a bare `--keep` keeps 10) deletes all but the newest N
 generations in each area, snapshotting every area and printing the count
 and total size before deleting anything, then reporting every removed path

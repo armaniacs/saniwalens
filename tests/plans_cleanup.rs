@@ -183,6 +183,46 @@ fn list_json_reports_entries_and_the_total() {
 
 #[cfg(unix)]
 #[test]
+fn list_warns_on_stderr_for_unreadable_generations_but_stays_green() {
+    // BDD "黙殺しない": an unreadable generation lists (at 0 B) instead of
+    // failing, and the undercount surfaces on stderr only — stdout and JSON
+    // keep the machine contract byte-identical.
+    use std::os::unix::fs::PermissionsExt;
+    let home = sandbox("list-unreadable-warns");
+    let generation = backups_dir(&home).join("2026-01-01T00-00-00");
+    std::fs::create_dir_all(&generation).unwrap();
+    std::fs::write(generation.join("a.md"), "12345").unwrap();
+    std::fs::set_permissions(&generation, std::fs::Permissions::from_mode(0o000)).unwrap();
+
+    let out = run_in(&home, &["cleanup", "--list"]);
+    assert!(
+        out.status.success(),
+        "list failed over one unreadable dir: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stdout = String::from_utf8(out.stdout).unwrap();
+    assert!(
+        stdout.contains(&generation.display().to_string()),
+        "the unreadable generation still lists:\n{stdout}"
+    );
+    let stderr = String::from_utf8(out.stderr).unwrap();
+    assert!(
+        stderr.contains("skipped 1 unreadable"),
+        "no skip warning on stderr:\n{stderr}"
+    );
+
+    let json = run_in(&home, &["cleanup", "--list", "--format", "json"]);
+    assert!(json.status.success(), "json list failed");
+    let payload: serde_json::Value =
+        serde_json::from_slice(&json.stdout).expect("stdout is one JSON document");
+    assert!(
+        !payload["areas"].as_array().unwrap().is_empty(),
+        "{payload}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
 fn sweep_keeps_the_newest_and_reports_every_removed_path() {
     // BDD "掃除できる": the two newest of four plans survive, the two
     // oldest are deleted and every deleted path is printed.
