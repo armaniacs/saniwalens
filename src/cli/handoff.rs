@@ -27,19 +27,35 @@ use super::deliver::{BriefingFile, ProcessAdvisor, write_private_tempfile};
 use super::headless::{Beat, run_headless};
 use super::{AdvisorLaunch, collect_findings, run_analyze, write_private_file};
 
+/// The `--apply`-capable harness labels, derived from the launch table: every
+/// harness whose [`RunMode`](optimize_mod::RunMode) is headless. Generated —
+/// never re-spelled — so a future headless harness appears in the refusal
+/// message the moment its `launch_command` arm lands, instead of leaving a
+/// stale `(opencode)` behind.
+fn headless_harness_labels() -> String {
+    Harness::ALL
+        .iter()
+        .filter(|harness| harness.launch_command().2 == optimize_mod::RunMode::Headless)
+        .map(|harness| harness.label())
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
 /// Fail unless the run mode is headless: `--apply` hands a headless run's
 /// plan to an interactive dialog, so an already-interactive session has
 /// nothing to hand off. An exhaustive match with no wildcard (like
 /// `delivery_mode`): a future third run mode fails to compile here instead
 /// of slipping through the handoff at runtime. This is the predicate both
 /// the flag pre-check and `run_apply`'s defense-in-depth arm share, so both
-/// refuse with the same wording.
+/// refuse with the same wording. The parenthetical names the allowed set via
+/// [`headless_harness_labels`], so the wording tracks the launch table.
 fn require_headless_mode(run_mode: optimize_mod::RunMode, harness_name: &str) -> Result<()> {
     match run_mode {
         optimize_mod::RunMode::Headless => Ok(()),
         optimize_mod::RunMode::Interactive => anyhow::bail!(
-            "`--apply` needs a headless harness (opencode): the {} session is already \
+            "`--apply` needs a headless harness ({}): the {} session is already \
              interactive and applies its own plan",
+            headless_harness_labels(),
             harness_name
         ),
     }
@@ -187,10 +203,10 @@ pub fn complete_handoff(
         .collect();
     let plan = extract_plan_text(&rendered);
     if plan.trim().is_empty() {
-        anyhow::bail!(
-            "the advisor produced no readable text, so no plan file was written \
-             (raw log removed)"
-        );
+        // Nothing is written and nothing is removed here: the input is the
+        // in-memory log text, so claiming a removed log would name a file
+        // that never existed in this function's scope.
+        anyhow::bail!("the advisor produced no readable text, so no plan file was written");
     }
     let plan_path = save_plan(handoff.plans, &plan)?;
     let prompt = optimize_mod::apply_prompt(
@@ -353,6 +369,25 @@ mod tests {
         assert!(require_headless_mode(optimize_mod::RunMode::Headless, "opencode").is_ok());
         let err = require_headless_mode(optimize_mod::RunMode::Interactive, "claude").unwrap_err();
         assert!(format!("{err:#}").contains("headless"), "{err:#}");
+    }
+
+    #[test]
+    fn refusal_message_names_the_allowed_headless_harnesses() {
+        // BDD: "許可される headless 群が文言と一致する". The allowed set is
+        // the launch table's truth; the message must name every headless
+        // harness, so a future headless arm without a message update fails
+        // here instead of shipping a stale parenthetical.
+        let expected: Vec<&str> = Harness::ALL
+            .iter()
+            .filter(|harness| harness.launch_command().2 == optimize_mod::RunMode::Headless)
+            .map(|harness| harness.label())
+            .collect();
+        assert!(!expected.is_empty(), "the gate allows no headless harness");
+        let err = require_headless_mode(optimize_mod::RunMode::Interactive, "claude").unwrap_err();
+        let rendered = format!("{err:#}");
+        for label in expected {
+            assert!(rendered.contains(label), "{rendered}");
+        }
     }
 
     #[test]
@@ -656,8 +691,12 @@ mod tests {
 
         let err = complete_handoff(TOOL_LINE, &ctx, &mut advisor).unwrap_err();
 
-        assert!(format!("{err:#}").contains("no readable text"), "{err:#}");
-        assert!(format!("{err:#}").contains("no plan file"), "{err:#}");
+        let rendered = format!("{err:#}");
+        assert!(rendered.contains("no readable text"), "{rendered}");
+        assert!(rendered.contains("no plan file"), "{rendered}");
+        // The input is in-memory log text: this function removes no file, so
+        // the error must not claim a removal.
+        assert!(!rendered.contains("removed"), "{rendered}");
         assert!(advisor.launches.is_empty(), "the dialog never opened");
         assert!(
             fs::read_dir(&*dir)
