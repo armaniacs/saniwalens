@@ -27,8 +27,9 @@ fn sandbox(name: &str) -> ScratchDir {
 }
 
 /// Like `run_in`, but the locale variables start cleared (hermetic against
-/// the runner's own `LANG`) and then take exactly the given pairs, so each
-/// locale case names its full `LC_ALL` / `LC_MESSAGES` / `LANG` triple.
+/// the runner's own `LANG` and `LANGUAGE`) and then take exactly the given
+/// pairs, so each locale case names its full `LC_ALL` / `LC_MESSAGES` /
+/// `LANG` / `LANGUAGE` tuple.
 fn run_in_with_locale(home: &Path, args: &[&str], locale: &[(&str, &str)]) -> std::process::Output {
     let mut cmd = Command::new(binary());
     cmd.args(args)
@@ -37,7 +38,8 @@ fn run_in_with_locale(home: &Path, args: &[&str], locale: &[(&str, &str)]) -> st
         .env("XDG_CONFIG_HOME", home.join("config"))
         .env_remove("LC_ALL")
         .env_remove("LC_MESSAGES")
-        .env_remove("LANG");
+        .env_remove("LANG")
+        .env_remove("LANGUAGE");
     for (key, value) in locale {
         cmd.env(key, value);
     }
@@ -267,4 +269,219 @@ fn locale_c_prints_byte_identical_to_unset() {
             "a {name} locale changed the prompt bytes"
         );
     }
+}
+
+// PBI `2026-11-14-01-feat-language-env-support.md`, outside-in: `LANGUAGE`
+// is the gettext message-language layer beneath the POSIX triple, so each
+// case names its full locale tuple on top of cleared variables.
+
+#[test]
+fn language_env_ja_carries_the_sentence() {
+    // BDD "LANGUAGEだけで日本語になる": with no flag and no config,
+    // `LANG=C.UTF-8` + `LANGUAGE=ja_JP:ja` carries the single sentence.
+    let home = sandbox("language-env-ja");
+    let out =
+        print_prompt_with_locale(&home, &[], &[("LANG", "C.UTF-8"), ("LANGUAGE", "ja_JP:ja")]);
+    assert!(
+        out.status.success(),
+        "print failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stdout = String::from_utf8(out.stdout).unwrap();
+    assert!(
+        stdout.contains(language_sentence()),
+        "LANGUAGE=ja lost its sentence:\n{stdout}"
+    );
+}
+
+#[test]
+fn lc_all_c_silences_the_language_env() {
+    // BDD "CロケールはLANGUAGEに勝つ": gettext's C priority — a bare `C`
+    // winner ignores `LANGUAGE` entirely.
+    let home = sandbox("language-env-c-wins");
+    let out = print_prompt_with_locale(
+        &home,
+        &[],
+        &[
+            ("LANG", "C.UTF-8"),
+            ("LANGUAGE", "ja_JP:ja"),
+            ("LC_ALL", "C"),
+        ],
+    );
+    assert!(
+        out.status.success(),
+        "print failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stdout = String::from_utf8(out.stdout).unwrap();
+    assert!(
+        !stdout.contains(language_sentence()),
+        "LC_ALL=C lost to LANGUAGE=ja:\n{stdout}"
+    );
+}
+
+#[test]
+fn language_env_votes_its_head_only() {
+    // BDD "先頭サブタグのみを見る": only the colon-separated head votes —
+    // a non-Japanese head stays silent even with `ja` behind it.
+    let home = sandbox("language-env-head");
+    let out = print_prompt_with_locale(&home, &[], &[("LANGUAGE", "fr:ja")]);
+    assert!(
+        out.status.success(),
+        "print failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stdout = String::from_utf8(out.stdout).unwrap();
+    assert!(
+        !stdout.contains(language_sentence()),
+        "a non-ja LANGUAGE head gained a sentence:\n{stdout}"
+    );
+}
+
+#[test]
+fn non_ja_language_env_prints_byte_identical_to_unset() {
+    // BDD "非jaのLANGUAGEは無意見である": a non-Japanese `LANGUAGE`
+    // renders exactly like no locale at all. Both runs share one sandbox
+    // so the store path inside the prompt is equal.
+    let home = sandbox("language-env-non-ja-identical");
+    let unset = print_prompt_with_locale(&home, &[], &[]);
+    assert!(
+        unset.status.success(),
+        "print failed: {}",
+        String::from_utf8_lossy(&unset.stderr)
+    );
+    let fr = print_prompt_with_locale(&home, &[], &[("LANGUAGE", "fr:en")]);
+    assert!(
+        fr.status.success(),
+        "print failed: {}",
+        String::from_utf8_lossy(&fr.stderr)
+    );
+    assert_eq!(
+        fr.stdout, unset.stdout,
+        "a non-ja LANGUAGE changed the prompt bytes"
+    );
+}
+
+// PBI `2026-11-14-02-feat-locale-decision-visibility.md`, outside-in: the
+// `--verbose` run names which layer decided the advisor language, on stderr
+// only, so the prompt bytes and JSON stay untouched.
+
+/// `optimize --print --verbose --frozen` on a synthetic home: `--verbose`
+/// must add exactly one decision-source line on stderr.
+fn verbose_print(home: &Path, extra: &[&str], locale: &[(&str, &str)]) -> std::process::Output {
+    let mut verbose = vec!["--verbose"];
+    verbose.extend(extra);
+    print_prompt_with_locale(home, &verbose, locale)
+}
+
+fn decision_line(stderr: &str) -> &str {
+    stderr
+        .lines()
+        .find(|line| line.contains("decided by"))
+        .unwrap_or("")
+}
+
+#[test]
+fn verbose_names_config_as_decision_source() {
+    // BDD "verbose で決定ソースが分かる": config `language = "ja"` wins,
+    // so the line names `config` even with a Japanese locale behind it.
+    let home = sandbox("verbose-source-config");
+    write_config(&home, "language = \"ja\"\n");
+    let out = verbose_print(&home, &[], &[("LANG", "ja_JP.UTF-8")]);
+    assert!(
+        out.status.success(),
+        "print failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stderr = String::from_utf8(out.stderr).unwrap();
+    assert!(
+        decision_line(&stderr).contains("decided by config"),
+        "no config decision line:\n{stderr}"
+    );
+}
+
+#[test]
+fn verbose_names_locale_as_decision_source() {
+    // BDD "locale 決定であることが分かる": with no flag and no config, a
+    // Japanese `LANG` decides, so the line names `locale`.
+    let home = sandbox("verbose-source-locale");
+    let out = verbose_print(&home, &[], &[("LANG", "ja_JP.UTF-8")]);
+    assert!(
+        out.status.success(),
+        "print failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stderr = String::from_utf8(out.stderr).unwrap();
+    assert!(
+        decision_line(&stderr).contains("decided by locale"),
+        "no locale decision line:\n{stderr}"
+    );
+}
+
+#[test]
+fn verbose_names_flag_as_decision_source() {
+    // The flag beats the file: `--language en` over a `ja` config names
+    // `flag`.
+    let home = sandbox("verbose-source-flag");
+    write_config(&home, "language = \"ja\"\n");
+    let out = verbose_print(&home, &["--language", "en"], &[("LANG", "ja_JP.UTF-8")]);
+    assert!(
+        out.status.success(),
+        "print failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stderr = String::from_utf8(out.stderr).unwrap();
+    assert!(
+        decision_line(&stderr).contains("decided by flag"),
+        "no flag decision line:\n{stderr}"
+    );
+}
+
+#[test]
+fn verbose_names_default_when_nothing_sets_a_language() {
+    // Nothing set anywhere: the default decides, so the line names
+    // `default`.
+    let home = sandbox("verbose-source-default");
+    let out = verbose_print(&home, &[], &[]);
+    assert!(
+        out.status.success(),
+        "print failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stderr = String::from_utf8(out.stderr).unwrap();
+    assert!(
+        decision_line(&stderr).contains("decided by default"),
+        "no default decision line:\n{stderr}"
+    );
+}
+
+#[test]
+fn non_verbose_run_prints_no_decision_line_and_matching_bytes() {
+    // BDD "通常実行の出力は変わらない": without `--verbose` no decision
+    // line appears anywhere, and the prompt bytes match the verbose run's.
+    // Both runs share one sandbox so the store path inside the prompt is
+    // equal.
+    let home = sandbox("verbose-quiet-identical");
+    write_config(&home, "language = \"ja\"\n");
+    let quiet = print_prompt_with_locale(&home, &[], &[("LANG", "ja_JP.UTF-8")]);
+    assert!(
+        quiet.status.success(),
+        "print failed: {}",
+        String::from_utf8_lossy(&quiet.stderr)
+    );
+    let verbose = verbose_print(&home, &[], &[("LANG", "ja_JP.UTF-8")]);
+    assert!(
+        verbose.status.success(),
+        "print failed: {}",
+        String::from_utf8_lossy(&verbose.stderr)
+    );
+    assert_eq!(
+        verbose.stdout, quiet.stdout,
+        "--verbose changed the prompt bytes"
+    );
+    let quiet_stderr = String::from_utf8(quiet.stderr).unwrap();
+    assert!(
+        !quiet_stderr.contains("decided by"),
+        "a quiet run leaked a decision line:\n{quiet_stderr}"
+    );
 }

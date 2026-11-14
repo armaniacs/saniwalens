@@ -1535,6 +1535,7 @@ mod tests {
             db_path: PathBuf::new(),
             store: two_window_store(),
             language: crate::core::optimize::AdvisorLanguage::default(),
+            language_source: crate::session::LanguageSource::Default,
         };
         trend(&two.store, &two.harness, trend_pair(), Format::Table).unwrap();
         trend(&two.store, &two.harness, trend_pair(), Format::Markdown).unwrap();
@@ -1544,6 +1545,7 @@ mod tests {
             db_path: PathBuf::new(),
             store: Store::in_memory().unwrap(),
             language: crate::core::optimize::AdvisorLanguage::default(),
+            language_source: crate::session::LanguageSource::Default,
         };
         trend(&empty.store, &empty.harness, trend_pair(), Format::Table).unwrap();
         trend(&empty.store, &empty.harness, trend_pair(), Format::Json).unwrap();

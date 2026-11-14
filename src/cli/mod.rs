@@ -15,8 +15,9 @@ use crate::core::scope::ScopeFilter;
 use crate::core::subagent::SplitCoverage;
 use crate::core::surface::{StartupSavings, Wedge};
 use crate::session::{
-    AnalyzeStats, Session, SessionEnv, Style, env_roots, eprint_freshness, freshness_line,
-    guard_harness, process_locale_language, resolve_cli_with_language,
+    AnalyzeStats, Session, SessionEnv, Style, env_roots, eprint_freshness,
+    eprint_language_decision, freshness_line, guard_harness, process_locale_language,
+    resolve_cli_with_language,
 };
 use crate::store::{OpenMode, Store};
 
@@ -533,6 +534,7 @@ pub fn run() -> Result<()> {
             let filter = parse_scope(scope.as_deref())?;
             let mut sess = Session::open_resolved(&harness, path)?;
             sess.language = language;
+            sess.language_source = resolved.language_source;
             let timeout = headless::resolve_timeout(timeout.as_deref())?;
             if apply {
                 return handoff::run_apply(&sess, projects, &filter, frozen, timeout, &env);
@@ -579,6 +581,7 @@ fn optimize(
     verbose: bool,
     timeout: Option<std::time::Duration>,
 ) -> Result<()> {
+    eprint_language_decision(verbose, sess.language_source, sess.language);
     if !frozen {
         let stats = run_analyze(&sess.harness, projects, &sess.db_path)?;
         eprintln!(
