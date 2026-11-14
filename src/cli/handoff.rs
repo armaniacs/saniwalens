@@ -730,6 +730,7 @@ mod tests {
             db_path: db,
             store,
             language: optimize_mod::AdvisorLanguage::default(),
+            language_source: crate::session::LanguageSource::Default,
         }
     }
 

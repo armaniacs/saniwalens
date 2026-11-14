@@ -73,9 +73,12 @@ file's top-level defaults, then the builtins (`claude`, the per-harness store
 path). `language` follows the same strongest-first shape minus the profile
 layer: `--language`, then the file's top-level `language`, then the locale
 fallback, then English. The locale fallback reads `LC_ALL` over
-`LC_MESSAGES` over `LANG` (POSIX order, empty counts as unset) and is
-Japanese only when the leading subtag is `ja` (`ja`, `ja_JP`,
-`ja_JP.UTF-8`); `C`, an empty value, and anything else keep the English
+`LC_MESSAGES` over `LANG` (POSIX order, empty counts as unset), then the
+`LANGUAGE` priority list's head (`ja_JP:ja` votes `ja_JP`) — Japanese only
+when the voting value's leading subtag is `ja` (`ja`, `ja_JP`,
+`ja_JP.UTF-8`); a bare-`C` / `POSIX` winner suppresses `LANGUAGE` entirely
+(gettext's C priority — `LANG=C.UTF-8` is not bare, so it still defers to
+`LANGUAGE`); `C`, an empty value, and anything else keep the English
 default, byte-identical to before.
 Profiles never carry it, so selecting a profile never blocks the file default.
 Flag *values* (`--scope`, `--format`) are parsed before the session is
@@ -612,7 +615,10 @@ as the equivalent `optimize` invocation. Fixed TUI protocol tokens
 are deliberately not translated: the `y`/`n`/`q` choice lines, the
 display-recovery line, and the headless proposal-only status line stay
 byte-identical in both languages, so the `y`/`n`/`q` parse contract never
-depends on the language setting.
+depends on the language setting. `optimize --verbose` additionally names the
+layer that decided the language on stderr —
+`language: <en|ja> (decided by flag|config|locale|default)` — so the prompt
+bytes stay identical with or without the flag.
 
 Crucially the briefing is the **complete** analysis, not a headline ― every
 project's friction breakdown, the full Bash/hotspot/thrash detail, and the actual

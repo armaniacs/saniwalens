@@ -10,7 +10,10 @@
 //! tripwire does not grow the very file it guards.
 
 /// The measured size of `src/cli/mod.rs` at the latest budget change (the
-/// advisor language flag of 2026-11-10: 1,132 lines, for the `--language`
+/// verbose language-decision line of 2026-11-14: 1,135 lines, for the
+/// `sess.language_source` handoff and the one `eprint_language_decision`
+/// call in the `optimize` arm (the line itself lives in `session.rs`, not
+/// the shell). The advisor language flag of 2026-11-10: 1,132 lines, for the `--language`
 /// global flag, its `resolve_cli_with_language` wiring, and the resolved
 /// language handoff into the `optimize` session (all language logic lives in
 /// `core::optimize`, `adapter::config_file`, and `session.rs`, not the shell).
@@ -35,7 +38,7 @@
 /// landing measured 3,383), with no slack — raising this constant is a review
 /// point, done in the same PR as the spec update it forces
 /// (`docs/specs/architecture.md`).
-const MOD_RS_LINE_BUDGET: usize = 1132;
+const MOD_RS_LINE_BUDGET: usize = 1135;
 
 /// The remedy half of the tripwire's failure message, pinned here so its
 /// wording cannot drift away from what it prescribes.

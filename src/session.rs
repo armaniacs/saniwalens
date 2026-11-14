@@ -48,6 +48,7 @@ pub struct LocaleEnv {
     pub lc_all: Option<String>,
     pub lc_messages: Option<String>,
     pub lang: Option<String>,
+    pub language: Option<String>,
 }
 
 /// Read the process locale for advisor-language resolution. Owned here so
@@ -58,6 +59,7 @@ pub fn locale_env() -> LocaleEnv {
         lc_all: std::env::var("LC_ALL").ok(),
         lc_messages: std::env::var("LC_MESSAGES").ok(),
         lang: std::env::var("LANG").ok(),
+        language: std::env::var("LANGUAGE").ok(),
     }
 }
 
@@ -71,6 +73,7 @@ pub fn process_locale_language() -> Option<AdvisorLanguage> {
         locale.lc_all.as_deref(),
         locale.lc_messages.as_deref(),
         locale.lang.as_deref(),
+        locale.language.as_deref(),
     )
 }
 
@@ -87,22 +90,53 @@ pub fn locale_is_japanese(value: &str) -> bool {
         .is_some_and(|subtag| subtag == "ja")
 }
 
+/// Whether a locale value is the bare `C` / `POSIX` locale that suppresses
+/// `LANGUAGE` (gettext's C priority): exactly `C` or `POSIX`,
+/// case-insensitive, with no encoding or modifier. `C.UTF-8` is *not* bare —
+/// on Ubuntu `LANG=C.UTF-8` pairs with `LANGUAGE=ja`, so only the bare form
+/// suppresses and anything else defers to the `LANGUAGE` head.
+pub fn locale_is_c(value: &str) -> bool {
+    matches!(value.trim().to_lowercase().as_str(), "c" | "posix")
+}
+
+/// The voting entry of a `LANGUAGE` priority list (`ja_JP:ja:en` → `ja_JP`):
+/// the colon-separated head, trimmed. A blank list votes nothing (`None`).
+pub fn language_head(value: &str) -> Option<&str> {
+    let head = value.split(':').next().unwrap_or("").trim();
+    (!head.is_empty()).then_some(head)
+}
+
 /// Resolve the locale fallback with POSIX precedence: `LC_ALL` wins over
 /// `LC_MESSAGES`, which wins over `LANG`; an empty value counts as unset.
-/// Yields `Some(Ja)` exactly when the winner is Japanese, `None` otherwise —
-/// the caller falls back to the English default, so `C`/`en_US`/unset all
-/// render byte-identical to before.
+/// Beneath a quiet POSIX layer — no winner, or a non-Japanese, non-C one —
+/// the `LANGUAGE` head votes (its own colon-separated first entry, normalized
+/// like every other locale value). A bare-`C` / `POSIX` winner suppresses
+/// `LANGUAGE` entirely (gettext's C priority), as does a Japanese winner
+/// needing no help. Yields `Some(Ja)` exactly when the layer votes Japanese,
+/// `None` otherwise — the caller falls back to the English default, so
+/// `C`/`en_US`/unset all render byte-identical to before.
 pub fn resolve_locale_language(
     lc_all: Option<&str>,
     lc_messages: Option<&str>,
     lang: Option<&str>,
+    language: Option<&str>,
 ) -> Option<AdvisorLanguage> {
-    [lc_all, lc_messages, lang]
+    let winner = [lc_all, lc_messages, lang]
         .into_iter()
         .flatten()
         .map(str::trim)
-        .find(|value| !value.is_empty())
-        .filter(|winner| locale_is_japanese(winner))
+        .find(|value| !value.is_empty());
+    if let Some(winner) = winner {
+        if locale_is_japanese(winner) {
+            return Some(AdvisorLanguage::Ja);
+        }
+        if locale_is_c(winner) {
+            return None;
+        }
+    }
+    language
+        .and_then(language_head)
+        .filter(|head| locale_is_japanese(head))
         .map(|_| AdvisorLanguage::Ja)
 }
 
@@ -113,6 +147,56 @@ pub struct ResolvedCli {
     pub harness: Harness,
     pub config_db: Option<PathBuf>,
     pub language: AdvisorLanguage,
+    pub language_source: LanguageSource,
+}
+
+/// Which layer named the advisor language, strongest first: the explicit
+/// `--language` flag, the config file's top-level `language`, the locale
+/// fallback, or the English default. Carried on the resolution so
+/// `--verbose` can print the decision (PBI 2026-11-14-02) without
+/// re-deriving it; the value itself stays the only thing prompts render.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LanguageSource {
+    Flag,
+    Config,
+    Locale,
+    Default,
+}
+
+impl LanguageSource {
+    pub fn label(self) -> &'static str {
+        match self {
+            LanguageSource::Flag => "flag",
+            LanguageSource::Config => "config",
+            LanguageSource::Locale => "locale",
+            LanguageSource::Default => "default",
+        }
+    }
+}
+
+/// The `--verbose`-only decision line (PBI 2026-11-14-02): the resolved
+/// language code and the layer that named it, in one greppable line.
+/// Rendered on stderr by the caller — never into prompts or JSON — so normal
+/// output stays byte-identical with or without `--verbose`.
+pub fn language_decision_line(source: LanguageSource, language: AdvisorLanguage) -> String {
+    let code = match language {
+        AdvisorLanguage::En => "en",
+        AdvisorLanguage::Ja => "ja",
+    };
+    format!("language: {code} (decided by {})", source.label())
+}
+
+/// Print [`language_decision_line`] on stderr, dimmed like the other shell
+/// chatter — a no-op unless `verbose`. The shell calls this with its own
+/// flag, so the condition lives in one tested place and the shell grows by
+/// one call line instead of a branch.
+pub fn eprint_language_decision(verbose: bool, source: LanguageSource, language: AdvisorLanguage) {
+    if verbose {
+        eprintln!(
+            "{}",
+            Style::stderr().dim(&language_decision_line(source, language))
+        );
+    }
 }
 
 /// Resolve one invocation's harness and default store from flags plus the
@@ -153,15 +237,28 @@ pub fn resolve_cli_with_language(
     // The locale only ever votes Ja: Some(En) carries no opinion, same as
     // None — so the enum feeds the default directly instead of round-tripping
     // through a "ja" string and the parser.
-    let language = match config_file::resolve_language(cli_language, file.as_ref()) {
-        Some(code) => parse_language(Some(&code))?,
-        None if locale == Some(AdvisorLanguage::Ja) => AdvisorLanguage::Ja,
-        None => AdvisorLanguage::default(),
-    };
+    let (language, language_source) =
+        match config_file::resolve_language(cli_language, file.as_ref()) {
+            // A present flag always wins the merge above, so its presence names
+            // the source; otherwise the file's own default did.
+            Some(code) => {
+                let source = if cli_language.is_some() {
+                    LanguageSource::Flag
+                } else {
+                    LanguageSource::Config
+                };
+                (parse_language(Some(&code))?, source)
+            }
+            None if locale == Some(AdvisorLanguage::Ja) => {
+                (AdvisorLanguage::Ja, LanguageSource::Locale)
+            }
+            None => (AdvisorLanguage::default(), LanguageSource::Default),
+        };
     Ok(ResolvedCli {
         harness: parse_harness(resolved.harness.as_deref())?,
         config_db: resolved.db,
         language,
+        language_source,
     })
 }
 
@@ -213,12 +310,17 @@ pub use crate::adapter::harness::AnalyzeStats;
 /// builtin, English by default). It lives on the session so the `optimize`
 /// family reads it without another parameter — including the guided TUI's
 /// inline next step, which builds its session the same way and therefore
-/// renders the same language without naming the flag.
+/// renders the same language without naming the flag. `language_source`
+/// names the layer that decided it, for the `--verbose`-only decision line
+/// (`language_decision_line`); sessions built without a resolution (the
+/// guide's inline run always passes `verbose = false`, so the line never
+/// renders there) keep the default.
 pub struct Session {
     pub harness: Harness,
     pub db_path: PathBuf,
     pub store: Store,
     pub language: AdvisorLanguage,
+    pub language_source: LanguageSource,
 }
 
 impl std::fmt::Debug for Session {
@@ -258,6 +360,7 @@ impl Session {
             db_path: path,
             store,
             language: AdvisorLanguage::default(),
+            language_source: LanguageSource::Default,
         })
     }
 
@@ -308,6 +411,7 @@ impl Session {
             db_path: path,
             store,
             language: AdvisorLanguage::default(),
+            language_source: LanguageSource::Default,
         })
     }
 
@@ -334,6 +438,7 @@ impl Session {
             db_path: path,
             store,
             language: AdvisorLanguage::default(),
+            language_source: LanguageSource::Default,
         })
     }
 
@@ -661,6 +766,7 @@ mod tests {
                 harness: Harness::Claude,
                 config_db: None,
                 language: AdvisorLanguage::En,
+                language_source: LanguageSource::Default,
             }
         );
     }
@@ -866,29 +972,38 @@ mod tests {
         // (`None`), so the caller falls back to the English default.
         use AdvisorLanguage::Ja;
         assert_eq!(
-            resolve_locale_language(Some("ja_JP.UTF-8"), None, None),
+            resolve_locale_language(Some("ja_JP.UTF-8"), None, None, None),
             Some(Ja)
         );
-        assert_eq!(resolve_locale_language(None, Some("ja"), None), Some(Ja));
         assert_eq!(
-            resolve_locale_language(None, None, Some("ja_JP.UTF-8")),
+            resolve_locale_language(None, Some("ja"), None, None),
             Some(Ja)
         );
-        assert_eq!(resolve_locale_language(None, None, None), None);
-        assert_eq!(resolve_locale_language(Some(""), Some(""), Some("")), None);
+        assert_eq!(
+            resolve_locale_language(None, None, Some("ja_JP.UTF-8"), None),
+            Some(Ja)
+        );
+        assert_eq!(resolve_locale_language(None, None, None, None), None);
+        assert_eq!(
+            resolve_locale_language(Some(""), Some(""), Some(""), None),
+            None
+        );
         // Boundary: `LC_ALL=C` silences `LANG=ja`; `LC_MESSAGES` wins over
         // `LANG` the same way; a `ja` `LC_ALL` wins over everything below.
         assert_eq!(
-            resolve_locale_language(Some("C"), None, Some("ja_JP.UTF-8")),
+            resolve_locale_language(Some("C"), None, Some("ja_JP.UTF-8"), None),
             None
         );
-        assert_eq!(resolve_locale_language(None, Some("C"), Some("ja")), None);
         assert_eq!(
-            resolve_locale_language(Some("ja"), Some("C"), Some("C")),
+            resolve_locale_language(None, Some("C"), Some("ja"), None),
+            None
+        );
+        assert_eq!(
+            resolve_locale_language(Some("ja"), Some("C"), Some("C"), None),
             Some(Ja)
         );
         assert_eq!(
-            resolve_locale_language(None, None, Some("en_US.UTF-8")),
+            resolve_locale_language(None, None, Some("en_US.UTF-8"), None),
             None
         );
     }
@@ -931,6 +1046,153 @@ mod tests {
         let resolved =
             resolve_cli_with_language(None, None, Some("en"), Some(Ja), &bare_env).unwrap();
         assert_eq!(resolved.language, En);
+    }
+
+    #[test]
+    fn locale_is_c_matches_only_the_bare_suppressing_form() {
+        // PBI 2026-11-14-01: only a bare `C` / `POSIX` winner suppresses
+        // `LANGUAGE` (gettext's C priority). `C.UTF-8` is not bare — on
+        // Ubuntu `LANG=C.UTF-8` pairs with `LANGUAGE=ja`, so it must defer.
+        for c in ["C", "c", "POSIX", "posix", "  C  "] {
+            assert!(locale_is_c(c), "{c}");
+        }
+        for not_c in [
+            "",
+            "C.UTF-8",
+            "c.utf8",
+            "en",
+            "en_US.UTF-8",
+            "ja",
+            "ja_JP.UTF-8",
+        ] {
+            assert!(!locale_is_c(not_c), "{not_c}");
+        }
+    }
+
+    #[test]
+    fn language_head_takes_the_first_colon_entry_only() {
+        // PBI 2026-11-14-01: `LANGUAGE` is a priority list — only the head
+        // votes, and a blank list votes nothing.
+        assert_eq!(language_head("ja_JP:ja"), Some("ja_JP"));
+        assert_eq!(language_head("fr:en"), Some("fr"));
+        assert_eq!(language_head("ja"), Some("ja"));
+        assert_eq!(language_head(""), None);
+        assert_eq!(language_head("   "), None);
+        assert_eq!(language_head("  ja_JP : en"), Some("ja_JP"));
+    }
+
+    #[test]
+    fn resolve_locale_language_reads_language_beneath_a_quiet_posix() {
+        // PBI 2026-11-14-01: the `LANGUAGE` column of the resolution table —
+        // a quiet POSIX layer (unset, or non-Japanese and non-C) defers to
+        // the `LANGUAGE` head; a bare-`C` winner suppresses it.
+        use AdvisorLanguage::Ja;
+        // BDD "LANGUAGEだけで日本語になる": `LANG=C.UTF-8` is not bare C,
+        // so `LANGUAGE=ja_JP:ja` votes Japanese.
+        assert_eq!(
+            resolve_locale_language(None, None, Some("C.UTF-8"), Some("ja_JP:ja")),
+            Some(Ja)
+        );
+        // No POSIX at all: the head alone decides.
+        assert_eq!(
+            resolve_locale_language(None, None, None, Some("ja_JP:en_US:fr")),
+            Some(Ja)
+        );
+        assert_eq!(
+            resolve_locale_language(None, None, None, Some("fr:en")),
+            None
+        );
+        assert_eq!(resolve_locale_language(None, None, None, Some("")), None);
+        // BDD "先頭サブタグのみを見る": a non-Japanese head stays silent
+        // even with `ja` behind it.
+        assert_eq!(
+            resolve_locale_language(None, None, None, Some("fr:ja")),
+            None
+        );
+        // BDD "CロケールはLANGUAGEに勝つ": a bare-`C` winner ignores
+        // `LANGUAGE`, at every POSIX layer.
+        assert_eq!(
+            resolve_locale_language(Some("C"), None, Some("ja"), Some("ja")),
+            None
+        );
+        assert_eq!(
+            resolve_locale_language(None, Some("POSIX"), None, Some("ja")),
+            None
+        );
+        assert_eq!(
+            resolve_locale_language(None, None, Some("C"), Some("ja")),
+            None
+        );
+        // A Japanese POSIX winner needs no help from `LANGUAGE`.
+        assert_eq!(
+            resolve_locale_language(None, None, Some("ja_JP.UTF-8"), Some("fr")),
+            Some(Ja)
+        );
+        // A non-Japanese, non-C POSIX layer still defers to `LANGUAGE`
+        // (gettext: `LANG` names the codeset, `LANGUAGE` the messages).
+        assert_eq!(
+            resolve_locale_language(None, None, Some("en_US.UTF-8"), Some("ja")),
+            Some(Ja)
+        );
+    }
+
+    #[test]
+    fn resolve_cli_language_reports_its_source() {
+        // PBI 2026-11-14-02: the resolution names its winning layer —
+        // flag, then the file, then the locale, then the default — so
+        // `--verbose` can print the decision without re-deriving it.
+        use AdvisorLanguage::{En, Ja};
+        use LanguageSource::{Config, Default, Flag, Locale};
+        let dir = example_dir("file-language-source");
+        let _ = std::fs::remove_dir_all(&dir);
+        write_config(&dir, "language = \"ja\"\n");
+        let env = SessionEnv {
+            state_home: Some(&dir),
+            home: None,
+            config_home: Some(&dir),
+        };
+        // The flag beats the file.
+        let resolved = resolve_cli_with_language(None, None, Some("en"), Some(Ja), &env).unwrap();
+        assert_eq!((resolved.language, resolved.language_source), (En, Flag));
+        // The file beats a `C` locale.
+        let resolved = resolve_cli_with_language(None, None, None, None, &env).unwrap();
+        assert_eq!((resolved.language, resolved.language_source), (Ja, Config));
+        let _ = std::fs::remove_dir_all(&dir);
+
+        let bare = example_dir("file-language-source-bare");
+        let bare_env = SessionEnv {
+            state_home: Some(&bare),
+            home: None,
+            config_home: Some(&bare),
+        };
+        // The locale fills the gap the flag and the file leave ...
+        let resolved = resolve_cli_with_language(None, None, None, Some(Ja), &bare_env).unwrap();
+        assert_eq!((resolved.language, resolved.language_source), (Ja, Locale));
+        // ... and the default decides when nothing votes.
+        let resolved = resolve_cli_with_language(None, None, None, None, &bare_env).unwrap();
+        assert_eq!((resolved.language, resolved.language_source), (En, Default));
+    }
+
+    #[test]
+    fn language_decision_line_names_source_and_code() {
+        // PBI 2026-11-14-02: the `--verbose`-only line carries the resolved
+        // code and the winning layer in one greppable line.
+        assert_eq!(
+            language_decision_line(LanguageSource::Config, AdvisorLanguage::Ja),
+            "language: ja (decided by config)"
+        );
+        assert_eq!(
+            language_decision_line(LanguageSource::Flag, AdvisorLanguage::En),
+            "language: en (decided by flag)"
+        );
+        assert_eq!(
+            language_decision_line(LanguageSource::Locale, AdvisorLanguage::Ja),
+            "language: ja (decided by locale)"
+        );
+        assert_eq!(
+            language_decision_line(LanguageSource::Default, AdvisorLanguage::En),
+            "language: en (decided by default)"
+        );
     }
 
     fn store_with_harness(dir: &Path, file: &str, label: Option<&str>) -> PathBuf {
