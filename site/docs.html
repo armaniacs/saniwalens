@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Docs — saniwalens</title>
+  <meta name="description" content="saniwalens commands, views, and the design-spec map.">
+  <meta name="color-scheme" content="light dark">
+  <script>
+    try {
+      document.querySelector('meta[name="color-scheme"]').content =
+        localStorage.getItem("color-scheme") ?? "light dark";
+    } catch (e) {}
+  </script>
+  <link rel="stylesheet" href="./styles.css">
+  <script defer src="./app.js"></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <header class="site-header">
+    <div class="header-inner">
+      <a class="site-logo" href="./index.html" aria-label="saniwalens home">saniwalens</a>
+
+      <nav class="site-nav" aria-label="Primary">
+        <button
+          class="menu-button"
+          type="button"
+          popovertarget="site-menu"
+          popovertargetaction="toggle"
+          aria-controls="site-menu"
+        >
+          <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+            <path d="M2 4h12M2 8h12M2 12h12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" fill="none"/>
+          </svg>
+          <span>Menu</span>
+        </button>
+
+        <ul id="site-menu" class="site-menu" popover="auto">
+          <li><a href="./index.html">Home</a></li>
+          <li><a href="./docs.html" aria-current="page">Docs</a></li>
+          <li><a href="./specs.html">Specs</a></li>
+          <li><a href="./cli.html">CLI</a></li>
+          <li><a href="https://github.com/armaniacs/saniwalens">GitHub</a></li>
+          <li><a href="./index_ja.html">日本語</a></li>
+        </ul>
+      </nav>
+
+      <button
+        id="theme-toggle"
+        class="theme-toggle"
+        type="button"
+        aria-live="polite"
+      >
+        <span class="theme-toggle-dark" aria-hidden="true">☾</span>
+        <span class="theme-toggle-light" aria-hidden="true">☀</span>
+        <span class="visually-hidden" id="theme-toggle-label">Switch to dark theme</span>
+      </button>
+    </div>
+  </header>
+
+  <main id="main">
+    <h1>Docs</h1>
+    <p class="lead">
+      The design intent lives in <code>docs/specs/</code>; this page maps it to
+      the commands you run. The README is how to run it; the specs are why.
+    </p>
+
+    <section aria-labelledby="pipeline-heading">
+      <h2 id="pipeline-heading">Pipeline</h2>
+      <div class="table-scroll" role="region" aria-label="Pipeline commands" tabindex="0">
+        <table>
+          <caption>Analyze once, read many times — the store decouples the stages</caption>
+          <thead>
+            <tr>
+              <th scope="col">Command</th>
+              <th scope="col">What it does</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <th scope="row"><code>saniwalens doctor</code></th>
+              <td>The health check, split global / per-project — <strong>start here</strong>.</td>
+            </tr>
+            <tr>
+              <th scope="row"><code>saniwalens analyze</code></th>
+              <td>Extract transcripts + config into the store (incremental). Reads run it automatically.</td>
+            </tr>
+            <tr>
+              <th scope="row"><code>saniwalens sql '&lt;query&gt;'</code></th>
+              <td>Arbitrary read-only SQL against the store. The store is the whole point.</td>
+            </tr>
+            <tr>
+              <th scope="row"><code>saniwalens optimize</code></th>
+              <td>Hand findings to an advisor session to act on.</td>
+            </tr>
+            <tr>
+              <th scope="row"><code>saniwalens cleanup</code></th>
+              <td>List or prune saved <code>--apply</code> plans and backups. Needs no store.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section aria-labelledby="views-heading">
+      <h2 id="views-heading">Views</h2>
+      <p>
+        Each is a curated lens that carries logic a raw query cannot (a classification,
+        an algorithm, a suggestion). Scopes: <code>--scope global | project | project:&lt;slug&gt;</code>.
+      </p>
+      <figure>
+        <figcaption id="views-code">The lenses you will reach for most:</figcaption>
+        <pre role="region" aria-labelledby="views-code" tabindex="0"><code>saniwalens waste                 # ranked opportunities, with a suggested action
+saniwalens inventory               # every surface × its actual usage
+saniwalens overhead                # always-on context per session
+saniwalens usage                   # per-skill usage, most-invoked first
+saniwalens failures                # recurring tool failures, ranked, with fixes
+saniwalens prompts                 # how you steer the session
+saniwalens stuck                  # files the agent got stuck re-editing</code></pre>
+      </figure>
+    </section>
+
+    <section aria-labelledby="specs-heading">
+      <h2 id="specs-heading">Spec map</h2>
+      <ul class="spec-list">
+        <li><a href="./specs.html#spec-architecture"><code>architecture.md</code></a> — two stages decoupled by SQLite; catalog × usage join</li>
+        <li><a href="./specs.html#spec-cli"><code>cli.md</code></a> — command contract and reporting model (<a href="./cli.html">generated CLI reference</a>)</li>
+        <li><a href="./specs.html#spec-surfaces"><code>surfaces.md</code></a> — configuration-surface catalog</li>
+        <li><a href="./specs.html#spec-events"><code>events.md</code></a> — usage-event spine</li>
+        <li><a href="./specs.html#spec-storage"><code>storage.md</code></a> — store schema and migration</li>
+        <li><a href="./specs.html#spec-harness"><code>harness.md</code></a> — per-harness contract</li>
+        <li><a href="./specs.html#spec-session-format"><code>session-format*.md</code></a> — transcript formats per harness</li>
+        <li><a href="./specs.html#spec-config-format"><code>config-format*.md</code></a> — config formats per harness</li>
+      </ul>
+    </section>
+
+    <section aria-labelledby="notes-heading">
+      <h2 id="notes-heading">Notes that save you a surprise</h2>
+      <ul>
+        <li>Counts are usage signals for ranking, <strong>not a billing ledger</strong>.</li>
+        <li>The store outlives your transcripts — deleting it is a real loss, not a cache flush.</li>
+        <li>The store migrates in place across schema changes; you never need to delete it.</li>
+        <li>Report tables stay English; <code>--language en|ja</code> switches only the advisor prompt.</li>
+      </ul>
+    </section>
+  </main>
+
+  <footer>
+    <p>
+      saniwalens — MIT. Source on <a href="https://github.com/armaniacs/saniwalens">GitHub</a>.
+    </p>
+  </footer>
+</body>
+</html>

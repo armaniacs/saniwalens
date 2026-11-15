@@ -1,0 +1,391 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CLI reference — saniwalens</title>
+  <meta name="description" content="saniwalens CLI reference, generated from --help output.">
+  <meta name="color-scheme" content="light dark">
+  <script>
+    try {
+      document.querySelector('meta[name="color-scheme"]').content =
+        localStorage.getItem("color-scheme") ?? "light dark";
+    } catch (e) {}
+  </script>
+  <link rel="stylesheet" href="./styles.css">
+  <script defer src="./app.js"></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <header class="site-header">
+    <div class="header-inner">
+      <a class="site-logo" href="./index.html" aria-label="saniwalens home">saniwalens</a>
+
+      <nav class="site-nav" aria-label="Primary">
+        <button
+          class="menu-button"
+          type="button"
+          popovertarget="site-menu"
+          popovertargetaction="toggle"
+          aria-controls="site-menu"
+        >
+          <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+            <path d="M2 4h12M2 8h12M2 12h12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" fill="none"/>
+          </svg>
+          <span>Menu</span>
+        </button>
+
+        <ul id="site-menu" class="site-menu" popover="auto">
+          <li><a href="./index.html">Home</a></li>
+          <li><a href="./docs.html">Docs</a></li>
+          <li><a href="./specs.html">Specs</a></li>
+          <li><a href="./cli.html" aria-current="page">CLI</a></li>
+          <li><a href="https://github.com/armaniacs/saniwalens">GitHub</a></li>
+          <li><a href="./index_ja.html">日本語</a></li>
+        </ul>
+      </nav>
+
+      <button
+        id="theme-toggle"
+        class="theme-toggle"
+        type="button"
+        aria-live="polite"
+      >
+        <span class="theme-toggle-dark" aria-hidden="true">☾</span>
+        <span class="theme-toggle-light" aria-hidden="true">☀</span>
+        <span class="visually-hidden" id="theme-toggle-label">Switch to dark theme</span>
+      </button>
+    </div>
+  </header>
+
+  <main id="main">
+    <h1>CLI reference</h1>
+    <p class="lead">Generated from the binary's own <code>--help</code> output. Re-run <code>python3 scripts/pages-build.py</code> after CLI changes. The <a href="./docs.html">docs page</a> explains the pipeline and views.</p>
+    <figure>
+      <figcaption id="cli-0"><code>saniwalens --help</code></figcaption>
+      <pre role="region" aria-labelledby="cli-0" tabindex="0"><code>See where your coding-agent time and tokens go, and which config to fix.
+Start with `saniwalens doctor`; every report explains itself and names the
+follow-up command.
+
+Usage: saniwalens [OPTIONS] &lt;COMMAND&gt;
+
+Commands:
+  analyze    Read your session logs and config into the local store. Runs automatically before every report — call it directly only to refresh without reading anything
+  usage      How often each skill ran and what it cost — per skill, or over time with --by
+  trend      How usage moved: each kind of event, each skill, and the session and subagent totals this window against the equal-length window right before it (default 7d vs the 7d before)
+  models     Where the tokens went, by model: main-thread usage and subagent runs grouped per model, costliest first
+  sessions   Every session: what it spent, how long it ran, and how often tool calls kept failing inside it — costliest first
+  inventory  Everything installed in your config (skills, rules, agents, MCP servers, CLAUDE.md), what it weighs, and whether it was ever used
+  waste      Cleanup opportunities: config that is never used, loaded every session while heavy, or rarely worth its cost — ranked by what removing it actually saves
+  overhead   What every session pays in context before any work starts, and how much of that comes from your own config files vs the harness itself
+  prompts    How you steer Claude: the mix of instructing, steering (&quot;go ahead&quot;), correcting (&quot;no, instead…&quot;), and questioning prompts — and what that mix suggests changing
+  failures   Tool calls that kept failing the same way — recurring failures that waste turns and tokens, each with a suggested fix
+  stuck      Files Claude kept re-editing in rapid bursts — where it got stuck retrying instead of making progress
+  doctor     The health check — what to fix first, what your sessions cost, and what is fine as-is. Start here
+  sql        Ask anything the fixed reports don&#x27;t cover: run a read-only SQL query against the analyzed store (as an argument, or piped via stdin). `SELECT sql FROM sqlite_master` shows the schema
+  optimize   Act on the findings: opens an advisor session pre-loaded with the full analysis, which investigates each problem and proposes concrete config fixes (interactively under Claude Code, headless under opencode)
+  tui        Step-by-step guide to the typical patterns (doctor / waste / failures). Needs an interactive terminal; without one it refuses instead of hanging
+  cleanup    List or prune the `--apply` handoff&#x27;s saved plans and backups. Needs no store: it only reads (and, with `--keep`, deletes) under $XDG_STATE_HOME/saniwalens/plans/ and .../backups/
+  help       Print this message or the help of the given subcommand(s)
+
+Options:
+      --harness &lt;HARNESS&gt;    Which agent harness to analyze: claude (default) | opencode | kilocode. Global so every command resolves its store and input roots through it. See `docs/specs/harness.md`
+      --profile &lt;PROFILE&gt;    Named preset from the config file to run under. Global so every command resolves through it; an explicit --harness or --db still wins over whatever the profile sets. See `docs/specs/cli.md`
+      --language &lt;LANGUAGE&gt;  Advisor output language: en (the default) | ja. Global so every command resolves it through the same flag-beats-file order; only `optimize` renders it into a prompt today. See `docs/specs/cli.md`
+  -h, --help                 Print help
+  -V, --version              Print version</code></pre>
+    </figure>
+    <figure>
+      <figcaption id="cli-1"><code>saniwalens analyze --help</code></figcaption>
+      <pre role="region" aria-labelledby="cli-1" tabindex="0"><code>Read your session logs and config into the local store. Runs automatically before every report — call it directly only to refresh without reading anything
+
+Usage: saniwalens analyze [OPTIONS]
+
+Options:
+      --harness &lt;HARNESS&gt;    Which agent harness to analyze: claude (default) | opencode | kilocode. Global so every command resolves its store and input roots through it. See `docs/specs/harness.md`
+      --projects &lt;PROJECTS&gt;  Transcript root (default: $CLAUDE_CONFIG_DIR/projects, or ~/.claude/projects)
+      --format &lt;FORMAT&gt;      Output format: table | json (the run&#x27;s counters)
+      --profile &lt;PROFILE&gt;    Named preset from the config file to run under. Global so every command resolves through it; an explicit --harness or --db still wins over whatever the profile sets. See `docs/specs/cli.md`
+      --db &lt;DB&gt;              Store path (default: $XDG_STATE_HOME/saniwalens/saniwalens.db)
+      --language &lt;LANGUAGE&gt;  Advisor output language: en (the default) | ja. Global so every command resolves it through the same flag-beats-file order; only `optimize` renders it into a prompt today. See `docs/specs/cli.md`
+  -h, --help                 Print help</code></pre>
+    </figure>
+    <figure>
+      <figcaption id="cli-2"><code>saniwalens usage --help</code></figcaption>
+      <pre role="region" aria-labelledby="cli-2" tabindex="0"><code>How often each skill ran and what it cost — per skill, or over time with --by
+
+Usage: saniwalens usage [OPTIONS]
+
+Options:
+      --by &lt;BY&gt;              Bucket usage by time: year | month | week | day | hour (JST)
+      --harness &lt;HARNESS&gt;    Which agent harness to analyze: claude (default) | opencode | kilocode. Global so every command resolves its store and input roots through it. See `docs/specs/harness.md`
+      --profile &lt;PROFILE&gt;    Named preset from the config file to run under. Global so every command resolves through it; an explicit --harness or --db still wins over whatever the profile sets. See `docs/specs/cli.md`
+      --since &lt;DATE&gt;         Only count events on or after this date (YYYY-MM-DD, JST)
+      --language &lt;LANGUAGE&gt;  Advisor output language: en (the default) | ja. Global so every command resolves it through the same flag-beats-file order; only `optimize` renders it into a prompt today. See `docs/specs/cli.md`
+      --until &lt;DATE&gt;         Only count events through this date (YYYY-MM-DD, JST) — the whole day counts
+      --last &lt;SPAN&gt;          Rolling window ending now: &lt;N&gt;d | &lt;N&gt;h | &lt;N&gt;w (e.g. 7d). Exclusive with the explicit dates
+      --format &lt;FORMAT&gt;      Output format: table | markdown | json
+      --frozen               Read the store as-is; skip the automatic refresh
+      --db &lt;DB&gt;              Store path (default: $XDG_STATE_HOME/saniwalens/saniwalens.db)
+  -h, --help                 Print help</code></pre>
+    </figure>
+    <figure>
+      <figcaption id="cli-3"><code>saniwalens trend --help</code></figcaption>
+      <pre role="region" aria-labelledby="cli-3" tabindex="0"><code>How usage moved: each kind of event, each skill, and the session and subagent totals this window against the equal-length window right before it (default 7d vs the 7d before)
+
+Usage: saniwalens trend [OPTIONS]
+
+Options:
+      --harness &lt;HARNESS&gt;    Which agent harness to analyze: claude (default) | opencode | kilocode. Global so every command resolves its store and input roots through it. See `docs/specs/harness.md`
+      --since &lt;DATE&gt;         Current window start (YYYY-MM-DD, JST). The window to compare it with is the same length immediately before it
+      --profile &lt;PROFILE&gt;    Named preset from the config file to run under. Global so every command resolves through it; an explicit --harness or --db still wins over whatever the profile sets. See `docs/specs/cli.md`
+      --until &lt;DATE&gt;         Current window end (YYYY-MM-DD, JST) — the whole day counts. Needs --since; alone, the window to compare against is undefined
+      --language &lt;LANGUAGE&gt;  Advisor output language: en (the default) | ja. Global so every command resolves it through the same flag-beats-file order; only `optimize` renders it into a prompt today. See `docs/specs/cli.md`
+      --last &lt;SPAN&gt;          Rolling pair ending now: &lt;N&gt;d | &lt;N&gt;h | &lt;N&gt;w (e.g. 7d). Exclusive with the explicit dates
+      --format &lt;FORMAT&gt;      Output format: table | markdown | json
+      --frozen               Read the store as-is; skip the automatic refresh
+      --db &lt;DB&gt;              Store path (default: $XDG_STATE_HOME/saniwalens/saniwalens.db)
+  -h, --help                 Print help</code></pre>
+    </figure>
+    <figure>
+      <figcaption id="cli-4"><code>saniwalens models --help</code></figcaption>
+      <pre role="region" aria-labelledby="cli-4" tabindex="0"><code>Where the tokens went, by model: main-thread usage and subagent runs grouped per model, costliest first
+
+Usage: saniwalens models [OPTIONS]
+
+Options:
+      --harness &lt;HARNESS&gt;    Which agent harness to analyze: claude (default) | opencode | kilocode. Global so every command resolves its store and input roots through it. See `docs/specs/harness.md`
+      --since &lt;DATE&gt;         Only count events on or after this date (YYYY-MM-DD, JST)
+      --profile &lt;PROFILE&gt;    Named preset from the config file to run under. Global so every command resolves through it; an explicit --harness or --db still wins over whatever the profile sets. See `docs/specs/cli.md`
+      --until &lt;DATE&gt;         Only count events through this date (YYYY-MM-DD, JST) — the whole day counts
+      --language &lt;LANGUAGE&gt;  Advisor output language: en (the default) | ja. Global so every command resolves it through the same flag-beats-file order; only `optimize` renders it into a prompt today. See `docs/specs/cli.md`
+      --last &lt;SPAN&gt;          Rolling window ending now: &lt;N&gt;d | &lt;N&gt;h | &lt;N&gt;w (e.g. 7d). Exclusive with the explicit dates
+      --format &lt;FORMAT&gt;      Output format: table | markdown | json
+      --frozen               Read the store as-is; skip the automatic refresh
+      --db &lt;DB&gt;              Store path (default: $XDG_STATE_HOME/saniwalens/saniwalens.db)
+  -h, --help                 Print help</code></pre>
+    </figure>
+    <figure>
+      <figcaption id="cli-5"><code>saniwalens sessions --help</code></figcaption>
+      <pre role="region" aria-labelledby="cli-5" tabindex="0"><code>Every session: what it spent, how long it ran, and how often tool calls kept failing inside it — costliest first
+
+Usage: saniwalens sessions [OPTIONS]
+
+Options:
+      --harness &lt;HARNESS&gt;    Which agent harness to analyze: claude (default) | opencode | kilocode. Global so every command resolves its store and input roots through it. See `docs/specs/harness.md`
+      --sort &lt;SORT&gt;          Sort by: tokens (total output) | duration (wall-clock span) | friction (tool-error count). Default: tokens
+      --profile &lt;PROFILE&gt;    Named preset from the config file to run under. Global so every command resolves through it; an explicit --harness or --db still wins over whatever the profile sets. See `docs/specs/cli.md`
+      --since &lt;DATE&gt;         Only count events on or after this date (YYYY-MM-DD, JST)
+      --language &lt;LANGUAGE&gt;  Advisor output language: en (the default) | ja. Global so every command resolves it through the same flag-beats-file order; only `optimize` renders it into a prompt today. See `docs/specs/cli.md`
+      --until &lt;DATE&gt;         Only count events through this date (YYYY-MM-DD, JST) — the whole day counts
+      --last &lt;SPAN&gt;          Rolling window ending now: &lt;N&gt;d | &lt;N&gt;h | &lt;N&gt;w (e.g. 7d). Exclusive with the explicit dates
+      --format &lt;FORMAT&gt;      Output format: table | markdown | json
+      --frozen               Read the store as-is; skip the automatic refresh
+      --db &lt;DB&gt;              Store path (default: $XDG_STATE_HOME/saniwalens/saniwalens.db)
+  -h, --help                 Print help</code></pre>
+    </figure>
+    <figure>
+      <figcaption id="cli-6"><code>saniwalens inventory --help</code></figcaption>
+      <pre role="region" aria-labelledby="cli-6" tabindex="0"><code>Everything installed in your config (skills, rules, agents, MCP servers, CLAUDE.md), what it weighs, and whether it was ever used
+
+Usage: saniwalens inventory [OPTIONS]
+
+Options:
+      --harness &lt;HARNESS&gt;    Which agent harness to analyze: claude (default) | opencode | kilocode. Global so every command resolves its store and input roots through it. See `docs/specs/harness.md`
+      --scope &lt;SCOPE&gt;        Show one config layer only: global (~/.claude) | project (all projects&#x27; own config) | project:&lt;slug&gt; (one project&#x27;s)
+      --profile &lt;PROFILE&gt;    Named preset from the config file to run under. Global so every command resolves through it; an explicit --harness or --db still wins over whatever the profile sets. See `docs/specs/cli.md`
+      --since &lt;DATE&gt;         Only count events on or after this date (YYYY-MM-DD, JST)
+      --language &lt;LANGUAGE&gt;  Advisor output language: en (the default) | ja. Global so every command resolves it through the same flag-beats-file order; only `optimize` renders it into a prompt today. See `docs/specs/cli.md`
+      --until &lt;DATE&gt;         Only count events through this date (YYYY-MM-DD, JST) — the whole day counts
+      --last &lt;SPAN&gt;          Rolling window ending now: &lt;N&gt;d | &lt;N&gt;h | &lt;N&gt;w (e.g. 7d). Exclusive with the explicit dates
+      --format &lt;FORMAT&gt;      Output format: table | markdown | json
+      --frozen               Read the store as-is; skip the automatic refresh
+      --db &lt;DB&gt;              Store path (default: $XDG_STATE_HOME/saniwalens/saniwalens.db)
+  -h, --help                 Print help</code></pre>
+    </figure>
+    <figure>
+      <figcaption id="cli-7"><code>saniwalens waste --help</code></figcaption>
+      <pre role="region" aria-labelledby="cli-7" tabindex="0"><code>Cleanup opportunities: config that is never used, loaded every session while heavy, or rarely worth its cost — ranked by what removing it actually saves
+
+Usage: saniwalens waste [OPTIONS]
+
+Options:
+      --harness &lt;HARNESS&gt;    Which agent harness to analyze: claude (default) | opencode | kilocode. Global so every command resolves its store and input roots through it. See `docs/specs/harness.md`
+      --scope &lt;SCOPE&gt;        Show one config layer only: global (~/.claude) | project (all projects&#x27; own config) | project:&lt;slug&gt; (one project&#x27;s)
+      --profile &lt;PROFILE&gt;    Named preset from the config file to run under. Global so every command resolves through it; an explicit --harness or --db still wins over whatever the profile sets. See `docs/specs/cli.md`
+      --since &lt;DATE&gt;         Only count events on or after this date (YYYY-MM-DD, JST)
+      --language &lt;LANGUAGE&gt;  Advisor output language: en (the default) | ja. Global so every command resolves it through the same flag-beats-file order; only `optimize` renders it into a prompt today. See `docs/specs/cli.md`
+      --until &lt;DATE&gt;         Only count events through this date (YYYY-MM-DD, JST) — the whole day counts
+      --last &lt;SPAN&gt;          Rolling window ending now: &lt;N&gt;d | &lt;N&gt;h | &lt;N&gt;w (e.g. 7d). Exclusive with the explicit dates
+      --format &lt;FORMAT&gt;      Output format: table | markdown | json
+      --frozen               Read the store as-is; skip the automatic refresh
+      --db &lt;DB&gt;              Store path (default: $XDG_STATE_HOME/saniwalens/saniwalens.db)
+  -h, --help                 Print help</code></pre>
+    </figure>
+    <figure>
+      <figcaption id="cli-8"><code>saniwalens overhead --help</code></figcaption>
+      <pre role="region" aria-labelledby="cli-8" tabindex="0"><code>What every session pays in context before any work starts, and how much of that comes from your own config files vs the harness itself
+
+Usage: saniwalens overhead [OPTIONS]
+
+Options:
+      --format &lt;FORMAT&gt;      Output format: table | markdown | json
+      --harness &lt;HARNESS&gt;    Which agent harness to analyze: claude (default) | opencode | kilocode. Global so every command resolves its store and input roots through it. See `docs/specs/harness.md`
+      --profile &lt;PROFILE&gt;    Named preset from the config file to run under. Global so every command resolves through it; an explicit --harness or --db still wins over whatever the profile sets. See `docs/specs/cli.md`
+      --since &lt;DATE&gt;         Only count events on or after this date (YYYY-MM-DD, JST)
+      --language &lt;LANGUAGE&gt;  Advisor output language: en (the default) | ja. Global so every command resolves it through the same flag-beats-file order; only `optimize` renders it into a prompt today. See `docs/specs/cli.md`
+      --until &lt;DATE&gt;         Only count events through this date (YYYY-MM-DD, JST) — the whole day counts
+      --last &lt;SPAN&gt;          Rolling window ending now: &lt;N&gt;d | &lt;N&gt;h | &lt;N&gt;w (e.g. 7d). Exclusive with the explicit dates
+      --frozen               Read the store as-is; skip the automatic refresh
+      --db &lt;DB&gt;              Store path (default: $XDG_STATE_HOME/saniwalens/saniwalens.db)
+  -h, --help                 Print help</code></pre>
+    </figure>
+    <figure>
+      <figcaption id="cli-9"><code>saniwalens prompts --help</code></figcaption>
+      <pre role="region" aria-labelledby="cli-9" tabindex="0"><code>How you steer Claude: the mix of instructing, steering (&quot;go ahead&quot;), correcting (&quot;no, instead…&quot;), and questioning prompts — and what that mix suggests changing
+
+Usage: saniwalens prompts [OPTIONS]
+
+Options:
+      --format &lt;FORMAT&gt;      Output format: table | markdown | json
+      --harness &lt;HARNESS&gt;    Which agent harness to analyze: claude (default) | opencode | kilocode. Global so every command resolves its store and input roots through it. See `docs/specs/harness.md`
+      --profile &lt;PROFILE&gt;    Named preset from the config file to run under. Global so every command resolves through it; an explicit --harness or --db still wins over whatever the profile sets. See `docs/specs/cli.md`
+      --since &lt;DATE&gt;         Only count events on or after this date (YYYY-MM-DD, JST)
+      --language &lt;LANGUAGE&gt;  Advisor output language: en (the default) | ja. Global so every command resolves it through the same flag-beats-file order; only `optimize` renders it into a prompt today. See `docs/specs/cli.md`
+      --until &lt;DATE&gt;         Only count events through this date (YYYY-MM-DD, JST) — the whole day counts
+      --last &lt;SPAN&gt;          Rolling window ending now: &lt;N&gt;d | &lt;N&gt;h | &lt;N&gt;w (e.g. 7d). Exclusive with the explicit dates
+      --frozen               Read the store as-is; skip the automatic refresh
+      --db &lt;DB&gt;              Store path (default: $XDG_STATE_HOME/saniwalens/saniwalens.db)
+  -h, --help                 Print help</code></pre>
+    </figure>
+    <figure>
+      <figcaption id="cli-10"><code>saniwalens failures --help</code></figcaption>
+      <pre role="region" aria-labelledby="cli-10" tabindex="0"><code>Tool calls that kept failing the same way — recurring failures that waste turns and tokens, each with a suggested fix
+
+Usage: saniwalens failures [OPTIONS]
+
+Options:
+      --harness &lt;HARNESS&gt;    Which agent harness to analyze: claude (default) | opencode | kilocode. Global so every command resolves its store and input roots through it. See `docs/specs/harness.md`
+      --scope &lt;SCOPE&gt;        Show one config layer only: global (failures spread across projects — habits), project (each project&#x27;s own failures), or project:&lt;slug&gt; (everything in that one project)
+      --profile &lt;PROFILE&gt;    Named preset from the config file to run under. Global so every command resolves through it; an explicit --harness or --db still wins over whatever the profile sets. See `docs/specs/cli.md`
+      --since &lt;DATE&gt;         Only count events on or after this date (YYYY-MM-DD, JST)
+      --language &lt;LANGUAGE&gt;  Advisor output language: en (the default) | ja. Global so every command resolves it through the same flag-beats-file order; only `optimize` renders it into a prompt today. See `docs/specs/cli.md`
+      --until &lt;DATE&gt;         Only count events through this date (YYYY-MM-DD, JST) — the whole day counts
+      --last &lt;SPAN&gt;          Rolling window ending now: &lt;N&gt;d | &lt;N&gt;h | &lt;N&gt;w (e.g. 7d). Exclusive with the explicit dates
+      --format &lt;FORMAT&gt;      Output format: table | markdown | json
+      --frozen               Read the store as-is; skip the automatic refresh
+      --db &lt;DB&gt;              Store path (default: $XDG_STATE_HOME/saniwalens/saniwalens.db)
+  -h, --help                 Print help</code></pre>
+    </figure>
+    <figure>
+      <figcaption id="cli-11"><code>saniwalens stuck --help</code></figcaption>
+      <pre role="region" aria-labelledby="cli-11" tabindex="0"><code>Files Claude kept re-editing in rapid bursts — where it got stuck retrying instead of making progress
+
+Usage: saniwalens stuck [OPTIONS]
+
+Options:
+      --format &lt;FORMAT&gt;      Output format: table | markdown | json
+      --harness &lt;HARNESS&gt;    Which agent harness to analyze: claude (default) | opencode | kilocode. Global so every command resolves its store and input roots through it. See `docs/specs/harness.md`
+      --profile &lt;PROFILE&gt;    Named preset from the config file to run under. Global so every command resolves through it; an explicit --harness or --db still wins over whatever the profile sets. See `docs/specs/cli.md`
+      --since &lt;DATE&gt;         Only count events on or after this date (YYYY-MM-DD, JST)
+      --language &lt;LANGUAGE&gt;  Advisor output language: en (the default) | ja. Global so every command resolves it through the same flag-beats-file order; only `optimize` renders it into a prompt today. See `docs/specs/cli.md`
+      --until &lt;DATE&gt;         Only count events through this date (YYYY-MM-DD, JST) — the whole day counts
+      --last &lt;SPAN&gt;          Rolling window ending now: &lt;N&gt;d | &lt;N&gt;h | &lt;N&gt;w (e.g. 7d). Exclusive with the explicit dates
+      --frozen               Read the store as-is; skip the automatic refresh
+      --db &lt;DB&gt;              Store path (default: $XDG_STATE_HOME/saniwalens/saniwalens.db)
+  -h, --help                 Print help</code></pre>
+    </figure>
+    <figure>
+      <figcaption id="cli-12"><code>saniwalens doctor --help</code></figcaption>
+      <pre role="region" aria-labelledby="cli-12" tabindex="0"><code>The health check — what to fix first, what your sessions cost, and what is fine as-is. Start here
+
+Usage: saniwalens doctor [OPTIONS]
+
+Options:
+      --harness &lt;HARNESS&gt;    Which agent harness to analyze: claude (default) | opencode | kilocode. Global so every command resolves its store and input roots through it. See `docs/specs/harness.md`
+      --scope &lt;SCOPE&gt;        Show one config layer only: global (~/.claude) | project (all projects&#x27; own config) | project:&lt;slug&gt; (one project&#x27;s)
+      --profile &lt;PROFILE&gt;    Named preset from the config file to run under. Global so every command resolves through it; an explicit --harness or --db still wins over whatever the profile sets. See `docs/specs/cli.md`
+      --since &lt;DATE&gt;         Only count events on or after this date (YYYY-MM-DD, JST)
+      --language &lt;LANGUAGE&gt;  Advisor output language: en (the default) | ja. Global so every command resolves it through the same flag-beats-file order; only `optimize` renders it into a prompt today. See `docs/specs/cli.md`
+      --until &lt;DATE&gt;         Only count events through this date (YYYY-MM-DD, JST) — the whole day counts
+      --last &lt;SPAN&gt;          Rolling window ending now: &lt;N&gt;d | &lt;N&gt;h | &lt;N&gt;w (e.g. 7d). Exclusive with the explicit dates
+      --format &lt;FORMAT&gt;      Output format: table (human text) | json (the routed findings)
+      --frozen               Read the store as-is; skip the automatic refresh
+      --db &lt;DB&gt;              Store path (default: $XDG_STATE_HOME/saniwalens/saniwalens.db)
+  -h, --help                 Print help</code></pre>
+    </figure>
+    <figure>
+      <figcaption id="cli-13"><code>saniwalens sql --help</code></figcaption>
+      <pre role="region" aria-labelledby="cli-13" tabindex="0"><code>Ask anything the fixed reports don&#x27;t cover: run a read-only SQL query against the analyzed store (as an argument, or piped via stdin). `SELECT sql FROM sqlite_master` shows the schema
+
+Usage: saniwalens sql [OPTIONS] [QUERY]
+
+Arguments:
+  [QUERY]  The SQL to run. If omitted, the query is read from stdin
+
+Options:
+      --harness &lt;HARNESS&gt;    Which agent harness to analyze: claude (default) | opencode | kilocode. Global so every command resolves its store and input roots through it. See `docs/specs/harness.md`
+      --limit &lt;LIMIT&gt;        Max result rows (default 10000); 0 means no limit. A truncated result warns on stderr and names this flag, so a silent partial slice never passes as complete [default: 10000]
+      --format &lt;FORMAT&gt;      Output format: table | markdown | json
+      --profile &lt;PROFILE&gt;    Named preset from the config file to run under. Global so every command resolves through it; an explicit --harness or --db still wins over whatever the profile sets. See `docs/specs/cli.md`
+      --db &lt;DB&gt;              Store path (default: $XDG_STATE_HOME/saniwalens/saniwalens.db)
+      --language &lt;LANGUAGE&gt;  Advisor output language: en (the default) | ja. Global so every command resolves it through the same flag-beats-file order; only `optimize` renders it into a prompt today. See `docs/specs/cli.md`
+  -h, --help                 Print help</code></pre>
+    </figure>
+    <figure>
+      <figcaption id="cli-14"><code>saniwalens optimize --help</code></figcaption>
+      <pre role="region" aria-labelledby="cli-14" tabindex="0"><code>Act on the findings: opens an advisor session pre-loaded with the full analysis, which investigates each problem and proposes concrete config fixes (interactively under Claude Code, headless under opencode)
+
+Usage: saniwalens optimize [OPTIONS]
+
+Options:
+      --harness &lt;HARNESS&gt;    Which agent harness to analyze: claude (default) | opencode | kilocode. Global so every command resolves its store and input roots through it. See `docs/specs/harness.md`
+      --projects &lt;PROJECTS&gt;  Transcript root (default: $CLAUDE_CONFIG_DIR/projects, or ~/.claude/projects)
+      --db &lt;DB&gt;              Store to analyze into / read from (default: $XDG_STATE_HOME/saniwalens/saniwalens.db)
+      --profile &lt;PROFILE&gt;    Named preset from the config file to run under. Global so every command resolves through it; an explicit --harness or --db still wins over whatever the profile sets. See `docs/specs/cli.md`
+      --language &lt;LANGUAGE&gt;  Advisor output language: en (the default) | ja. Global so every command resolves it through the same flag-beats-file order; only `optimize` renders it into a prompt today. See `docs/specs/cli.md`
+      --scope &lt;SCOPE&gt;        Optimize one config layer only: global (~/.claude) | project | project:&lt;slug&gt;
+      --frozen               Use the existing store as-is; skip the analyze step
+      --print                Print the composed prompt instead of launching the advisor
+      --verbose              Stream the advisor&#x27;s raw output instead of the quiet render (headless opencode runs log raw output to a file by default)
+      --apply                Save the headless plan under $XDG_STATE_HOME/saniwalens/plans/ and open the harness&#x27;s own interactive session to apply it (headless only)
+      --timeout &lt;DURATION&gt;   Stop a headless advisor after this long (e.g. 30s, 2m, 500ms)
+  -h, --help                 Print help</code></pre>
+    </figure>
+    <figure>
+      <figcaption id="cli-15"><code>saniwalens tui --help</code></figcaption>
+      <pre role="region" aria-labelledby="cli-15" tabindex="0"><code>Step-by-step guide to the typical patterns (doctor / waste / failures). Needs an interactive terminal; without one it refuses instead of hanging
+
+Usage: saniwalens tui [OPTIONS]
+
+Options:
+      --harness &lt;HARNESS&gt;    Which agent harness to analyze: claude (default) | opencode | kilocode. Global so every command resolves its store and input roots through it. See `docs/specs/harness.md`
+      --profile &lt;PROFILE&gt;    Named preset from the config file to run under. Global so every command resolves through it; an explicit --harness or --db still wins over whatever the profile sets. See `docs/specs/cli.md`
+      --language &lt;LANGUAGE&gt;  Advisor output language: en (the default) | ja. Global so every command resolves it through the same flag-beats-file order; only `optimize` renders it into a prompt today. See `docs/specs/cli.md`
+  -h, --help                 Print help</code></pre>
+    </figure>
+    <figure>
+      <figcaption id="cli-16"><code>saniwalens cleanup --help</code></figcaption>
+      <pre role="region" aria-labelledby="cli-16" tabindex="0"><code>List or prune the `--apply` handoff&#x27;s saved plans and backups. Needs no store: it only reads (and, with `--keep`, deletes) under $XDG_STATE_HOME/saniwalens/plans/ and .../backups/
+
+Usage: saniwalens cleanup [OPTIONS]
+
+Options:
+      --harness &lt;HARNESS&gt;    Which agent harness to analyze: claude (default) | opencode | kilocode. Global so every command resolves its store and input roots through it. See `docs/specs/harness.md`
+      --list                 Only list plans and backups with their sizes; delete nothing. A bare run lists too; the sweep needs an explicit `--keep`
+      --keep [&lt;KEEP&gt;]        Delete all but the newest N generations in each area, showing the count and total size first. A bare `--keep` keeps 10
+      --profile &lt;PROFILE&gt;    Named preset from the config file to run under. Global so every command resolves through it; an explicit --harness or --db still wins over whatever the profile sets. See `docs/specs/cli.md`
+      --format &lt;FORMAT&gt;      Output format: table | markdown | json
+      --language &lt;LANGUAGE&gt;  Advisor output language: en (the default) | ja. Global so every command resolves it through the same flag-beats-file order; only `optimize` renders it into a prompt today. See `docs/specs/cli.md`
+  -h, --help                 Print help</code></pre>
+    </figure>
+  </main>
+
+  <footer>
+    <p>
+      saniwalens — MIT. Source on <a href="https://github.com/armaniacs/saniwalens">GitHub</a>.
+    </p>
+  </footer>
+</body>
+</html>

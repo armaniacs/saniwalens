@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>saniwalens — coding-agent の利用を見るレンズ</title>
+  <meta name="description" content="saniwalens は agent セッションの transcript と live の設定をローカルの SQLite ストアに展開し、時間・トークン・手間の無駄と直し方を示します。">
+  <meta name="color-scheme" content="light dark">
+  <script>
+    try {
+      document.querySelector('meta[name="color-scheme"]').content =
+        localStorage.getItem("color-scheme") ?? "light dark";
+    } catch (e) {}
+  </script>
+  <link rel="stylesheet" href="./styles.css">
+  <script defer src="./app.js"></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">本文へ移動</a>
+
+  <header class="site-header">
+    <div class="header-inner">
+      <a class="site-logo" href="./index_ja.html" aria-label="saniwalens ホーム">saniwalens</a>
+
+      <nav class="site-nav" aria-label="主要">
+        <button
+          class="menu-button"
+          type="button"
+          popovertarget="site-menu"
+          popovertargetaction="toggle"
+          aria-controls="site-menu"
+        >
+          <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+            <path d="M2 4h12M2 8h12M2 12h12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" fill="none"/>
+          </svg>
+          <span>メニュー</span>
+        </button>
+
+        <ul id="site-menu" class="site-menu" popover="auto">
+          <li><a href="./index_ja.html" aria-current="page">ホーム</a></li>
+          <li><a href="./docs_ja.html">ドキュメント</a></li>
+          <li><a href="./specs.html">仕様（英語）</a></li>
+          <li><a href="./cli.html">CLI（英語）</a></li>
+          <li><a href="https://github.com/armaniacs/saniwalens">GitHub</a></li>
+          <li><a href="./index.html">English</a></li>
+        </ul>
+      </nav>
+
+      <button
+        id="theme-toggle"
+        class="theme-toggle"
+        type="button"
+        aria-live="polite"
+      >
+        <span class="theme-toggle-dark" aria-hidden="true">☾</span>
+        <span class="theme-toggle-light" aria-hidden="true">☀</span>
+        <span class="visually-hidden" id="theme-toggle-label">ダークテーマに切り替え</span>
+      </button>
+    </div>
+  </header>
+
+  <main id="main">
+    <h1>coding-agent の利用を見るレンズ</h1>
+    <p class="lead">
+      <code>saniwalens</code> は agent セッションの transcript と live の設定を読み、
+      ローカルの SQLite ストアに展開して、<strong>時間・トークン・手間がどこで無駄になり、
+      どう直すか</strong>を示します。使われていない・重い設定、繰り返す tool 失敗、
+      行き詰まり箇所、その背後のコスト像です。
+    </p>
+    <p>
+      外に何も送りません。分析は読み取り専用・増分です。詳しくは
+      <a href="https://github.com/armaniacs/saniwalens/tree/main/docs/specs">設計 spec</a> と
+      <a href="./docs_ja.html">ドキュメント頁</a> をどうぞ。英語版は
+      <a href="./index.html">こちら</a>。
+    </p>
+
+    <section aria-labelledby="install-heading">
+      <h2 id="install-heading">インストール / ビルド</h2>
+      <figure>
+        <figcaption id="install-homebrew">Homebrew（macOS と Linux、Intel と arm）:</figcaption>
+        <pre role="region" aria-labelledby="install-homebrew" tabindex="0"><code>brew install armaniacs/saniwalens/saniwalens</code></pre>
+      </figure>
+      <figure>
+        <figcaption id="install-cargo">Cargo で crates.io から（bundled SQLite に C コンパイラが要る）:</figcaption>
+        <pre role="region" aria-labelledby="install-cargo" tabindex="0"><code>cargo install saniwalens</code></pre>
+      </figure>
+      <figure>
+        <figcaption id="install-nix">Nix（toolchain の用意が要らない）:</figcaption>
+        <pre role="region" aria-labelledby="install-nix" tabindex="0"><code>nix run github:armaniacs/saniwalens -- doctor   # 入れずに動かす
+nix profile install github:armaniacs/saniwalens  # `saniwalens` を PATH に入れる</code></pre>
+      </figure>
+    </section>
+
+    <section aria-labelledby="quickstart-heading">
+      <h2 id="quickstart-heading">クイックスタート</h2>
+      <figure>
+        <figcaption id="quickstart-code">健康診断から始め、所見を advisor に渡す:</figcaption>
+        <pre role="region" aria-labelledby="quickstart-code" tabindex="0"><code># 1. 一画面の健康診断（初回は自動で analyze）
+saniwalens doctor
+saniwalens doctor --scope global
+saniwalens doctor --scope project:&lt;slug&gt;
+
+# 2. 改善余地のランク付け
+saniwalens waste
+saniwalens inventory   # 全 surface × 実際の利用
+saniwalens failures    # 繰り返す tool 失敗を分類別に
+saniwalens stuck       # agent が書き直しを繰り返した箇所
+
+# 3. 所見を動かす
+saniwalens optimize --scope global</code></pre>
+      </figure>
+      <p>
+        読み取りコマンドは報告の前に自動でストアを更新し（変わっていない transcript
+        は飛ばすので速い）、鮮度行を stderr に出します。あるがまま読むなら
+        <code>--frozen</code>。PR 貼り付け用に <code>--format markdown</code>、
+        機械読み用に <code>--format json</code> もあります。
+      </p>
+    </section>
+
+    <section aria-labelledby="harness-heading">
+      <h2 id="harness-heading">対応 harness</h2>
+      <p>
+        1 回の実行で 1 つの harness を分析し、<code>--harness</code> で選びます。
+        既定は <code>claude</code> のままなので、既存の呼び方はバイト単位で変わりません。
+        harness ごとにストアを持つので、所見が混ざりません。
+      </p>
+      <div class="table-scroll" role="region" aria-label="対応 harness" tabindex="0">
+        <table>
+          <caption>harness 別の transcript・設定カタログ・ストア</caption>
+          <thead>
+            <tr>
+              <th scope="col"><code>--harness</code></th>
+              <th scope="col">Agent</th>
+              <th scope="col">Transcript</th>
+              <th scope="col">設定カタログ</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <th scope="row"><code>claude</code>（既定）</th>
+              <td>Claude Code</td>
+              <td><code>~/.claude/projects</code></td>
+              <td>skills、rules、agents、MCP servers、<code>CLAUDE.md</code></td>
+            </tr>
+            <tr>
+              <th scope="row"><code>opencode</code></th>
+              <td>opencode</td>
+              <td>opencode データベース</td>
+              <td>commands、agents、<code>AGENTS.md</code></td>
+            </tr>
+            <tr>
+              <th scope="row"><code>kilocode</code></th>
+              <td>Kilo Code</td>
+              <td>エディタ <code>globalStorage</code> の task ファイル</td>
+              <td>commands、agents、skills、<code>AGENTS.md</code></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section aria-labelledby="links-heading">
+      <h2 id="links-heading">さらに深く</h2>
+      <ul>
+        <li><a href="./docs_ja.html">ドキュメント — コマンド・ビュー・spec 対応表</a></li>
+        <li><a href="./specs.html">設計 spec（英語）</a> — なぜ・契約</li>
+        <li><a href="./cli.html">CLI リファレンス（英語）</a> — <code>--help</code> から生成</li>
+        <li><a href="https://github.com/armaniacs/saniwalens/blob/main/CHANGELOG.md">CHANGELOG</a></li>
+        <li><a href="https://github.com/armaniacs/saniwalens/blob/main/README.ja.md">README（日本語・GitHub 上）</a></li>
+        <li><a href="https://github.com/armaniacs/saniwalens/blob/main/SECURITY.ja.md">セキュリティ — 非公開 advisory、公開 issue 禁止</a></li>
+      </ul>
+    </section>
+  </main>
+
+  <footer>
+    <p>
+      saniwalens — MIT。数値は順位付け用の利用シグナルであり、課金台帳ではありません。
+      ソースは <a href="https://github.com/armaniacs/saniwalens">GitHub</a>。
+    </p>
+  </footer>
+</body>
+</html>

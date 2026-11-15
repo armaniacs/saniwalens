@@ -1,0 +1,391 @@
+#!/usr/bin/env python3
+"""Generate GitHub Pages content from the repo's own docs.
+
+Reads `docs/specs/*.md` and (optionally) the built `saniwalens` binary's
+`--help` output, and writes `site/specs.html` / `site/cli.html` using the same
+header/nav/footer shell as the hand-written pages (so the modern-web-guidance
+patterns — landmarks, popover nav, color-scheme handling — carry over).
+
+The generated files are committed: Pages deploys `site/` with no build step,
+so what you see here is what ships. Re-run after editing specs or CLI help:
+
+    python3 scripts/pages-build.py
+"""
+
+from __future__ import annotations
+
+import html
+import re
+import subprocess
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+SPECS_DIR = ROOT / "docs" / "specs"
+SITE_DIR = ROOT / "site"
+GITHUB_SPECS = "https://github.com/armaniacs/saniwalens/blob/main/docs/specs"
+
+SPEC_FILES = [
+    "architecture.md",
+    "cli.md",
+    "surfaces.md",
+    "events.md",
+    "storage.md",
+    "harness.md",
+    "session-format.md",
+    "session-format-opencode.md",
+    "session-format-kilocode.md",
+    "config-format.md",
+    "config-format-opencode.md",
+    "config-format-kilocode.md",
+]
+
+NAV_EN = [
+    ("./index.html", "Home", False),
+    ("./docs.html", "Docs", False),
+    ("./specs.html", "Specs", True),
+    ("./cli.html", "CLI", False),
+    ("https://github.com/armaniacs/saniwalens", "GitHub", False),
+    ("./index_ja.html", "日本語", False),
+]
+
+NAV_CLI = [
+    ("./index.html", "Home", False),
+    ("./docs.html", "Docs", False),
+    ("./specs.html", "Specs", False),
+    ("./cli.html", "CLI", True),
+    ("https://github.com/armaniacs/saniwalens", "GitHub", False),
+    ("./index_ja.html", "日本語", False),
+]
+
+
+def nav_html(items: list[tuple[str, str, bool]]) -> str:
+    lis = []
+    for href, label, current in items:
+        aria = ' aria-current="page"' if current else ""
+        lis.append(f'          <li><a href="{href}"{aria}>{html.escape(label)}</a></li>')
+    return "\n".join(lis)
+
+
+def page_shell(*, title: str, desc: str, nav: list[tuple[str, str, bool]], body: str) -> str:
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{html.escape(title)} — saniwalens</title>
+  <meta name="description" content="{html.escape(desc)}">
+  <meta name="color-scheme" content="light dark">
+  <script>
+    try {{
+      document.querySelector('meta[name="color-scheme"]').content =
+        localStorage.getItem("color-scheme") ?? "light dark";
+    }} catch (e) {{}}
+  </script>
+  <link rel="stylesheet" href="./styles.css">
+  <script defer src="./app.js"></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <header class="site-header">
+    <div class="header-inner">
+      <a class="site-logo" href="./index.html" aria-label="saniwalens home">saniwalens</a>
+
+      <nav class="site-nav" aria-label="Primary">
+        <button
+          class="menu-button"
+          type="button"
+          popovertarget="site-menu"
+          popovertargetaction="toggle"
+          aria-controls="site-menu"
+        >
+          <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+            <path d="M2 4h12M2 8h12M2 12h12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" fill="none"/>
+          </svg>
+          <span>Menu</span>
+        </button>
+
+        <ul id="site-menu" class="site-menu" popover="auto">
+{nav_html(nav)}
+        </ul>
+      </nav>
+
+      <button
+        id="theme-toggle"
+        class="theme-toggle"
+        type="button"
+        aria-live="polite"
+      >
+        <span class="theme-toggle-dark" aria-hidden="true">☾</span>
+        <span class="theme-toggle-light" aria-hidden="true">☀</span>
+        <span class="visually-hidden" id="theme-toggle-label">Switch to dark theme</span>
+      </button>
+    </div>
+  </header>
+
+  <main id="main">
+{body}
+  </main>
+
+  <footer>
+    <p>
+      saniwalens — MIT. Source on <a href="https://github.com/armaniacs/saniwalens">GitHub</a>.
+    </p>
+  </footer>
+</body>
+</html>
+"""
+
+
+def inline_md(text: str) -> str:
+    """Inline markdown: `code`, **bold**, [links](...), leaving the rest escaped."""
+    parts: list[str] = []
+    # Split out inline code first so its contents are never linkified.
+    tokens = re.split(r"(`[^`]+`)", text)
+    for i, tok in enumerate(tokens):
+        if i % 2 == 1:
+            parts.append(f"<code>{html.escape(tok[1:-1])}</code>")
+            continue
+        seg = html.escape(tok)
+        seg = re.sub(r"\[([^\]]+)\]\(([^)\s]+)(?:\s+\"[^\"]*\")?\)", _link_repl, seg)
+        seg = re.sub(r"\*\*([^*]+)\*\*", r"<strong>\1</strong>", seg)
+        parts.append(seg)
+    return "".join(parts)
+
+
+def _link_repl(m: re.Match[str]) -> str:
+    label, href = m.group(1), m.group(2)
+    if href.endswith(".md") and "://" not in href:
+        stem = href.split("/")[-1][:-3]
+        href = f"#spec-{stem}"
+    elif href.startswith("docs/"):
+        href = f"https://github.com/armaniacs/saniwalens/blob/main/{href}"
+    return f'<a href="{html.escape(href)}">{label}</a>'
+
+
+def md_to_html(src: str, *, demote: int = 1, section_id: str = "") -> str:
+    """A small markdown subset: headings, fences, tables, lists, quotes, rules."""
+    lines = src.splitlines()
+    out: list[str] = []
+    i = 0
+    in_code = False
+    code_lang = ""
+
+    def close_lists(stack: list[str]) -> None:
+        while stack:
+            out.append(f"</{stack.pop()}>")
+
+    list_stack: list[str] = []
+    in_quote = False
+
+    while i < len(lines):
+        line = lines[i]
+        stripped = line.strip()
+
+        fence = re.match(r"^```(\S*)\s*$", stripped)
+        if fence:
+            if not in_code:
+                in_code = True
+                code_lang = fence.group(1)
+                close_lists(list_stack)
+                if in_quote:
+                    out.append("</blockquote>")
+                    in_quote = False
+                cls = f' class="language-{html.escape(code_lang)}"' if code_lang else ""
+                out.append(f"<pre><code{cls}>")
+            else:
+                in_code = False
+                out.append("</code></pre>")
+            i += 1
+            continue
+        if in_code:
+            out.append(html.escape(line))
+            out.append("\n")
+            i += 1
+            continue
+
+        if not stripped:
+            close_lists(list_stack)
+            if in_quote:
+                out.append("</blockquote>")
+                in_quote = False
+            i += 1
+            continue
+
+        if re.match(r"^---+\s*$", stripped):
+            close_lists(list_stack)
+            out.append("<hr>")
+            i += 1
+            continue
+
+        hm = re.match(r"^(#{1,6})\s+(.*)$", stripped)
+        if hm:
+            close_lists(list_stack)
+            level = min(6, len(hm.group(1)) + demote)
+            out.append(f"<h{level}>{inline_md(hm.group(2))}</h{level}>")
+            i += 1
+            continue
+
+        if stripped.startswith("|") and i + 1 < len(lines) and re.match(
+            r"^\|?[\s:|-]+\|?\s*$", lines[i + 1].strip()
+        ):
+            close_lists(list_stack)
+            if in_quote:
+                out.append("</blockquote>")
+                in_quote = False
+            headers = [c.strip() for c in stripped.strip("|").split("|")]
+            out.append("<div class=\"table-scroll\" role=\"region\" tabindex=\"0\">")
+            out.append("<table><thead><tr>")
+            out.extend(f"<th scope=\"col\">{inline_md(h)}</th>" for h in headers)
+            out.append("</tr></thead><tbody>")
+            i += 2
+            while i < len(lines) and lines[i].strip().startswith("|"):
+                cells = [c.strip() for c in lines[i].strip().strip("|").split("|")]
+                out.append("<tr>")
+                for j, cell in enumerate(cells):
+                    tag = "th scope=\"row\"" if j == 0 else "td"
+                    out.append(f"<{tag}>{inline_md(cell)}</{tag}>")
+                out.append("</tr>")
+                i += 1
+            out.append("</tbody></table></div>")
+            continue
+
+        lm = re.match(r"^(\s*)([-*]|\d+[.)])\s+(.*)$", line)
+        if lm:
+            tag = "ul" if lm.group(2) in ("-", "*") else "ol"
+            if not list_stack or list_stack[-1] != tag:
+                close_lists(list_stack)
+                out.append(f"<{tag}>")
+                list_stack.append(tag)
+            out.append(f"<li>{inline_md(lm.group(3))}</li>")
+            i += 1
+            continue
+
+        if stripped.startswith(">"):
+            close_lists(list_stack)
+            if not in_quote:
+                out.append("<blockquote>")
+                in_quote = True
+            out.append(f"<p>{inline_md(stripped[1:].strip())}</p>")
+            i += 1
+            continue
+
+        close_lists(list_stack)
+        if in_quote:
+            out.append("</blockquote>")
+            in_quote = False
+        out.append(f"<p>{inline_md(stripped)}</p>")
+        i += 1
+
+    close_lists(list_stack)
+    if in_quote:
+        out.append("</blockquote>")
+    if in_code:
+        out.append("</code></pre>")
+    return "\n".join(out)
+
+
+def build_specs() -> None:
+    toc = ["    <ul>"]
+    sections = []
+    for name in SPEC_FILES:
+        stem = name[:-3]
+        src = (SPECS_DIR / name).read_text(encoding="utf-8")
+        first = next((ln for ln in src.splitlines() if ln.startswith("# ")), stem)
+        title = first[2:].strip()
+        toc.append(f'      <li><a href="#spec-{stem}"><code>{stem}.md</code> — {html.escape(title)}</a></li>')
+        body = md_to_html(src, demote=1)
+        sections.append(
+            f'    <section aria-label="{html.escape(title)}" id="spec-{stem}">\n{body}\n'
+            f'      <p><a href="{GITHUB_SPECS}/{name}">Source: {name}</a></p>\n    </section>'
+        )
+    toc.append("    </ul>")
+    body = (
+        "    <h1>Design specs</h1>\n"
+        "    <p class=\"lead\">The design intent: the <em>why</em> and the contract. "
+        "This page mirrors <code>docs/specs/</code>; the files on "
+        f"<a href=\"{GITHUB_SPECS}\">GitHub</a> are the record.</p>\n"
+        "    <nav aria-label=\"Specs\">\n" + "\n".join(toc) + "\n    </nav>\n"
+        + "\n".join(sections)
+    )
+    (SITE_DIR / "specs.html").write_text(
+        page_shell(
+            title="Design specs",
+            desc="saniwalens design specs: the why and the contract, mirrored from docs/specs/.",
+            nav=NAV_EN,
+            body=body,
+        ),
+        encoding="utf-8",
+    )
+    print("wrote site/specs.html")
+
+
+def find_binary() -> Path | None:
+    for cand in (ROOT / "target" / "debug" / "saniwalens", ROOT / "target" / "release" / "saniwalens"):
+        if cand.exists():
+            return cand
+    return None
+
+
+def help_text(binary: Path, args: list[str]) -> str:
+    try:
+        out = subprocess.run(
+            [str(binary), *args], capture_output=True, text=True, timeout=30
+        )
+        return out.stdout or out.stderr
+    except (OSError, subprocess.SubprocessError) as exc:
+        return f"(unavailable: {exc})"
+
+
+def build_cli() -> None:
+    binary = find_binary()
+    if binary is None:
+        print("no binary found; skipping site/cli.html (build first, then re-run)")
+        return
+    top = help_text(binary, ["--help"])
+    # Subcommands listed under a "Commands:" section of clap's help.
+    subs: list[str] = []
+    in_cmds = False
+    for line in top.splitlines():
+        if line.strip().lower().startswith("commands:"):
+            in_cmds = True
+            continue
+        if in_cmds:
+            if not line.strip():
+                break
+            m = re.match(r"^\s{2}(\S+)", line)
+            if m and m.group(1) not in ("help",):
+                subs.append(m.group(1).rstrip(","))
+    blocks = [("saniwalens --help", top)]
+    for sub in subs:
+        blocks.append((f"saniwalens {sub} --help", help_text(binary, [sub, "--help"])))
+    figs = []
+    for n, (cmd, text) in enumerate(blocks):
+        figs.append(
+            f'    <figure>\n      <figcaption id="cli-{n}"><code>{html.escape(cmd)}</code></figcaption>\n'
+            f'      <pre role="region" aria-labelledby="cli-{n}" tabindex="0"><code>{html.escape(text.rstrip())}</code></pre>\n'
+            "    </figure>"
+        )
+    body = (
+        "    <h1>CLI reference</h1>\n"
+        "    <p class=\"lead\">Generated from the binary's own <code>--help</code> "
+        f"output. Re-run <code>python3 scripts/pages-build.py</code> after CLI changes. "
+        "The <a href=\"./docs.html\">docs page</a> explains the pipeline and views.</p>\n"
+        + "\n".join(figs)
+    )
+    (SITE_DIR / "cli.html").write_text(
+        page_shell(
+            title="CLI reference",
+            desc="saniwalens CLI reference, generated from --help output.",
+            nav=NAV_CLI,
+            body=body,
+        ),
+        encoding="utf-8",
+    )
+    print(f"wrote site/cli.html ({len(blocks)} commands)")
+
+
+if __name__ == "__main__":
+    SITE_DIR.mkdir(exist_ok=True)
+    build_specs()
+    build_cli()
