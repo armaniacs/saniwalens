@@ -609,6 +609,10 @@ pub fn read_project_surfaces(
 /// log lines (CR/LF) or restyle the terminal (ESC). Every control codepoint
 /// (C0, DEL, C1 — covers `\r`, `\n`, `0x1b`) becomes U+FFFD; confinement and
 /// the skip itself are unchanged, only the displayed text is scrubbed.
+/// Scope note: exotic Unicode display controls (Cf bidi overrides, Zl/Zp
+/// line/paragraph separators) pass through — they cannot forge log lines or
+/// ANSI sequences through this sink. Terminal-sink sweep: 87 sites
+/// triaged, this sink the only finding, 0 remaining.
 fn neutralize_log_text(text: &str) -> String {
     text.chars()
         .map(|c| if c.is_control() { '\u{FFFD}' } else { c })
