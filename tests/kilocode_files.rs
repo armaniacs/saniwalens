@@ -98,8 +98,11 @@ fn metadata_files_become_file_read_events_and_missing_metadata_stays_quiet() {
 /// reach the stderr skip-warning verbatim — raw CR/LF would forge log lines
 /// and a raw ESC would restyle the terminal. The warning only fires for an
 /// entry that resolves to a real file outside the config root, so the
-/// payload lives in the outside file's name (legal on unix). Confinement is
-/// unchanged: the entry is still skipped, loudly, on one sanitized line.
+/// payload lives in the outside file's name (legal on unix; Windows forbids
+/// control bytes in file names, so this E2E stays unix-only — the sanitizer
+/// itself is pinned cross-platform by `neutralize_log_text_*` unit tests).
+/// Confinement is unchanged: the entry is still skipped, loudly, on one sanitized line.
+#[cfg(unix)]
 #[test]
 fn hostile_instructions_entry_is_neutralized_in_stderr_warning() {
     let dir = scratch_dir("log-neutralization");

@@ -888,6 +888,19 @@ mod tests {
     }
 
     #[test]
+    fn neutralize_log_text_replaces_control_bytes_with_u_fffd() {
+        // Cross-platform pin of the CWE-117 gate (the E2E hostile-filename
+        // test is unix-only since Windows forbids control bytes in file
+        // names): no control byte may pass through to the stderr warning.
+        assert_eq!(neutralize_log_text("plain entry"), "plain entry");
+        assert_eq!(
+            neutralize_log_text("a\r\nb\x1b[31mc\x7fd\u{80}e\u{9f}f"),
+            "a\u{FFFD}\u{FFFD}b\u{FFFD}[31mc\u{FFFD}d\u{FFFD}e\u{FFFD}f"
+        );
+        assert_eq!(neutralize_log_text("日本語の計画"), "日本語の計画");
+    }
+
+    #[test]
     fn files_in_context_lists_every_declared_path() {
         let json = r#"{"taskId":"t1","files_in_context":["/repo/src/main.rs","/repo/docs/a.md"]}"#;
         assert_eq!(
