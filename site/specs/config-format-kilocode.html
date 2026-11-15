@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Config Format Specification — kilocode — saniwalens</title>
+  <meta name="description" content="saniwalens spec config-format-kilocode.md, mirrored from docs/specs/.">
+  <meta name="color-scheme" content="light dark">
+  <script>
+    try {
+      document.querySelector('meta[name="color-scheme"]').content =
+        localStorage.getItem("color-scheme") ?? "light dark";
+    } catch (e) {}
+  </script>
+  <link rel="stylesheet" href="../styles.css">
+  <script defer src="../app.js"></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <header class="site-header">
+    <div class="header-inner">
+      <a class="site-logo" href="../index.html" aria-label="saniwalens home">saniwalens</a>
+
+      <nav class="site-nav" aria-label="Primary">
+        <button
+          class="menu-button"
+          type="button"
+          popovertarget="site-menu"
+          popovertargetaction="toggle"
+          aria-controls="site-menu"
+        >
+          <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+            <path d="M2 4h12M2 8h12M2 12h12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" fill="none"/>
+          </svg>
+          <span>Menu</span>
+        </button>
+
+        <ul id="site-menu" class="site-menu" popover="auto">
+          <li><a href="../index.html">Home</a></li>
+          <li><a href="../docs.html">Docs</a></li>
+          <li><a href="../specs.html" aria-current="page">Specs</a></li>
+          <li><a href="../cli.html">CLI</a></li>
+          <li><a href="https://github.com/armaniacs/saniwalens">GitHub</a></li>
+          <li><a href="../index_ja.html">日本語</a></li>
+        </ul>
+      </nav>
+
+      <button
+        id="theme-toggle"
+        class="theme-toggle"
+        type="button"
+        aria-live="polite"
+      >
+        <span class="theme-toggle-dark" aria-hidden="true">☾</span>
+        <span class="theme-toggle-light" aria-hidden="true">☀</span>
+        <span class="visually-hidden" id="theme-toggle-label">Switch to dark theme</span>
+      </button>
+    </div>
+  </header>
+
+  <main id="main">
+    <h1>Config Format Specification — kilocode</h1>
+<p>This spec catalogues what the <strong>adapter layer</strong> knows about kilocode **config</p>
+<p>files** — the catalog half for the kilocode harness. Its Claude Code sibling</p>
+<p>is <code>config-format.md</code>; its opencode sibling is <code>config-format-opencode.md</code></p>
+<p>(the join semantics are shared, <code>surfaces.md</code>). Only the adapter uses the</p>
+<p>paths and shapes below. Like every upstream-tracking spec, this one describes</p>
+<p>what was observed and marks what was not.</p>
+<blockquote>
+<p>Observed against a real <code>~/.config/kilo/</code> tree and a real project tree</p>
+<p>(kilo CLI <code>7.3.41</code>). Kilo is an OpenCode fork, so the layout mirrors</p>
+<p>opencode&#x27;s under kilo&#x27;s own names — <code>~/.config/kilo/</code> for global and</p>
+<p><code>.kilo/</code> for project — with one addition: kilo&#x27;s <code>kilo.json</code> carries an</p>
+<p><code>instructions[]</code> array of always-on instruction files.</p>
+</blockquote>
+<h2>Where config lives</h2>
+<p>Config exists at two scopes; project overrides/extends global. The adapter</p>
+<p>scans both and records the scope on each surface — <code>Scope::Project</code> carries</p>
+<p>the owning project&#x27;s directory, since many projects coexist in one store</p>
+<p>(<code>harness.md</code>: <code>project</code> is the session&#x27;s <code>directory</code> verbatim).</p>
+<div class="table-scroll" role="region" tabindex="0">
+<table><thead><tr>
+<th scope="col">Surface kind</th>
+<th scope="col">Global</th>
+<th scope="col">Project-local</th>
+</tr></thead><tbody>
+<tr>
+<th scope="row"><code>command</code></th scope="row">
+<td><code>~/.config/kilo/command/*.md</code></td>
+<td><code>&lt;project&gt;/.kilo/command/*.md</code></td>
+</tr>
+<tr>
+<th scope="row"><code>agent</code></th scope="row">
+<td><code>~/.config/kilo/agent/*.md</code></td>
+<td><code>&lt;project&gt;/.kilo/agent/*.md</code></td>
+</tr>
+<tr>
+<th scope="row"><code>skill</code></th scope="row">
+<td><code>~/.config/kilo/skills/</code>, plus the shared <code>~/.claude/skills/</code> and <code>~/.agents/skills/</code></td>
+<td><code>&lt;project&gt;/.kilo/skills/</code>, plus the shared <code>&lt;project&gt;/.claude/skills/</code> and <code>&lt;project&gt;/.agents/skills/</code></td>
+</tr>
+<tr>
+<th scope="row"><code>claude_md</code></th scope="row">
+<td><code>~/.config/kilo/AGENTS.md</code></td>
+<td><code>&lt;project&gt;/AGENTS.md</code> (+ its <code>@import</code>s), <code>&lt;project&gt;/.kilorules</code>, and every file in <code>kilo.json</code>&#x27;s <code>instructions[]</code></td>
+</tr>
+</tbody></table></div>
+<p><code>~/.config</code> throughout means <code>$XDG_CONFIG_HOME</code> when that variable names an</p>
+<p>absolute path, else <code>~/.config</code> — the XDG rule, mirroring how the store</p>
+<p>resolution treats <code>XDG_STATE_HOME</code>.</p>
+<p>Which project roots get scanned is driven by the *sessions*, exactly as for</p>
+<p>Claude Code: <code>analyze</code> collects the distinct session directories and scans</p>
+<p>each root that still exists on disk. A deleted root contributes no project</p>
+<p>surfaces.</p>
+<p>**The <code>instructions[]</code> array is kilo&#x27;s own addition** and the reason it is</p>
+<p>catalogued at all: it is how <code>kilo.json</code> loads always-on instruction files —</p>
+<p>the measured project pointed it at a gitignored <code>AGENTS.local.md</code>, and the</p>
+<p>measured global config at an absolute path into the Claude Code tree</p>
+<p>(<code>~/.config/claude/RTK.md</code>). A file only reachable through this array is</p>
+<p>otherwise invisible to the catalog while costing tokens on every session —</p>
+<p>the exact blind spot an optimization advisor needs named. Paths resolve</p>
+<p>against the config file&#x27;s directory at the global scope and the project root</p>
+<p>at the project scope; absolute paths pass through. Entries are confined</p>
+<p>to that same base: the candidate is canonicalized (so <code>..</code> and symlinks</p>
+<p>resolve first) and an entry landing outside the root is skipped with a</p>
+<p><code>warning:</code> on stderr — out-of-root files stay uncatalogued. An entry naming</p>
+<p>no existing file yields nothing, as before.</p>
+<h2>Static cost and load mode</h2>
+<p>Commands and agents load like Claude Code skills: only the frontmatter</p>
+<p><code>description</code> is startup-listed, the body waits for invocation. Each records</p>
+<p>the whole file as <code>static_tokens</code> (its invocation cost) and the description</p>
+<p>alone as <code>startup_tokens</code>, under <code>LoadMode::StartupDescription</code>.</p>
+<p><strong>The startup-listing is an assumption</strong>, stated here so a wrong table entry</p>
+<p>can be found: it was not verified against kilo&#x27;s prompt construction. If kilo</p>
+<p>lists only names, every <code>startup_tokens</code> here overstates by the description</p>
+<p>weight; the <code>overhead</code> reconciliation against the observed session-start floor</p>
+<p>is the honest check.</p>
+<p>Instruction files (<code>AGENTS.md</code>, <code>.kilorules</code>, <code>instructions[]</code> entries) reuse</p>
+<p>the shared <code>claude_md</code> weighing: whole text as <code>static_tokens</code> and</p>
+<p><code>startup_tokens</code>, <code>LoadMode::StartupFull</code>, <code>@import</code> files as their own</p>
+<p>surfaces. <code>.kilorules</code> is the project rules file kilo loads always-on</p>
+<p>(measured present in a project that used kilo heavily); treating it as an</p>
+<p>instruction file rather than a <code>rule</code> reflects how kilo loads it — always,</p>
+<p>not per-path.</p>
+<p>The token estimator is the shared <code>approx_tokens</code> (roughly four characters</p>
+<p>per token) — a ranking signal, not a billing figure.</p>
+<h2>Identity and the join</h2>
+<ul>
+<li><code>command</code> surfaces take the file stem as id. Catalog-only, as under</li>
+</ul>
+<p>opencode: a human invoking a command leaves no structural marker in the</p>
+<p>transcript (user text is prose), so no event can ever join them. The core</p>
+<p>already treats unknown kinds as catalog-only, so no core change backs this</p>
+<p>spec.</p>
+<ul>
+<li><code>agent</code> surfaces take the file stem as id. kilocode yields **no</li>
+</ul>
+<p><code>agent_spawn</code> events** (measured across 92 tasks: zero), so every custom</p>
+<p>agent file reads as unused config — a catalog-only surface in practice,</p>
+<p>reported honestly rather than hidden.</p>
+<ul>
+<li><code>skill</code> surfaces join <code>tool=skill</code> events by the skill name, the same join</li>
+</ul>
+<p>Claude Code uses. Sites may reach one shared directory through symlinks, so</p>
+<p>surfaces dedup by <strong>canonical path</strong> — one row per actual definition, no</p>
+<p>matter how many sites reach it. But kilocode maps **no skill-invocation</p>
+<p>signal** in v1 (see <code>session-format-kilocode.md</code>), so every skill reads</p>
+<p><code>uses 0</code> / <code>UNUSED</code> under kilocode — the same honest absence as the agent</p>
+<p>rows: reported, not evidence of disuse, and the waste view&#x27;s suggestion</p>
+<p>stays &quot;declutter only&quot; because the startup saving is the description alone.</p>
+<ul>
+<li>A surface existing at both scopes under one <code>(kind, id)</code> resolves per</li>
+</ul>
+<p>project (project shadows global), exactly as for Claude Code.</p>
+<h2>Deliberately out of v1</h2>
+<ul>
+<li><strong>MCP servers.</strong> The <code>mcp</code> key is real (measured: a single <code>skillport</code></li>
+</ul>
+<p>entry), but kilocode emitted <strong>zero</strong> <code>mcp__</code>-namespaced tool calls across</p>
+<p>92 tasks — the server↔tool join has no usage half to pin against. Skipped</p>
+<p>until both halves are observed together.</p>
+<ul>
+<li>**<code>permission</code> surfaces.** The <code>kilo.json</code> permission table is real</li>
+</ul>
+<p>(measured: <code>bash</code> patterns and <code>external_directory</code> paths), but kilocode&#x27;s</p>
+<p>auto-approved calls emit no denial marker (see</p>
+<p><code>session-format-kilocode.md</code>), so every entry would read &quot;unused&quot; — a false</p>
+<p>wedge manufactured by the catalog, not found in usage. Skipped until a</p>
+<p>denial marker is found.</p>
+<ul>
+<li>**<code>agent</code> entries inside <code>kilo.json</code>.** The measured keys are the stock</li>
+</ul>
+<p>modes (<code>plan</code>, <code>debug</code>, <code>ask</code>, <code>code</code>) — product defaults, not user</p>
+<p>config. Custom agents are files under <code>agent/</code>, which is what is catalogued.</p>
+<ul>
+<li>**<code>provider</code>, <code>model</code>, <code>commit_message</code>, and the other <code>kilo.json</code> keys.**</li>
+</ul>
+<p>Settings, not cost surfaces.</p>
+<ul>
+<li>**<code>.kilo/agents/</code>, <code>.kilo/plugins/</code>, <code>.kilo/plans/</code>.** Present in the</li>
+</ul>
+<p>measured project tree but not the documented convention (<code>.kilo/agent/</code> is);</p>
+<p>whether kilo loads them is unverified, and cataloguing files the harness</p>
+<p>never loads would invent always-on cost.</p>
+    <nav aria-label="Spec pages">
+      <ul class="prev-next">
+      <li><a rel="prev" href="./config-format-opencode.html">← Config Format Specification — opencode</a></li>
+      <li><a href="../specs.html">Specs index</a></li>
+      </ul>
+    </nav>
+    <p><a href="https://github.com/armaniacs/saniwalens/blob/main/docs/specs/config-format-kilocode.md">Source: config-format-kilocode.md</a></p>
+
+  </main>
+
+  <footer>
+    <p>
+      saniwalens — MIT. Source on <a href="https://github.com/armaniacs/saniwalens">GitHub</a>.
+    </p>
+  </footer>
+</body>
+</html>

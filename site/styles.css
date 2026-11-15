@@ -342,6 +342,18 @@ tbody tr:last-child td {
   margin-block: 0.4rem;
 }
 
+/* Prev / index / next across the per-spec pages. */
+.prev-next {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1.5rem;
+  justify-content: space-between;
+  list-style: none;
+  margin-block-start: 3rem;
+  padding: 1rem 0 0;
+  border-block-start: 1px solid var(--line);
+}
+
 footer {
   border-block-start: 1px solid var(--line);
   color: var(--muted);

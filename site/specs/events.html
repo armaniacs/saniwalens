@@ -1,0 +1,490 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Events Specification — saniwalens</title>
+  <meta name="description" content="saniwalens spec events.md, mirrored from docs/specs/.">
+  <meta name="color-scheme" content="light dark">
+  <script>
+    try {
+      document.querySelector('meta[name="color-scheme"]').content =
+        localStorage.getItem("color-scheme") ?? "light dark";
+    } catch (e) {}
+  </script>
+  <link rel="stylesheet" href="../styles.css">
+  <script defer src="../app.js"></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <header class="site-header">
+    <div class="header-inner">
+      <a class="site-logo" href="../index.html" aria-label="saniwalens home">saniwalens</a>
+
+      <nav class="site-nav" aria-label="Primary">
+        <button
+          class="menu-button"
+          type="button"
+          popovertarget="site-menu"
+          popovertargetaction="toggle"
+          aria-controls="site-menu"
+        >
+          <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+            <path d="M2 4h12M2 8h12M2 12h12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" fill="none"/>
+          </svg>
+          <span>Menu</span>
+        </button>
+
+        <ul id="site-menu" class="site-menu" popover="auto">
+          <li><a href="../index.html">Home</a></li>
+          <li><a href="../docs.html">Docs</a></li>
+          <li><a href="../specs.html" aria-current="page">Specs</a></li>
+          <li><a href="../cli.html">CLI</a></li>
+          <li><a href="https://github.com/armaniacs/saniwalens">GitHub</a></li>
+          <li><a href="../index_ja.html">日本語</a></li>
+        </ul>
+      </nav>
+
+      <button
+        id="theme-toggle"
+        class="theme-toggle"
+        type="button"
+        aria-live="polite"
+      >
+        <span class="theme-toggle-dark" aria-hidden="true">☾</span>
+        <span class="theme-toggle-light" aria-hidden="true">☀</span>
+        <span class="visually-hidden" id="theme-toggle-label">Switch to dark theme</span>
+      </button>
+    </div>
+  </header>
+
+  <main id="main">
+    <h1>Events Specification</h1>
+<p>An <strong>event</strong> is one timestamped occurrence the tool extracts from a transcript,</p>
+<p>carrying a runtime cost and pointing at the configuration surface it exercises.</p>
+<p>Events are the usage half of the catalog×usage model (<code>architecture.md</code>). This</p>
+<p>spec defines the event kinds, how a *span* (an event with a duration window) is</p>
+<p>bounded, how each cost metric is computed, and how two hard cases — context</p>
+<p>compaction and meta-skills that drive other skills — are handled. All of it is</p>
+<p><strong>pure</strong> logic over the domain model the adapter produces; it is the tool&#x27;s</p>
+<p>primary test surface (<code>.claude/rules/tdd.md</code>).</p>
+<h2>Event kinds</h2>
+<p>Every event has a <code>kind</code> and, where applicable, a <code>surface_kind</code> / <code>surface_id</code></p>
+<p>identifying the configuration surface it exercises (the join key into</p>
+<p><code>surfaces.md</code>).</p>
+<div class="table-scroll" role="region" tabindex="0">
+<table><thead><tr>
+<th scope="col"><code>kind</code></th>
+<th scope="col">Surface exercised</th>
+<th scope="col">Span?</th>
+</tr></thead><tbody>
+<tr>
+<th scope="row"><code>skill_invocation</code></th scope="row">
+<td><code>skill</code></td>
+<td>yes — work window until the skill&#x27;s activity ends</td>
+</tr>
+<tr>
+<th scope="row"><code>agent_spawn</code></th scope="row">
+<td><code>agent</code></td>
+<td>no — point event; its cost is carried by the run it started (below)</td>
+</tr>
+<tr>
+<th scope="row"><code>tool_use</code></th scope="row">
+<td><code>mcp_tool</code> / <code>mcp_server</code> / built-in tool</td>
+<td>point event</td>
+</tr>
+<tr>
+<th scope="row"><code>prompt</code></th scope="row">
+<td>— (user input; raw material for skill extraction)</td>
+<td>point event; text referenced, not stored</td>
+</tr>
+<tr>
+<th scope="row"><code>tool_error</code></th scope="row">
+<td>— (a failed <code>tool_result</code>)</td>
+<td>point event; friction category in <code>surface_id</code>, a short error-text excerpt in <code>source</code>, the originating tool name in <code>model</code>, the call&#x27;s target (file_path / command) in <code>target</code></td>
+</tr>
+<tr>
+<th scope="row"><code>file_edit</code></th scope="row">
+<td>— (an Edit/Write target)</td>
+<td>point event; the file&#x27;s <strong>basename</strong> in <code>surface_id</code>, its <strong>full path</strong> in <code>target</code></td>
+</tr>
+<tr>
+<th scope="row"><code>file_read</code></th scope="row">
+<td>— (a Read target)</td>
+<td>point event; same encoding as <code>file_edit</code>. Observed, never attributed: it feeds the never-fires wedge (<code>docs/specs/surfaces.md</code>), not thrash (which reads <code>file_edit</code> only) or hotspots</td>
+</tr>
+<tr>
+<th scope="row"><code>hook_use</code></th scope="row">
+<td>hook (a fired hook)</td>
+<td>point event; the hook&#x27;s <code>hookName</code> (<code>Event:Matcher</code>) in <code>surface_id</code>, joining the catalogued hook. Firings come from <code>attachment</code> records with <code>type: &quot;hook_success&quot;</code>; context/summary attachments are not executions</td>
+</tr>
+<tr>
+<th scope="row"><code>bash_cmd</code></th scope="row">
+<td>— (a Bash invocation)</td>
+<td>point event; the command&#x27;s leading word in <code>surface_id</code></td>
+</tr>
+<tr>
+<th scope="row"><code>compaction</code></th scope="row">
+<td>— (a <code>compact_boundary</code>)</td>
+<td>point marker, used by the context metric</td>
+</tr>
+<tr>
+<th scope="row"><code>permission_prompt</code></th scope="row">
+<td><code>permission</code></td>
+<td>point event (friction signal) — partly heuristic source</td>
+</tr>
+</tbody></table></div>
+<p>New kinds are added additively as the adapter learns to recognise new signals</p>
+<p>(<code>session-format.md</code>); the schema&#x27;s loose <code>kind</code> / <code>surface_*</code> columns</p>
+<p>(<code>storage.md</code>) absorb them without migration.</p>
+<p>Two kinds carry caveats that downstream reports must honour:</p>
+<ul>
+<li>**<code>prompt</code>** stores a pointer <code>(source_path, source_line)</code> to the raw record,</li>
+</ul>
+<p>not the prompt text — the text is recovered on demand by the future</p>
+<p>skill-extraction layer, keeping personal data out of the store (<code>storage.md</code>,</p>
+<p><code>.claude/rules/session-data-privacy.md</code>). This reserves the</p>
+<p>prompt-clustering capability now so it survives transcript rotation.</p>
+<ul>
+<li>**<code>permission_prompt</code>** is counted from the denial marker a denying entry</li>
+</ul>
+<p>carries, falling back to denial text where there is none (<code>session-format.md</code>).</p>
+<p>The marked half is as structural as any other kind; the fallback half is not,</p>
+<p>so the friction wedge built on it (<code>surfaces.md</code>) stays labelled</p>
+<p>lower-confidence — a transcript written before the marker existed is still</p>
+<p>counted by an English phrase alone.</p>
+<ul>
+<li>**<code>tool_error</code><strong> keeps a short, bounded </strong>excerpt** of the error text — unlike</li>
+</ul>
+<p><code>prompt</code>, which stores only a pointer. The asymmetry is deliberate: prompt text</p>
+<p>is large and wholesale-sensitive and is needed in full only by a later layer,</p>
+<p>so a pointer defers the cost; an error excerpt is small and its *value is the</p>
+<p>concrete instance* (the actual failing path), which a report shows directly.</p>
+<p>It lives only in the local store (gitignored, never committed), so the privacy</p>
+<p>rule — no real data in the repo — still holds.</p>
+<ul>
+<li>A <code>tool_error</code>&#x27;s friction category (<code>core::friction</code>) follows two precedence</li>
+</ul>
+<p>rules. First, **a concrete cause beats <code>cancelled</code>**: the interruption</p>
+<p>patterns are checked only after every specific cause (path-not-found,</p>
+<p>edit-precondition, …), so a real failure with an interruption-like fragment</p>
+<p>appended keeps its cause instead of vanishing into the non-actionable</p>
+<p><code>cancelled</code> bucket. Second, **short interruption fragments require the whole</p>
+<p>message**: <code>tool execution aborted</code> and <code>task cancelled</code> classify as</p>
+<p><code>cancelled</code> only when they are the entire (trimmed, case-insensitive) error</p>
+<p>text — project content merely mentioning them is not a user stop. Longer,</p>
+<p>tool-specific stop markers (<code>cancelled: parallel tool call</code>, `request</p>
+<p>interrupted by user`, …) still match by containment.</p>
+<ul>
+<li>**<code>file_edit</code>** stores the basename *and* the full path because the two answer</li>
+</ul>
+<p>different questions. A hotspot ranking wants the basename — it is the name a</p>
+<p>human recognises, and collapsing every <code>route.ts</code> into one row is the point.</p>
+<p>The name is taken on <strong>either separator</strong> (<code>core::path::basename</code>): a</p>
+<p>transcript spells paths the way the machine that wrote it does, and the same</p>
+<p>file arrives both ways within one session. Cutting on <code>/</code> alone left a</p>
+<p>backslash path standing in for the name and let one file compete against</p>
+<p>itself for a hotspot slot, so the list ranked spellings rather than files.</p>
+<p>Thrash detection wants the opposite: an episode claims *one agent kept retrying</p>
+<p>this one file*, so it must distinguish two same-named files, and two sessions</p>
+<p>editing one file in parallel. Keeping only the basename made those</p>
+<p>indistinguishable and let <code>stuck</code> report parallel work as an agent stuck in a</p>
+<p>loop. Detection therefore groups on <code>(session_id, path)</code> — the session implies</p>
+<p>the project, and the path is unique within it (<code>core::thrash</code>). The deliberate</p>
+<p>cost: thrash continuing across a resume or <code>/clear</code> splits into one episode per</p>
+<p>session. A split under-reports a real burst; a merge invents one that never</p>
+<p>happened, and the merge is what makes the report untrustworthy.</p>
+<p>Surfaces that emit no event at all ― <code>rule</code> and <code>claude_md</code> ― never produce</p>
+<p>rows here. That is expected, not missing data; <code>surfaces.md</code> classifies them as</p>
+<p>catalog-only so their absence of events is never read as disuse. (Hooks used</p>
+<p>to be on this list; firing became observable, so they emit <code>hook_use</code>.)</p>
+<p>A <strong>span</strong> is an event with a duration window — currently <code>skill_invocation</code>.</p>
+<p>The rest of this spec is mostly about spans, since that is where boundary and</p>
+<p>attribution subtlety lives. Point events carry only an instant and their own</p>
+<p>cost.</p>
+<h2>Span boundaries</h2>
+<p>A span starts at its invocation. It ends at the <strong>earliest</strong> of:</p>
+<ol>
+<li>the next <strong>human turn</strong> in the session;</li>
+<li>the next <strong>sibling</strong> invocation (an invocation that is not a child of this</li>
+</ol>
+<p>span — see meta-skills below);</p>
+<ol>
+<li>a record following an <strong>idle gap</strong> longer than <code>IDLE_GAP</code> from the previous</li>
+</ol>
+<p>record (active work has ended);</p>
+<ol>
+<li>the <strong>end of the session</strong>.</li>
+</ol>
+<p>Rules 2–4 exist because rule 1 alone is insufficient. The naive definition</p>
+<p>(end = next human turn only) let a span run to the end of the session whenever no</p>
+<p>human turn followed, sweeping in unrelated tokens — observed: a <code>doc-check</code> span</p>
+<p>absorbing ~580k output tokens of later, unrelated work. Rules 2 and 3 close the</p>
+<p>span at the next real boundary; rule 4 bounds the trailing case. A span closed</p>
+<p>only by rule 4 has a <code>duration_sec</code> that is a lower bound (the session may have</p>
+<p>ended mid-work), so reports flag trailing spans rather than trusting their</p>
+<p>wall-clock.</p>
+<p><code>IDLE_GAP</code> is a tuning constant injected into the core (not hard-wired), so</p>
+<p>tests pin it.</p>
+<h2>Meta-skills and nesting ― intentionally flat (spike decision, PBI 22)</h2>
+<p>Some skills drive other skills (<code>loop</code> repeatedly invokes <code>git-commit</code>,</p>
+<p><code>code-review</code>, …). It is tempting to treat those inner calls as <strong>children</strong> of</p>
+<p>the driver and nest them under a <code>parent_id</code>. We deliberately do <strong>not</strong>, and a</p>
+<p>2026-11 design spike re-confirmed this against real transcripts instead of</p>
+<p>reversing it:</p>
+<p>Empirically, a meta-skill&#x27;s &quot;children&quot; are recorded exactly like sequential</p>
+<p>top-level commands: each appears as its own <code>slash</code> invocation with its **own</p>
+<p>distinct <code>promptId</code>** — not the driver&#x27;s, not a tool-path call, not a sidechain.</p>
+<p>There is no structural marker (<code>source</code>, <code>promptId</code>, nesting depth) that</p>
+<p>distinguishes &quot;a skill <code>loop</code> ran&quot; from &quot;a skill the user ran next&quot;. Inferring</p>
+<p>nesting would require a fragile time-window or a hard-coded list of meta-skills.</p>
+<p>The spike checked every alternative against real transcripts and found each</p>
+<p>one unsound or out of scope:</p>
+<p>So the model stays flat: each invocation is its own span, and the boundary rules</p>
+<p>(next human turn / next skill / idle gap) apply uniformly. This is not a loss of</p>
+<p>accuracy — a child&#x27;s cost is correctly attributed to the child (<code>git-commit</code>&#x27;s</p>
+<p>tokens land on <code>git-commit</code>); the driver&#x27;s own small span reflects that it is an</p>
+<p>orchestrator, not the place the work happened. Reports therefore never</p>
+<p>double-count, and need no parent-inclusive/exclusive distinction.</p>
+<p>The one thing that *is* attributable across the boundary is subagent cost, which</p>
+<p>carries a real join key — see below.</p>
+<p>Candidates the spike rejected, with reasons:</p>
+<ul>
+<li><strong>Time-window containment</strong> (&quot;B&#x27;s span inside A&#x27;s span ⇒ nested&quot;): sequential</li>
+</ul>
+<p>siblings nest temporally too ― an agent running skill A over 1-10s and skill</p>
+<p>B over 3-5s looks identical with or without nesting. Attributing on this</p>
+<p>would corrupt the cost join the tool exists to keep honest.</p>
+<ul>
+<li><strong>Turn-boundary rule</strong> (no human turn between ⇒ nested): absence of a human</li>
+</ul>
+<p>turn proves nothing; consecutive invocations in one assistant stretch are as</p>
+<p>often sequential follow-ups as nested calls.</p>
+<ul>
+<li>**<code>parentUuid</code> tree branches**: branches in real transcripts are attachment</li>
+</ul>
+<p>records (hook results, file snapshots) riding alongside the next message ―</p>
+<p>parallel metadata, not nested execution. The main line stays a chain.</p>
+<ul>
+<li><strong>Hard-coded meta-skill names</strong>: breaks on the first rename and can never</li>
+</ul>
+<p>cover user-defined loops; the PBI itself flags this as irrecoverable.</p>
+<h2>Metrics</h2>
+<p>Each metric is computed from the records strictly within the event/span.</p>
+<div class="table-scroll" role="region" tabindex="0">
+<table><thead><tr>
+<th scope="col">Metric</th>
+<th scope="col">Definition</th>
+</tr></thead><tbody>
+<tr>
+<th scope="row"><code>out_tokens</code></th scope="row">
+<td>Sum of <code>out_tokens</code> over the span&#x27;s <code>assistant</code> records. Each record carries only the output it is the first to report, so the sum counts every API response once however many records it was written as; see &quot;One message, several records&quot; below.</td>
+</tr>
+<tr>
+<th scope="row"><code>ctx_growth</code></th scope="row">
+<td><strong>Compaction-safe</strong> context consumption: the sum of *positive* differences in prompt size between consecutive <code>assistant</code> records. Decreases (compaction, cache eviction) are clipped to zero.</td>
+</tr>
+<tr>
+<th scope="row"><code>ctx_start</code></th scope="row">
+<td>Prompt size at the span&#x27;s first <code>assistant</code> record — *where this skill ran*, not where the session began. See &quot;The session-start context is its own event&quot; below.</td>
+</tr>
+<tr>
+<th scope="row"><code>ctx_peak</code></th scope="row">
+<td>Maximum prompt size across the span&#x27;s <code>assistant</code> records.</td>
+</tr>
+<tr>
+<th scope="row"><code>duration_sec</code></th scope="row">
+<td>Last minus first record <code>timestamp</code> within the span. Zero when fewer than two timestamped records.</td>
+</tr>
+<tr>
+<th scope="row"><code>sub_tokens</code></th scope="row">
+<td>Tokens from subagents attributed to this span (below).</td>
+</tr>
+<tr>
+<th scope="row"><code>sub_agent_count</code></th scope="row">
+<td>Number of subagents attributed.</td>
+</tr>
+<tr>
+<th scope="row"><code>sub_tokens_estimated</code></th scope="row">
+<td>True when any attributed subagent was equally split (below).</td>
+</tr>
+<tr>
+<th scope="row"><code>model</code></th scope="row">
+<td>Representative model: the first <code>assistant</code> record whose model is <strong>not</strong> <code>&lt;synthetic&gt;</code>. NULL if none qualifies.</td>
+</tr>
+</tbody></table></div>
+<h3>One message, several records</h3>
+<p>An <code>assistant</code> record is one transcript line, and one API response is written</p>
+<p>as several lines whose usage objects repeat or accumulate the same output</p>
+<p>(<code>session-format.md</code>). Summed naively, a response is charged once per line —</p>
+<p>and the factor varies by skill (how often the model thinks before it acts), so</p>
+<p>the error reorders skill rankings rather than merely inflating every figure.</p>
+<p>The core does not see this. The adapter reconciles the lines of a response as</p>
+<p>it parses, so each record&#x27;s <code>out_tokens</code> is only the output that record is the</p>
+<p>first to report; the core sums records exactly as the definition above says</p>
+<p>and every response lands once. This keeps the layout knowledge where the</p>
+<p>format-isolation rule wants it, and it also settles the boundary case: when a</p>
+<p>span closes between two lines of one response (the response thought inside</p>
+<p>one skill and then invoked the next), the output is charged to the span that</p>
+<p>saw it first, never to both. Every line still yields a record, so</p>
+<p><code>ctx_growth</code>, <code>ctx_start</code>, <code>ctx_peak</code> and <code>duration_sec</code> see the same</p>
+<p>timestamps and prompt sizes they always did.</p>
+<h3>Why <code>ctx_growth</code>, not max-minus-start</h3>
+<p>The intuitive &quot;context consumed&quot; is <code>ctx_peak − ctx_start</code>, but prompt size is</p>
+<p>not monotonic: when a session compacts (observed ~1,000,000 → ~49,000 within one</p>
+<p>file, marked by a <code>compact_boundary</code> record — <code>session-format.md</code>), <code>ctx_peak</code></p>
+<p>keeps crediting the pre-compaction peak long after that context was released, and</p>
+<p>a span opening just after a peak can show a near-zero or negative figure. Summing</p>
+<p>only the positive step-to-step increments counts what the span actually *added*</p>
+<p>to the running context and is robust to mid-span compaction. <code>ctx_start</code> and</p>
+<p><code>ctx_peak</code> are stored alongside so the raw shape stays inspectable and</p>
+<p><code>ctx_growth</code> is auditable rather than opaque. The <code>compact_boundary</code> markers may</p>
+<p>additionally be used to split or annotate a span; at minimum the metric must not</p>
+<p>assume monotonic prompt size.</p>
+<h3>The session-start context is its own event</h3>
+<p>A span&#x27;s <code>ctx_start</code> answers &quot;how much context was loaded when this skill ran&quot;,</p>
+<p>which is a *span* property. The always-on floor (<code>surfaces.md</code>) needs a different</p>
+<p>question answered — &quot;how much context did this session begin with&quot; — and the two</p>
+<p>diverge sharply: a session that only invokes a skill after a long conversation</p>
+<p>has a span <code>ctx_start</code> in the hundreds of thousands while having started lean.</p>
+<p>Minimising span <code>ctx_start</code> therefore does not converge on the floor; it converges</p>
+<p>on whichever session happened to invoke a skill early.</p>
+<p>So the session start is extracted separately, as one <code>session_start</code> event per</p>
+<p>session carrying the prompt size of the session&#x27;s <strong>first</strong> <code>assistant</code> record</p>
+<p>(<code>core::span::session_start_ctx</code>). A transcript with no <code>assistant</code> record yields</p>
+<p>no event — the session contributes no observation rather than a zero that would</p>
+<p>sink every minimum it entered.</p>
+<p>This remains a *lower bound* per observation: a resumed session&#x27;s first record</p>
+<p>already carries the restored context, so its start overstates a fresh one. Taking</p>
+<p>the minimum across a project&#x27;s sessions is what filters those out, which is why</p>
+<p>the session count travels with the floor in reports — one observation cannot be</p>
+<p>distinguished from one resumed session.</p>
+<h2>Subagent runs</h2>
+<p>A <strong>run</strong> is one execution of one agent type, extracted from its own transcript</p>
+<p>plus the sidecar beside it (<code>session-format.md</code>). It is a first-class persisted</p>
+<p>row (<code>storage.md</code>), not an intermediate, because the session-level total answers</p>
+<p>only *how much* subagent work cost — never *whose*. Two agents with similar</p>
+<p>spawn counts can differ by an order of magnitude in output, and the spawn count</p>
+<p>alone cannot tell them apart; without runs, the largest figure in the report is</p>
+<p>the one nothing can be done about.</p>
+<p>A run carries the agent type, its own output tokens, its model, its depth in the</p>
+<p>spawn tree, and the ids that link it back: its own <code>tool_use_id</code>, its parent</p>
+<p>run, and the <strong>root</strong> <code>tool_use_id</code> its tree started at (<code>core::subagent</code>).</p>
+<ul>
+<li><strong>Every run counts once, at its own cost, whatever its depth.</strong> A nested run</li>
+</ul>
+<p>is the agent that wrote those tokens; folding it into its parent&#x27;s type would</p>
+<p>bill an agent that only delegated. So the per-agent rows sum exactly to the</p>
+<p>session-level total — for every session whose runs could be extracted. A</p>
+<p>session analyzed before runs were extracted keeps its total, but once Claude</p>
+<p>Code has pruned its transcripts its runs are gone for good, so a store can</p>
+<p>hold rows for only part of its total; reports reconcile the two and label</p>
+<p>the rows a partial split (<code>core::subagent::SplitCoverage</code>, <code>cli.md</code>&#x27;s</p>
+<p>reporting-honesty rules).</p>
+<ul>
+<li><strong>A run whose agent type is unknown</strong> (no sidecar) is kept, grouped under</li>
+</ul>
+<p>&quot;unknown&quot;. Dropping it would silently break that sum; guessing a type would</p>
+<p>be worse.</p>
+<ul>
+<li><strong>The root link is what crosses the boundary.</strong> A nested run&#x27;s own</li>
+</ul>
+<p><code>tool_use_id</code> names a call inside its *parent&#x27;s* transcript, which no</p>
+<p>main-thread span contains. Walking <code>parent_agent_id</code> to the tree&#x27;s root gives</p>
+<p>the one call the main thread actually made, so a subtree&#x27;s cost lands on the</p>
+<p>main-thread work that caused it. A broken chain (missing parent, or a cycle in</p>
+<p>malformed input) leaves the run unrooted and unattributed rather than charged</p>
+<p>to an arbitrary spawn.</p>
+<h2>Subagent attribution</h2>
+<p>A span&#x27;s <code>sub_tokens</code> is the cost of the runs it spawned. The join is tried at</p>
+<p>two precisions, and falls back only when it must:</p>
+<ol>
+<li><strong>By spawn call.</strong> A run rooted at a known <code>Agent</code> call is attributed to the</li>
+</ol>
+<p>one span whose window contains that call. Spans do not overlap, so this</p>
+<p>claims at most one span: the attribution is exact and is <strong>never</strong> flagged</p>
+<p>estimated.</p>
+<ol>
+<li><strong>By turn.</strong> Used <strong>only when the run carries no call id at all</strong> — an older</li>
+</ol>
+<p>transcript with no sidecar. Then only <code>promptId</code> is left, and it identifies</p>
+<p>the turn rather than the spawn: the run is claimed by every span that spawned</p>
+<p>anything in that turn, and when more than one competes they **split its tokens</p>
+<p>equally** and are each marked <code>sub_tokens_estimated</code>. A single claimant is not</p>
+<p>flagged: the flag means *this figure was split*, which is what the metrics</p>
+<p>table above defines it as.</p>
+<p>The precisions are selected by what the run *knows*, never by whether the exact</p>
+<p>join happened to hit. Once a run carries a call id the turn join is never used</p>
+<p>for it, in either failing case:</p>
+<ul>
+<li><strong>Its rooted call sits in no span.</strong> The root already says which call spawned</li>
+</ul>
+<p>it, so no span containing that call means it was spawned outside every span.</p>
+<ul>
+<li><strong>Its parent chain is broken</strong> (a missing parent, or a cycle in malformed</li>
+</ul>
+<p>input), so it has no root. The call id still shows it was spawned by another</p>
+<p>subagent rather than from the main thread.</p>
+<p>Retrying by turn in either case would charge the run to whichever unrelated span</p>
+<p>happened to spawn something in the same turn — the exact error the call id</p>
+<p>exists to prevent.</p>
+<p>A run matching no span (spawned outside any skill, or unrooted) is not</p>
+<p>attributed per-span; it still counts in the session-level total, which is exact</p>
+<p>and needs no join.</p>
+<p>Equal-split is a deliberate approximation — this tool ranks, it does not bill</p>
+<p>(<code>architecture.md</code>) — and its worst-case error is bounded by the spread of the</p>
+<p>competing runs&#x27; sizes. The flag, not false precision, is the mitigation, and it</p>
+<p>now marks only the runs that genuinely could not be resolved.</p>
+<h3>The spawn event carries the run&#x27;s cost</h3>
+<p>An <code>agent_spawn</code> event and a run describe one subagent from opposite sides: the</p>
+<p>event is what the main thread *did*, the run is what it *cost*. They are joined</p>
+<p>by the spawn call&#x27;s id, so the event&#x27;s <code>out_tokens</code> is the run&#x27;s own output and</p>
+<p>its <code>sub_tokens</code> the output of everything that run spawned in turn. A spawn</p>
+<p>whose run is missing keeps zeros rather than borrowing another&#x27;s figures.</p>
+<p>This is why the spawn stays a point event rather than growing a window: its cost</p>
+<p>is measured in the subagent&#x27;s transcript, not inferred from main-thread records</p>
+<p>inside a guessed boundary.</p>
+<h3>Per-span attribution is window-bounded, not authoritative</h3>
+<p>Attribution joins a subagent to the span whose window contains its <code>Agent</code></p>
+<p>spawn. Under the flat-span model a span&#x27;s window can stretch past the skill&#x27;s</p>
+<p>own work (until the next human turn / skill / idle gap), so it can absorb</p>
+<p>subagents spawned by *later, same-window* activity. Observed in real data: a</p>
+<p><code>git-commit</code> span — <code>git-commit</code> spawns no agents — picked up several agents</p>
+<p>that ran after the commit in the same turn. There is no transcript marker for</p>
+<p>&quot;the skill returned&quot;, so this cannot be tightened structurally.</p>
+<p>Joining by the spawn call instead of the turn does not fix this: the call is</p>
+<p>inside the window either way, so the window is still the thing being trusted.</p>
+<p>What it fixes is the *other* half — a span that spawned nothing in that turn no</p>
+<p>longer takes a share.</p>
+<p>Therefore <code>events.sub_tokens</code> is recorded per span (queryable, and exact for</p>
+<p>skills that genuinely spawn their own agents) but is **not rolled up into the</p>
+<p>per-skill report**, where it would over-count. The authoritative subagent figure</p>
+<p>is the <strong>session-level total</strong> (<code>sessions.sub_tokens</code>), which is exact — every</p>
+<p>subagent run counted once, no window guess involved — and the per-agent split of</p>
+<p>that total (<code>subagent_runs</code>) is exact for the same reason wherever it exists.</p>
+<p>The two are recorded separately, so the split can cover only part of the total</p>
+<p>in a store that outlived the transcripts behind it; see the runs section above.</p>
+<h2>Determinism</h2>
+<p>The core takes the session&#x27;s records plus tuning constants (<code>IDLE_GAP</code>) and</p>
+<p>returns events with no hidden inputs — no clock reads, no randomness. Identical</p>
+<p>records in always produce identical events out, so every rule above is pinned by</p>
+<p>a fixture test.</p>
+    <nav aria-label="Spec pages">
+      <ul class="prev-next">
+      <li><a rel="prev" href="./surfaces.html">← Surfaces Specification</a></li>
+      <li><a href="../specs.html">Specs index</a></li>
+      <li><a rel="next" href="./storage.html">Storage Specification →</a></li>
+      </ul>
+    </nav>
+    <p><a href="https://github.com/armaniacs/saniwalens/blob/main/docs/specs/events.md">Source: events.md</a></p>
+
+  </main>
+
+  <footer>
+    <p>
+      saniwalens — MIT. Source on <a href="https://github.com/armaniacs/saniwalens">GitHub</a>.
+    </p>
+  </footer>
+</body>
+</html>

@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Config Format Specification — opencode — saniwalens</title>
+  <meta name="description" content="saniwalens spec config-format-opencode.md, mirrored from docs/specs/.">
+  <meta name="color-scheme" content="light dark">
+  <script>
+    try {
+      document.querySelector('meta[name="color-scheme"]').content =
+        localStorage.getItem("color-scheme") ?? "light dark";
+    } catch (e) {}
+  </script>
+  <link rel="stylesheet" href="../styles.css">
+  <script defer src="../app.js"></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <header class="site-header">
+    <div class="header-inner">
+      <a class="site-logo" href="../index.html" aria-label="saniwalens home">saniwalens</a>
+
+      <nav class="site-nav" aria-label="Primary">
+        <button
+          class="menu-button"
+          type="button"
+          popovertarget="site-menu"
+          popovertargetaction="toggle"
+          aria-controls="site-menu"
+        >
+          <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+            <path d="M2 4h12M2 8h12M2 12h12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" fill="none"/>
+          </svg>
+          <span>Menu</span>
+        </button>
+
+        <ul id="site-menu" class="site-menu" popover="auto">
+          <li><a href="../index.html">Home</a></li>
+          <li><a href="../docs.html">Docs</a></li>
+          <li><a href="../specs.html" aria-current="page">Specs</a></li>
+          <li><a href="../cli.html">CLI</a></li>
+          <li><a href="https://github.com/armaniacs/saniwalens">GitHub</a></li>
+          <li><a href="../index_ja.html">日本語</a></li>
+        </ul>
+      </nav>
+
+      <button
+        id="theme-toggle"
+        class="theme-toggle"
+        type="button"
+        aria-live="polite"
+      >
+        <span class="theme-toggle-dark" aria-hidden="true">☾</span>
+        <span class="theme-toggle-light" aria-hidden="true">☀</span>
+        <span class="visually-hidden" id="theme-toggle-label">Switch to dark theme</span>
+      </button>
+    </div>
+  </header>
+
+  <main id="main">
+    <h1>Config Format Specification — opencode</h1>
+<p>This spec catalogues what the <strong>adapter layer</strong> knows about opencode **config</p>
+<p>files** — the catalog half for the opencode harness. Its Claude Code sibling</p>
+<p>is <code>config-format.md</code>; the join semantics are shared (<code>surfaces.md</code>). Only the</p>
+<p>adapter uses the paths and shapes below. Like every upstream-tracking spec,</p>
+<p>this one describes what was observed and marks what was not.</p>
+<blockquote>
+<p>Observed against a real <code>~/.config/opencode/</code> tree (opencode <code>1.x</code>). No</p>
+<p>project-level <code>.opencode/</code> directory and no MCP definition were present in</p>
+<p>this environment — the project layout and the MCP site below follow the</p>
+<p>documented conventions and are marked as such until a live tree confirms</p>
+<p>them.</p>
+</blockquote>
+<h2>Where config lives</h2>
+<p>Config exists at two scopes; project overrides/extends global. The adapter</p>
+<p>scans both and records the scope on each surface — <code>Scope::Project</code> carries</p>
+<p>the owning project&#x27;s directory, since many projects coexist in one store</p>
+<p>(<code>harness.md</code>: <code>project</code> is the session&#x27;s <code>directory</code> verbatim).</p>
+<div class="table-scroll" role="region" tabindex="0">
+<table><thead><tr>
+<th scope="col">Surface kind</th>
+<th scope="col">Global</th>
+<th scope="col">Project-local</th>
+</tr></thead><tbody>
+<tr>
+<th scope="row"><code>command</code></th scope="row">
+<td><code>~/.config/opencode/command/*.md</code></td>
+<td><code>&lt;project&gt;/.opencode/command/*.md</code></td>
+</tr>
+<tr>
+<th scope="row"><code>agent</code></th scope="row">
+<td><code>~/.config/opencode/agent/*.md</code></td>
+<td><code>&lt;project&gt;/.opencode/agent/*.md</code></td>
+</tr>
+<tr>
+<th scope="row"><code>claude_md</code></th scope="row">
+<td>— (unverified; not scanned)</td>
+<td><code>&lt;project&gt;/AGENTS.md</code> (+ its <code>@import</code>s)</td>
+</tr>
+</tbody></table></div>
+<p><code>~/.config</code> throughout means <code>$XDG_CONFIG_HOME</code> when that variable names an</p>
+<p>absolute path, else <code>~/.config</code> — the XDG rule, mirroring how the store</p>
+<p>resolution treats <code>XDG_STATE_HOME</code>.</p>
+<p>Which project roots get scanned is driven by the *sessions*, exactly as for</p>
+<p>Claude Code: <code>analyze</code> collects the distinct session directories and scans</p>
+<p>each root that still exists on disk. A deleted root contributes no project</p>
+<p>surfaces.</p>
+<h2>Static cost and load mode</h2>
+<p>Both surface kinds load like Claude Code skills: only the frontmatter</p>
+<p><code>description</code> is startup-listed, the body waits for invocation. So each</p>
+<p>surface records the whole file as <code>static_tokens</code> (its invocation cost) and</p>
+<p>the description alone as <code>startup_tokens</code>, under</p>
+<p><code>LoadMode::StartupDescription</code>. The token estimator is the shared</p>
+<p><code>approx_tokens</code> (roughly four characters per token) — a ranking signal, not</p>
+<p>a billing figure.</p>
+<p><strong>The startup-listing is an assumption</strong>, stated here so a wrong table entry</p>
+<p>can be found: it was not verified against opencode&#x27;s prompt construction the</p>
+<p>way the Claude Code table was pinned to release <code>2.1.x</code>. If opencode lists</p>
+<p>only names (not descriptions), every <code>startup_tokens</code> here overstates by the</p>
+<p>description weight; the <code>overhead</code> reconciliation against the observed</p>
+<p>session-start floor is the honest check.</p>
+<p><code>description</code> is read defensively (plain/quoted/block scalars with folded</p>
+<p>continuation lines); a file declaring none costs zero at startup. Unknown</p>
+<p>frontmatter keys are ignored.</p>
+<p><code>AGENTS.md</code> reuses the shared <code>claude_md</code> weighing (whole text,</p>
+<p><code>StartupFull</code>, <code>@import</code> files as their own surfaces) — opencode reads the</p>
+<p>same file the Claude Code adapter weighs, so the cost lands identically.</p>
+<p><code>CLAUDE.md</code> is deliberately <strong>not</strong> scanned: opencode&#x27;s documented</p>
+<p>instruction file is <code>AGENTS.md</code>, and cataloguing a file the harness never</p>
+<p>loads would invent always-on cost.</p>
+<h2>Identity and the join</h2>
+<ul>
+<li><code>command</code> surfaces take the file stem as id (<code>review.md</code> → <code>review</code>).</li>
+</ul>
+<p>Commands are <strong>catalog-only</strong>: a human invoking <code>/review</code> leaves no</p>
+<p>structural marker in the transcript (user text is prose, and</p>
+<p>substring-matching it would misread discussions *about* commands), so no</p>
+<p>event can ever join them. The core already treats unknown kinds as</p>
+<p>catalog-only (<code>is_usage_measurable</code> lists only measurable kinds), which is</p>
+<p>why no core change backs this spec — absence of events is never read as</p>
+<p>disuse.</p>
+<ul>
+<li><code>agent</code> surfaces take the file stem as id and join <code>agent_spawn</code> events by</li>
+</ul>
+<p>the <code>task</code> tool&#x27;s <code>subagent_type</code>. Built-in agents (<code>build</code>, <code>explore</code>,</p>
+<p>…) exercised without a matching file surface appear as <strong>orphaned usage</strong>,</p>
+<p>the mirror of unused config — reported, not hidden.</p>
+<ul>
+<li>A surface existing at both scopes under one <code>(kind, id)</code> resolves per</li>
+</ul>
+<p>project (project shadows global), exactly as for Claude Code.</p>
+<h2>Deliberately out of v1</h2>
+<ul>
+<li><strong>Skills — catalogued from the six documented sites</strong> (<code>docs/skills/</code>):</li>
+</ul>
+<p>opencode-native (<code>.opencode/skills/</code>, <code>~/.config/opencode/skills/</code>) first,</p>
+<p>then the compatible homes opencode also loads (<code>.claude/skills/</code>,</p>
+<p><code>.agents/skills/</code>, and their global forms). Sites may reach one shared</p>
+<p>directory through symlinks (<code>.opencode/skills -&gt; ../.agents/skills</code> is the</p>
+<p>observed shape), so surfaces dedup by <strong>canonical path</strong> — one row per</p>
+<p>actual definition, no matter how many sites reach it. Deduping by name</p>
+<p>instead would mark the shared definition unused at one scope (a wedge the</p>
+<p>catalog manufactured); deduping by path keeps one honest row joined by</p>
+<p>every <code>tool=skill</code> event.</p>
+<ul>
+<li><strong>MCP servers.</strong> No MCP definition was present (<code>opencode.json</code> carries no</li>
+</ul>
+<p><code>mcp</code> key here), and no MCP-namespaced tool appeared in the usage sample,</p>
+<p>so the server↔tool join cannot be pinned down. Skipped until both halves</p>
+<p>are observed together.</p>
+<ul>
+<li>**<code>permission</code> surfaces.** The <code>opencode.json</code> permission table is real,</li>
+</ul>
+<p>but no runtime denial signal joins it (see <code>session-format-opencode.md</code>),</p>
+<p>so every entry would read &quot;unused&quot; — a false wedge manufactured by the</p>
+<p>catalog, not found in usage. Skipped until a denial marker is found.</p>
+<ul>
+<li>**Global <code>AGENTS.md</code>.** Whether opencode loads one is unverified; only the</li>
+</ul>
+<p>project file is scanned.</p>
+    <nav aria-label="Spec pages">
+      <ul class="prev-next">
+      <li><a rel="prev" href="./config-format.html">← Config Format Specification</a></li>
+      <li><a href="../specs.html">Specs index</a></li>
+      <li><a rel="next" href="./config-format-kilocode.html">Config Format Specification — kilocode →</a></li>
+      </ul>
+    </nav>
+    <p><a href="https://github.com/armaniacs/saniwalens/blob/main/docs/specs/config-format-opencode.md">Source: config-format-opencode.md</a></p>
+
+  </main>
+
+  <footer>
+    <p>
+      saniwalens — MIT. Source on <a href="https://github.com/armaniacs/saniwalens">GitHub</a>.
+    </p>
+  </footer>
+</body>
+</html>

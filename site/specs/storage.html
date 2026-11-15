@@ -1,0 +1,736 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Storage Specification — saniwalens</title>
+  <meta name="description" content="saniwalens spec storage.md, mirrored from docs/specs/.">
+  <meta name="color-scheme" content="light dark">
+  <script>
+    try {
+      document.querySelector('meta[name="color-scheme"]').content =
+        localStorage.getItem("color-scheme") ?? "light dark";
+    } catch (e) {}
+  </script>
+  <link rel="stylesheet" href="../styles.css">
+  <script defer src="../app.js"></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <header class="site-header">
+    <div class="header-inner">
+      <a class="site-logo" href="../index.html" aria-label="saniwalens home">saniwalens</a>
+
+      <nav class="site-nav" aria-label="Primary">
+        <button
+          class="menu-button"
+          type="button"
+          popovertarget="site-menu"
+          popovertargetaction="toggle"
+          aria-controls="site-menu"
+        >
+          <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+            <path d="M2 4h12M2 8h12M2 12h12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" fill="none"/>
+          </svg>
+          <span>Menu</span>
+        </button>
+
+        <ul id="site-menu" class="site-menu" popover="auto">
+          <li><a href="../index.html">Home</a></li>
+          <li><a href="../docs.html">Docs</a></li>
+          <li><a href="../specs.html" aria-current="page">Specs</a></li>
+          <li><a href="../cli.html">CLI</a></li>
+          <li><a href="https://github.com/armaniacs/saniwalens">GitHub</a></li>
+          <li><a href="../index_ja.html">日本語</a></li>
+        </ul>
+      </nav>
+
+      <button
+        id="theme-toggle"
+        class="theme-toggle"
+        type="button"
+        aria-live="polite"
+      >
+        <span class="theme-toggle-dark" aria-hidden="true">☾</span>
+        <span class="theme-toggle-light" aria-hidden="true">☀</span>
+        <span class="visually-hidden" id="theme-toggle-label">Switch to dark theme</span>
+      </button>
+    </div>
+  </header>
+
+  <main id="main">
+    <h1>Storage Specification</h1>
+<p>The store is the SQLite database <code>analyze</code> writes and every consumer reads</p>
+<p>(<code>architecture.md</code>). It holds the tables that mirror the catalog×usage model ―</p>
+<p>a shared <code>sessions</code> dimension, the <code>surfaces</code> catalog, the <code>events</code> spine, and</p>
+<p><code>subagent_runs</code> for work that happened in its own transcript ― plus</p>
+<p><code>ingested_files</code> for incremental rebuilds. This spec defines the schema and the</p>
+<p>ingest contract; the *meaning* of the columns lives in the specs that own them</p>
+<p>(<code>events.md</code>, <code>surfaces.md</code>, <code>config-format.md</code>).</p>
+<h2>Schema</h2>
+<pre><code class="language-sql">
+-- Shared dimension. One row per analyzed transcript.
+
+
+CREATE TABLE sessions (
+
+
+    id              TEXT PRIMARY KEY,   -- sessionId
+
+
+    project         TEXT NOT NULL,      -- normalized (worktree folded; see below)
+
+
+    slug            TEXT NOT NULL,      -- raw cwd-slug
+
+
+    root            TEXT NOT NULL,      -- real start directory (records&#x27; cwd, worktree folded); &#x27;&#x27; when unknown
+
+
+    source_path     TEXT NOT NULL,      -- the main transcript file
+
+
+    started_at      TEXT NOT NULL,      -- RFC3339 UTC
+
+
+    sub_tokens      INTEGER NOT NULL,   -- the session&#x27;s exact subagent output total (events.md)
+
+
+    sub_agent_count INTEGER NOT NULL,   -- subagent runs the session spawned, nested included
+
+
+    version         TEXT                -- Claude Code version, when present
+
+
+);
+
+
+
+
+
+-- Catalog: everything installed, with its static cost. Read from live config.
+
+
+CREATE TABLE surfaces (
+
+
+    kind          TEXT NOT NULL,    -- skill | rule | mcp_server | mcp_tool | hook | claude_md | permission | agent
+
+
+    id            TEXT NOT NULL,    -- stable identity within the kind
+
+
+    scope         TEXT NOT NULL,    -- global | project
+
+
+    project       TEXT NOT NULL,    -- owning project&#x27;s normalized slug; &#x27;&#x27; for global rows
+
+
+    config_path   TEXT,
+
+
+    static_tokens INTEGER,          -- token weight of the whole definition (a skill&#x27;s body = its invocation cost); NULL if unknown (e.g. mcp_tool)
+
+
+    startup_tokens INTEGER,         -- weight of the slice loaded into every session (description for a skill/agent); NULL if unknown
+
+
+    load_mode     TEXT NOT NULL,    -- startup_full | startup_description | path_conditional | on_demand | tool_schema
+
+
+    attrs_json    TEXT,             -- kind-specific extras (paths glob, hook matcher, …)
+
+
+    PRIMARY KEY (kind, id, scope, project)
+
+
+);
+
+
+
+
+
+-- Usage spine. One row per extracted event; a skill span is one kind.
+
+
+CREATE TABLE events (
+
+
+    id                   INTEGER PRIMARY KEY,
+
+
+    session_id           TEXT NOT NULL REFERENCES sessions(id),
+
+
+    source_path          TEXT NOT NULL,   -- file this event came from (ingest delete key)
+
+
+    source_line          INTEGER,         -- 0-based line index in source_path; recovers the raw record (prompt text for goal-3 clustering) without storing it
+
+
+    kind                 TEXT NOT NULL,   -- skill_invocation | session_start | tool_use | agent_spawn | prompt | tool_error | compaction | permission_prompt | …
+
+
+    surface_kind         TEXT,            -- join key into surfaces (NULL for surfaceless kinds)
+
+
+    surface_id           TEXT,            -- for tool_error: the friction category (no surface join, surface_kind NULL); for file_edit: the basename hotspots group on (the full path is in target)
+
+
+    source               TEXT,            -- kind-specific detail string: slash|tool (skill path); behavior class (prompt); a short error-text excerpt (tool_error); NULL otherwise
+
+
+    started_at           TEXT NOT NULL,   -- RFC3339 UTC
+
+
+    started_epoch        INTEGER NOT NULL,-- UTC unix seconds (bucketing)
+
+
+    duration_sec         REAL NOT NULL,
+
+
+    is_trailing          INTEGER NOT NULL,-- 1 when closed only by session end (duration is a lower bound)
+
+
+    out_tokens           INTEGER NOT NULL,
+
+
+    ctx_growth           INTEGER NOT NULL,
+
+
+    ctx_start            INTEGER NOT NULL,-- for session_start: the context the session began with (the always-on floor)
+
+
+    ctx_peak             INTEGER NOT NULL,
+
+
+    sub_tokens           INTEGER NOT NULL,
+
+
+    sub_agent_count      INTEGER NOT NULL,
+
+
+    sub_tokens_estimated INTEGER NOT NULL,
+
+
+    model                TEXT,            -- representative model (skill_invocation); the originating tool name (tool_error)
+
+
+    target               TEXT,            -- the failed call&#x27;s subject: file_path edited / command run (tool_error); the edited file&#x27;s full path (file_edit); the Agent call&#x27;s id (agent_spawn), joining subagent_runs
+
+
+    attrs_json           TEXT
+
+
+);
+
+
+
+
+
+CREATE INDEX events_by_epoch ON events(started_epoch);
+
+
+CREATE INDEX events_by_surface ON events(surface_kind, surface_id);
+
+
+
+
+
+-- One row per subagent execution, from the subagent&#x27;s own transcript and its
+
+
+-- sidecar (events.md). This is where &quot;which agent types consumed those tokens?&quot;
+
+
+-- is answered; the session total answers only &quot;how many&quot;.
+
+
+CREATE TABLE subagent_runs (
+
+
+    id               INTEGER PRIMARY KEY,
+
+
+    session_id       TEXT NOT NULL REFERENCES sessions(id),
+
+
+    source_path      TEXT NOT NULL,   -- the parent session&#x27;s transcript (ingest delete key)
+
+
+    run_path         TEXT NOT NULL,   -- the subagent&#x27;s own transcript
+
+
+    agent            TEXT,            -- the agent type; NULL when no sidecar recorded it
+
+
+    agent_id         TEXT NOT NULL,
+
+
+    tool_use_id      TEXT,            -- the Agent call that spawned this run; joins events.target
+
+
+    root_tool_use_id TEXT,            -- the main-thread call its spawn tree started at
+
+
+    parent_agent_id  TEXT,            -- the run that spawned it, for a nested run
+
+
+    spawn_depth      INTEGER NOT NULL,-- 1 main-thread, 2+ nested
+
+
+    model            TEXT,
+
+
+    prompt_id        TEXT,            -- the spawning turn (the fallback join key)
+
+
+    out_tokens       INTEGER NOT NULL,
+
+
+    started_at       TEXT NOT NULL,   -- RFC3339 UTC
+
+
+    started_epoch    INTEGER NOT NULL
+
+
+);
+
+
+
+
+
+CREATE INDEX subagent_runs_by_agent  ON subagent_runs(agent);
+
+
+CREATE INDEX subagent_runs_by_source ON subagent_runs(source_path);
+
+
+
+
+
+-- Incremental-ingest fingerprints.
+
+
+CREATE TABLE ingested_files (
+
+
+    path  TEXT PRIMARY KEY,
+
+
+    mtime INTEGER NOT NULL,
+
+
+    size  INTEGER NOT NULL
+
+
+);
+
+
+
+
+
+-- Analyze-run metadata: analyzed_at (RFC3339 UTC), projects_dir, config_dir,
+
+
+-- analyzer_version. Freshness reporting reads analyzed_at; auto-analyze on read
+
+
+-- commands re-runs the analysis against the same recorded roots (cli.md);
+
+
+-- analyzer_version invalidates the incremental skip (below).
+
+
+CREATE TABLE meta (
+
+
+    key   TEXT PRIMARY KEY,
+
+
+    value TEXT NOT NULL
+
+
+);
+
+
+
+
+
+-- A clean read view over tool_error events for ad-hoc SQL (the `sql` command).
+
+
+-- The friction signal is overloaded onto generic event columns; the view names
+
+
+-- it and joins the project so a query need not know the encoding. The view
+
+
+-- statement is generated from `EVENT_ENCODING` (`store.rs`) ― the table below
+
+
+-- is the definition, the view is a projection of it.
+
+
+CREATE VIEW tool_errors AS
+
+
+SELECT e.session_id, s.project,
+
+
+       e.surface_id AS category, e.source AS excerpt, e.model AS tool,
+
+
+       e.target, e.started_epoch
+
+
+FROM events e JOIN sessions s ON e.session_id = s.id
+
+
+WHERE e.kind = &#x27;tool_error&#x27;;
+
+
+</code></pre>
+<h3>Indexes are the planner&#x27;s choices</h3>
+<p>A declared index is an *option* the store hands SQLite&#x27;s planner, not behavior:</p>
+<p>it never changes what a query returns, only how the rows are reached. Indexes</p>
+<p>are declared in <code>INDEX_SCHEMA</code> (<code>store.rs</code>) ― the DDL above mirrors it ― and</p>
+<p>reconciled into every existing store on the next ReadWrite open, so adding one</p>
+<p>is a non-migrating change: <code>SCHEMA_VERSION</code> does not move and no public API</p>
+<p>changes. Only <code>ReadWrite</code> migrates, though: a ReadOnly open (<code>--frozen</code> /</p>
+<p><code>sql</code>) cannot create the index, so a store that has not been opened read-write</p>
+<p>since it was declared keeps running its windowed queries as scans.</p>
+<p><code>events_by_epoch</code> (<code>events(started_epoch)</code>) backs the windowed readers that</p>
+<p>scan <code>events</code> on <code>started_epoch</code> ― the twelve windowed methods over <code>events</code>,</p>
+<p>including the rollup and skill-usage queries inside <code>trend_aggregates</code>&#x27; two</p>
+<p>windows (2 x 4 queries; the session and subagent-total halves read the</p>
+<p>sessions axis). The 2026-10-31 why-why bench (SQLite 3.54.0, a synthetic</p>
+<p>fixture, a 7-day window) measured a 1M-row windowed query at 106-220ms without</p>
+<p>the index and 36-42ms with it (about 3-5x), the plan changing from</p>
+<p><code>SCAN events</code> to <code>SEARCH USING INDEX</code>. The claim stops at the <code>events</code> axis:</p>
+<p>the sessions-axis readers bind the TEXT <code>sessions.started_at</code> (the overhead</p>
+<p>floors <code>s.started_at</code>) over a small table no index needs to serve, and the</p>
+<p>per-agent breakdown binds <code>subagent_runs.started_epoch</code>, a different table the</p>
+<p>new index does not cover.</p>
+<p>The gain is <strong>not immediate</strong>: on a young store the planner keeps choosing</p>
+<p><code>events_by_surface(surface_kind = ?)</code>, and this index pays off only as row</p>
+<p>counts and statistics grow ― from roughly 500k-1M rows (at 1M rows, one <code>trend</code></p>
+<p>run costs about 500ms and <code>findings</code> about 1s, past the ~100ms felt threshold</p>
+<p>per operation; row count via <code>saniwalens sql &quot;SELECT COUNT(*) FROM events&quot;</code>).</p>
+<p>Two scoping notes are the contract, not defects. The ingest delete</p>
+<p>(<code>DELETE FROM events WHERE source_path = ?</code>) gains nothing from this index ―</p>
+<p>serving <code>source_path</code> is a separate change of the same shape, not this one. And</p>
+<p>the user-facing consequence of the ReadOnly asymmetry is stated where users</p>
+<p>read it (<code>cli.md</code>&#x27;s Period section, README&#x27;s Notes).</p>
+<h3>Column encoding is defined once</h3>
+<p>The generic columns carry kind-specific meanings ― <code>tool_error</code>&#x27;s friction</p>
+<p>category rides in <code>surface_id</code>, its excerpt in <code>source</code>, the originating tool</p>
+<p>in <code>model</code>; <code>file_edit</code> keeps the basename in <code>surface_id</code> and the full path in</p>
+<p><code>target</code>; a prompt&#x27;s behavioral class rides in <code>source</code>. That mapping is</p>
+<p>defined <strong>once</strong>, in <code>EVENT_ENCODING</code> (<code>store.rs</code>), and everything else derives</p>
+<p>from it: the <code>tool_errors</code> view is generated from the table, the readers take</p>
+<p>their column names from it (<code>encoding_column</code>), and the writer&#x27;s <code>INSERT</code></p>
+<p>columns for <code>tool_error</code> and <code>prompt</code> are spelled from it too. The work-event</p>
+<p>writer is the one place that fills physical columns without consulting the</p>
+<p>table ― one statement spans several kinds, so the meaning a row&#x27;s value carries</p>
+<p>depends on its <code>kind</code>, which is read back through the table.</p>
+<p>A new event kind is therefore a row in the table, not an edit scattered across</p>
+<p>view SQL and queries: existing queries keep passing untouched, and the</p>
+<p>round-trip tests (<code>tool_errors_view_exposes_named_columns_and_project</code>,</p>
+<p><code>file_edits_carry_their_project_session_and_full_path</code>, …) pin the writers</p>
+<p>against the same table so writer and reader cannot disagree about which column</p>
+<p>holds what.</p>
+<p>The <code>REFERENCES</code> annotations above record which column joins which table; they</p>
+<p>are <strong>not declared constraints</strong>. SQLite does not enforce foreign keys unless</p>
+<p><code>PRAGMA foreign_keys</code> is on, and turning it on would constrain the order a</p>
+<p>delete-then-insert re-ingest may touch the tables in, for no integrity this</p>
+<p>single-writer store does not already have ― so the schema states the</p>
+<p>relationship and the ingest code maintains it (per <code>source_path</code>, below).</p>
+<p>The store is also a <strong>read surface for arbitrary queries</strong> (<code>cli.md</code>: <code>sql</code>).</p>
+<p>Because it is plain SQLite holding already-extracted facts, the session-analysis</p>
+<p>slices a consumer might want ― the <code>optimize</code> agent chasing a root cause, say ―</p>
+<p>are a <code>SELECT</code> away, which is cheaper and less error-prone than re-parsing the</p>
+<p>raw transcripts. <code>sql</code> opens the db <strong>read-only</strong></p>
+<p>(<code>Store::open(path, OpenMode::ReadOnly)</code>) so an</p>
+<p>ad-hoc query cannot mutate the derived store; views like <code>tool_errors</code> keep those</p>
+<p>queries clean despite the column overloading.</p>
+<p><code>attrs_json</code> is the additive escape hatch: a new event kind or surface attribute</p>
+<p>lands there without a migration, and graduates to a column only if reports query</p>
+<p>it often. This is what keeps &quot;add a new surface&quot; a non-migrating change.</p>
+<h3>Prompt text is referenced, never copied</h3>
+<p>A <code>prompt</code> event stores <code>(source_path, source_line)</code>, not the prompt string. The</p>
+<p>future skill-extraction layer (clustering recurring prompts into candidate</p>
+<p>skills ― <code>architecture.md</code>) recovers the text by re-reading that line on demand.</p>
+<p>This keeps personal data out of the store (<code>.claude/rules/session-data-privacy.md</code>)</p>
+<p>while reserving the capability now, so it survives transcript rotation: the</p>
+<p>pointer is cheap to keep and the alternative ― discovering later that the text is</p>
+<p>gone ― is unrecoverable. (If the source file is rotated away, the pointer simply</p>
+<p>resolves to nothing; the event&#x27;s counts remain.)</p>
+<h3>The store file is owner-only</h3>
+<p>What survives ingestion is still sensitive: file paths, tool-error excerpts,</p>
+<p>project names, and pointers back into the raw transcripts. Since the default</p>
+<p>store is a single well-known user-level path shared by every project</p>
+<p>(<code>cli.md</code>), the umask default ― commonly a group/world-readable <code>0755</code></p>
+<p>directory and <code>0644</code> file ― would expose that aggregate to other local</p>
+<p>accounts. <code>Store::open</code> therefore creates the directory <code>0700</code> and the store</p>
+<p><code>0600</code>, matching how the <code>optimize</code> briefing (carrying the same class of data)</p>
+<p>is written.</p>
+<p>The store file is created by <code>Store::open</code> itself rather than chmod&#x27;ed after</p>
+<p>SQLite creates it, which is what keeps the guarantee airtight: the schema write</p>
+<p>would otherwise land in a file still carrying the umask mode, and SQLite copies</p>
+<p>the database&#x27;s mode onto the rollback journal it writes beside it, so the</p>
+<p>journal inherits <code>0600</code> for free. An <strong>existing</strong> store is narrowed as well ―</p>
+<p>a store an older saniwalens created under the umask is the case that actually</p>
+<p>exists, and a permanently exposed one would mean this protection never reaches</p>
+<p>anyone who already ran the tool. Only a regular file is re-moded, so a <code>--db</code></p>
+<p>pointing at a directory still fails at SQLite rather than being silently</p>
+<p>re-moded, and a store owned by another account is left as it is ― re-moding it</p>
+<p>is not this process&#x27;s call, and refusing to run over it would break a store</p>
+<p>legitimately created under another user.</p>
+<h2>Surface identity, scope, and the effective join</h2>
+<p><code>surfaces</code> is keyed <code>(kind, id, scope, project)</code> because the same logical</p>
+<p>surface can be installed globally and in <strong>any number of projects</strong> (e.g. a</p>
+<p><code>git-commit</code> skill in <code>~/.claude/skills/</code> and in two projects&#x27;</p>
+<p><code>.claude/skills/</code>). Events carry only <code>(surface_kind, surface_id)</code> ― the</p>
+<p>transcript does not reveal which copy was loaded ― but they *do* join a session</p>
+<p>whose <code>project</code> is known, and Claude Code&#x27;s own resolution makes a project&#x27;s</p>
+<p>copy shadow the global one <strong>inside that project only</strong>.</p>
+<p>So the catalog×usage join is defined per session project: an event from project</p>
+<p>P joins P&#x27;s project row for that <code>(kind, id)</code> when one exists, else the global</p>
+<p>row. The join stays strictly 1:N-safe ― one event never matches two surface</p>
+<p>rows, and one project&#x27;s usage never inflates another project&#x27;s copy</p>
+<p>(<code>Store::effective_catalog</code>). Scope and project are retained on every catalog</p>
+<p>row so reports can route a finding to the config layer that owns the fix</p>
+<p>(<code>cli.md</code> <code>--scope</code>). <code>surfaces.md</code> and <code>config-format.md</code> describe the same</p>
+<p>contract.</p>
+<h2>Timestamps are stored in UTC</h2>
+<p><code>started_at</code> / <code>started_epoch</code> are UTC; the transcript gives UTC and the store</p>
+<p>keeps it. Timezone is a <strong>presentation</strong> concern: the report converts to the</p>
+<p>target zone (default JST) when bucketing and displaying (<code>cli.md</code>). Storing local</p>
+<p>time would corrupt sorting and break portability across machines.</p>
+<h2>Project normalization</h2>
+<p>A worktree directory has its own <code>cwd-slug</code> (a <code>...--wt-feat-x</code> suffix), so the</p>
+<p>same logical project is otherwise scattered across slugs. <code>sessions.project</code> is</p>
+<p>the <strong>normalized</strong> project (worktree suffix folded to the parent); <code>sessions.slug</code></p>
+<p>keeps the raw slug. Reports group by <code>project</code> so a project&#x27;s usage is not split,</p>
+<p>while the raw slug stays available for drill-down. The exact folding rule is an</p>
+<p>adapter concern documented where it is implemented, but it must preserve a</p>
+<p>testable invariant: **one logical project maps to exactly one <code>project</code> value,</p>
+<p>and folding is idempotent** (folding an already-folded value is a no-op). Getting</p>
+<p>this wrong splits or merges a project&#x27;s usage, which is a correctness bug for</p>
+<p>every per-project wedge, not a presentation detail.</p>
+<p><code>sessions.root</code> folds by the same rule one level down, on the real path rather</p>
+<p>than the slug. The two must agree: the slug form keys on a <code>--wt-</code> infix and is</p>
+<p>separator-free, so the path form accepts <strong>either separator</strong> ― otherwise a</p>
+<p>worktree recorded on Windows folds by <code>project</code> while <code>root</code> stays split, and</p>
+<p>per-root config scanning (<code>config-format.md</code>) sees two roots where there is one</p>
+<p>checkout.</p>
+<h2>Schema evolution is non-destructive</h2>
+<p>The store outlives its inputs. Claude Code prunes transcripts on its own</p>
+<p>retention schedule, and once a transcript is gone the rows extracted from it are</p>
+<p>the only surviving record of that session ― nothing on disk can rebuild them.</p>
+<p>So an upgrade may never resolve schema drift by asking for the file to be</p>
+<p>deleted; <code>Store::open</code> migrates in place instead (<code>migrate</code> in <code>store.rs</code>).</p>
+<p>The declared schema is the single source of truth for the target shape: it is</p>
+<p>applied to a scratch in-memory database and read back through</p>
+<p><code>PRAGMA table_info</code>, and the live store is reconciled against that. Adding a</p>
+<p>column to the declaration is therefore the whole of a routine migration ― there</p>
+<p>is no parallel list of ALTER statements to keep in step, which is what made the</p>
+<p>previous &quot;detect a missing column, refuse the file&quot; check drift into a</p>
+<p>delete-and-lose-history instruction.</p>
+<p>Drift is reconciled per object by what that object costs to lose:</p>
+<ul>
+<li><code>sessions</code>, <code>events</code>, <code>ingested_files</code>, <code>meta</code> hold history, so a missing</li>
+</ul>
+<p>column is appended with <code>ALTER TABLE ADD COLUMN</code>. Existing rows take the</p>
+<p>column&#x27;s default, which the &quot;report the gap, never substitute&quot; contract below</p>
+<p>already covers. A column that is already present is <strong>compared, not skipped</strong> ―</p>
+<p>matching on name alone would pass silently over a retype or a changed default,</p>
+<p>leaving the store permanently diverged from the declaration it is meant to</p>
+<p>converge on.</p>
+<ul>
+<li><code>surfaces</code> is a snapshot of live config rebuilt on every analyze, so a shape</li>
+</ul>
+<p>change drops and recreates it. The shape is compared first ― an unchanged</p>
+<p>catalog must survive reopening, or a <code>--frozen</code> read would report an empty one.</p>
+<p>When it *is* rebuilt, <code>analyzed_at</code> is cleared, so a <code>--frozen</code> read is routed</p>
+<p>to the freshness warning instead of printing an ordinary header over an empty</p>
+<p>catalog.</p>
+<ul>
+<li>Indexes and views carry no data, so a drifted one is simply dropped and</li>
+</ul>
+<p>recreated. Only a *drifted* one: <code>CREATE INDEX / VIEW IF NOT EXISTS</code> would keep</p>
+<p>a stale definition ― a reader would then silently query yesterday&#x27;s column</p>
+<p>mapping ― but reindexing <code>events</code> on every open is not free either, so the</p>
+<p>stored <code>CREATE</code> statement is compared against the declared one and matched</p>
+<p>objects are left untouched. Objects the declaration does not name are also left</p>
+<p>untouched: the store is meant to be explored with ad-hoc SQL, so a helper view</p>
+<p>someone saved into the file is theirs to keep.</p>
+<p>Indexes and views are <strong>declared apart from the tables</strong>, in their own constants,</p>
+<p>and applied only after column reconciliation. Declared alongside the table they</p>
+<p>would be replayed by the same <code>execute_batch</code> that creates missing tables, before</p>
+<p>any column was added ― so an index over a column a future release introduces</p>
+<p>would hit <code>no such column</code> on a legacy store and take the whole migration down,</p>
+<p>which is the destructive refusal this design exists to remove. Deriving the names</p>
+<p>to reconcile from the declaration is also what removes a hand-kept list: such a</p>
+<p>list drifts, and a declared object missing from it would collide with its own</p>
+<p><code>CREATE</code> on the store&#x27;s second open.</p>
+<p>The whole migration runs in one transaction, as every other multi-statement write</p>
+<p>here does: reconciliation can bail partway through, and a store left</p>
+<p>half-migrated is the outcome in-place upgrading exists to avoid.</p>
+<p><code>PRAGMA user_version</code> carries <code>SCHEMA_VERSION</code>. Reconciliation only ever adds, so</p>
+<p>routine additive changes do not bump it; it exists to catch what reconciliation</p>
+<p>cannot express. A store stamped <strong>newer</strong> than this build is refused rather than</p>
+<p>written to ― this build&#x27;s shape would overwrite changes it does not understand,</p>
+<p>in a file the newer binary still reads correctly. The version is also the seam</p>
+<p>for a future change that reconciliation cannot cover (a column removed, retyped,</p>
+<p>or given a new meaning). Reconciliation now *fails* on such drift rather than</p>
+<p>ignoring it, so the seam cannot be skipped by accident; the migration written to</p>
+<p>fill it must state what it discards, because the answer is no longer &quot;nothing&quot;.</p>
+<p><code>Store::open(path, OpenMode::ReadOnly)</code> (the <code>sql</code> command) cannot migrate ―</p>
+<p>the mode argument is the typed statement of which guarantee applies: <code>ReadWrite</code></p>
+<p>creates the file, narrows it to owner-only, and migrates in place; <code>ReadOnly</code></p>
+<p>does none of the three. An ad-hoc query against a store older than this build</p>
+<p>surfaces SQLite&#x27;s own missing-column error; any read command opens <code>ReadWrite</code></p>
+<p>and migrates first.</p>
+<h2>Incremental ingest</h2>
+<p>Transcripts are append-only and <strong>active sessions keep growing</strong>, so re-running</p>
+<p><code>analyze</code> must be cheap and idempotent.</p>
+<h3>One transcript, one batch</h3>
+<p><code>Store::ingest(IngestBatch)</code> is the only way rows enter the store. A caller</p>
+<p>submits everything one transcript yielded ― session meta, spans, usage events,</p>
+<p>prompts, subagent runs, tool errors, work events ― and the store applies it in</p>
+<p><strong>one transaction, in its own order</strong>: the session row (insert-or-replace), the</p>
+<p>delete of everything this file previously put in <code>events</code>, then each child set,</p>
+<p>then the spawn-cost settle that reads the spawn events it just wrote. The order</p>
+<p>the old five-function API demanded of its callers ― <code>ingest_session</code> first, or</p>
+<p>its delete silently dropped the children ― is no longer a convention to</p>
+<p>remember: no entry point expresses it. Re-ingest of the same file is the same</p>
+<p>batch twice, which the replace contract below makes idempotent, and a batch&#x27;s</p>
+<p>atomicity means a failure mid-ingest leaves the previous rows intact rather</p>
+<p>than a half-replaced file.</p>
+<ul>
+<li>Before ingesting a file, compare <code>(mtime, size)</code> against <code>ingested_files</code>.</li>
+</ul>
+<p>Unchanged → skip. Changed or new → re-ingest. <code>mtime</code> is **epoch</p>
+<p>nanoseconds** (<code>adapter::harness::file_fingerprint</code>): whole-second</p>
+<p>truncation made a same-second, same-size edit invisible, so the transcript</p>
+<p>was skipped until something else moved the fingerprint. Epoch nanos fit in</p>
+<p>an <code>INTEGER</code> until the year 2262.</p>
+<ul>
+<li>Re-ingest is <strong>replace, not append</strong>: delete all <code>events</code> whose <code>source_path</code></li>
+</ul>
+<p>equals this file, then re-extract from the whole file and insert. This is why</p>
+<p><code>events.source_path</code> exists. Replacing avoids duplicate rows when a still-open</p>
+<p>session is analyzed twice (the second pass simply supersedes the first).</p>
+<p><code>subagent_runs</code> replaces on the same key ― the parent transcript&#x27;s path, not</p>
+<p>the subagent&#x27;s ― so one session&#x27;s runs are rebuilt as a set, and a run whose</p>
+<p>own transcript vanished does not survive as an orphan. The subagent files</p>
+<p>themselves are deliberately <strong>not</strong> fingerprinted: a subagent&#x27;s completion</p>
+<p>appends its <code>tool_result</code> to the *main* transcript, so the parent&#x27;s own</p>
+<p>fingerprint already moves when a child finishes, and the next run re-reads the</p>
+<p>whole directory. Stat-ing every file under <code>subagents/</code> on every run would buy</p>
+<p>only the case of a session killed between the child finishing and that</p>
+<p><code>tool_result</code> being written ― where the session&#x27;s data is incomplete anyway. Filling an</p>
+<p><code>agent_spawn</code> row&#x27;s cost from those runs is scoped to that same key: a call id</p>
+<p>is unique <strong>within</strong> a session, and nothing guarantees it across sessions</p>
+<p>(a resumed or copied transcript can carry one over), so an unscoped join would</p>
+<p>pick an arbitrary row and sum another session&#x27;s runs on top.</p>
+<ul>
+<li><code>surfaces</code> is rebuilt wholesale on each run from current config ― the catalog</li>
+</ul>
+<p>is a snapshot of *now*, not an accumulation. (Usage is historical; catalog is</p>
+<p>current ― <code>surfaces.md</code>.)</p>
+<p>The fingerprint is keyed on the *file*, not on what saniwalens knew how to extract</p>
+<p>from it. On its own that skip never expires: a session that has closed will never</p>
+<p>change again, so its rows would stay pinned to whatever the saniwalens that first read</p>
+<p>them understood ― an event kind added later stays missing for that session, a</p>
+<p>field added later stays NULL, and a classifier that learned a new pattern never</p>
+<p>reaches it.</p>
+<p><code>meta.analyzer_version</code> is the invalidation. It names the <strong>analysis semantics</strong></p>
+<p>the stored rows were produced by; a run whose version differs from the store&#x27;s</p>
+<p>ignores the fingerprint skip, re-ingests every transcript once (replace, per</p>
+<p>above, so this is safe to repeat), and stamps the new value. Bump it whenever</p>
+<p>extraction or classification changes what an *unchanged* transcript yields. It is</p>
+<p>deliberately not the crate version ― a release that changes no analysis should not</p>
+<p>cost every user a full re-analyze. The Claude Code pair lives with its mapping in</p>
+<p><code>adapter::transcript</code> (<code>CLAUDE_ANALYZER_META_KEY</code> / <code>CLAUDE_ANALYZER_VERSION</code>);</p>
+<p>each other harness carries its own beside its own mapping (<code>harness.md</code>), and</p>
+<p><code>Store::is_analyzer_current(key, version)</code> compares whatever it is handed ― the</p>
+<p>store owns no harness&#x27;s key.</p>
+<p>Invalidation only recovers what the transcript actually holds. Where a signal was</p>
+<p>never recorded at all, the contract remains that a reader **reports the gap or</p>
+<p>drops the row**, never substitutes something plausible:</p>
+<ul>
+<li><code>overhead</code> reports the always-on floor as unavailable when no <code>session_start</code></li>
+</ul>
+<p>was observed, rather than falling back to a skill span&#x27;s <code>ctx_start</code></p>
+<p>(<code>surfaces.md</code>).</p>
+<ul>
+<li>Thrash detection excludes <code>file_edit</code> rows with no <code>target</code>, rather than</li>
+</ul>
+<p>falling back to the basename in <code>surface_id</code> (<code>events.md</code>).</p>
+<p>Both fallbacks would have looked like working output while silently restoring the</p>
+<p>bug the field exists to prevent, which is worse than an empty report. Such a</p>
+<p>result is a fact about the input: re-analyzing will not conjure a signal the</p>
+<p>transcript never recorded, and the transcript it came from may be gone entirely.</p>
+<p><code>(mtime, size)</code> is a cheap change detector, not a content hash; a touch that</p>
+<p>changes mtime without changing bytes triggers a harmless idempotent replace, and</p>
+<p>any byte change moves size or mtime. A content hash is a later hardening option</p>
+<p>if the cheap detector proves insufficient.</p>
+<p>The nanos unit itself is a fingerprint change: <code>mtime</code> values stamped in whole</p>
+<p>seconds never match an epoch-nanos reading, so the first run after the upgrade</p>
+<p>re-ingests every file-backed transcript once (replace, per above, so this is</p>
+<p>safe to repeat) and then the skip resumes. No <code>analyzer_version</code> bump is</p>
+<p>involved ― row-backed fingerprints (<code>opencode</code>&#x27;s <code>time_updated_ms</code> plus message</p>
+<p>count) keep matching, so only the file-backed paths (Claude Code transcripts,</p>
+<p>kilocode&#x27;s two-file task fold) pay the one-time pass. The stat-before-read</p>
+<p>rule below is unchanged: a file that grows mid-run still shows a mismatch next</p>
+<p>run, because the recorded size is the bytes actually consumed.</p>
+<h3>Reading files that grow mid-run</h3>
+<p>Active sessions are appended to while <code>analyze</code> runs, so the reader must tolerate</p>
+<p>a <strong>torn read</strong>: a partial final line is skipped (JSONL append is not atomic at</p>
+<p>line granularity), never parsed as a broken record. The fingerprint stored in</p>
+<p><code>ingested_files</code> is captured <strong>after</strong> the read completes ― recording the size</p>
+<p>actually consumed. A file that grew during the read therefore shows a changed</p>
+<p><code>(mtime, size)</code> on the next run and is re-ingested, picking up the tail. Stamping</p>
+<p>the fingerprint before the read would record the post-growth size against</p>
+<p>pre-growth events and permanently skip the tail. The stamp is additionally gated</p>
+<p>on a post-read re-stat (<code>restat_matches</code> in <code>adapter::harness</code>): only when the</p>
+<p>re-read fingerprint equals the pre-read one is the stamp written, so a mid-run</p>
+<p>append fails closed to &quot;ingest without stamping&quot; and the next run re-ingests</p>
+<p>rather than skipping on a stale stamp. Row-backed fingerprints (<code>opencode</code>&#x27;s</p>
+<p><code>time_updated_ms</code> plus message count, kilocode&#x27;s task fold) re-query after ingest</p>
+<p>under the same gate.</p>
+<h2>Why a dimension + catalog + spine, not one span table</h2>
+<p>An earlier design had a single skill-centric <code>spans</code> table. It could not hold</p>
+<p>rules, hooks, MCP, or prompts without contortion, and it conflated the catalog</p>
+<p>(what is installed) with usage (what ran). Splitting into <code>sessions</code> (dimension)</p>
+<p>+ <code>surfaces</code> (catalog) + <code>events</code> (usage) lets every configuration surface share</p>
+<p>one usage spine and one catalog shape, and makes the optimization analysis a</p>
+<p>join rather than a special case per surface ― see <code>surfaces.md</code>.</p>
+<p><code>subagent_runs</code> sits beside the spine rather than in it because a run is not an</p>
+<p>event *of the session* ― it happened in another transcript, on another thread,</p>
+<p>and its cost was measured there. Putting it in <code>events</code> with `surface_kind =</p>
+<p>&#x27;agent&#x27;` would double-count every spawn in the catalog×usage join, which counts</p>
+<p>rows per surface. The spine keeps the main thread&#x27;s spawn; the run keeps the</p>
+<p>cost; <code>events.target</code> joins them.</p>
+    <nav aria-label="Spec pages">
+      <ul class="prev-next">
+      <li><a rel="prev" href="./events.html">← Events Specification</a></li>
+      <li><a href="../specs.html">Specs index</a></li>
+      <li><a rel="next" href="./harness.html">Harness Specification →</a></li>
+      </ul>
+    </nav>
+    <p><a href="https://github.com/armaniacs/saniwalens/blob/main/docs/specs/storage.md">Source: storage.md</a></p>
+
+  </main>
+
+  <footer>
+    <p>
+      saniwalens — MIT. Source on <a href="https://github.com/armaniacs/saniwalens">GitHub</a>.
+    </p>
+  </footer>
+</body>
+</html>

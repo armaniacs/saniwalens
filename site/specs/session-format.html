@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Session Format Specification — saniwalens</title>
+  <meta name="description" content="saniwalens spec session-format.md, mirrored from docs/specs/.">
+  <meta name="color-scheme" content="light dark">
+  <script>
+    try {
+      document.querySelector('meta[name="color-scheme"]').content =
+        localStorage.getItem("color-scheme") ?? "light dark";
+    } catch (e) {}
+  </script>
+  <link rel="stylesheet" href="../styles.css">
+  <script defer src="../app.js"></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <header class="site-header">
+    <div class="header-inner">
+      <a class="site-logo" href="../index.html" aria-label="saniwalens home">saniwalens</a>
+
+      <nav class="site-nav" aria-label="Primary">
+        <button
+          class="menu-button"
+          type="button"
+          popovertarget="site-menu"
+          popovertargetaction="toggle"
+          aria-controls="site-menu"
+        >
+          <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+            <path d="M2 4h12M2 8h12M2 12h12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" fill="none"/>
+          </svg>
+          <span>Menu</span>
+        </button>
+
+        <ul id="site-menu" class="site-menu" popover="auto">
+          <li><a href="../index.html">Home</a></li>
+          <li><a href="../docs.html">Docs</a></li>
+          <li><a href="../specs.html" aria-current="page">Specs</a></li>
+          <li><a href="../cli.html">CLI</a></li>
+          <li><a href="https://github.com/armaniacs/saniwalens">GitHub</a></li>
+          <li><a href="../index_ja.html">日本語</a></li>
+        </ul>
+      </nav>
+
+      <button
+        id="theme-toggle"
+        class="theme-toggle"
+        type="button"
+        aria-live="polite"
+      >
+        <span class="theme-toggle-dark" aria-hidden="true">☾</span>
+        <span class="theme-toggle-light" aria-hidden="true">☀</span>
+        <span class="visually-hidden" id="theme-toggle-label">Switch to dark theme</span>
+      </button>
+    </div>
+  </header>
+
+  <main id="main">
+    <h1>Session Format Specification</h1>
+<p>This spec catalogues what the <strong>adapter layer</strong> knows about the Claude Code</p>
+<p><strong>transcript</strong> format ― the usage half of the catalog×usage model</p>
+<p>(<code>architecture.md</code>). Its sibling <code>config-format.md</code> covers the config half. Only</p>
+<p>the adapter may use the field names below; everything downstream sees the</p>
+<p>internal domain model (<code>.claude/rules/format-isolation.md</code>). This is one of the</p>
+<p>two specs most likely to change when Claude Code ships a new release.</p>
+<blockquote>
+<p>Observed against a real <code>~/.claude/projects/</code> tree (≒460 transcript files)</p>
+<p>on 2026-06-14, Claude Code transcript version <code>2.1.x</code>. Counts drift as</p>
+<p>sessions accumulate; the <strong>shapes</strong> are what matter.</p>
+</blockquote>
+<h2>File layout</h2>
+<pre><code>
+~/.claude/projects/
+
+
+  &lt;cwd-slug&gt;/
+
+
+    &lt;sessionId&gt;.jsonl                          ← main session transcript
+
+
+    &lt;sessionId&gt;/subagents/
+
+
+      agent-&lt;agentId&gt;.jsonl                    ← one transcript per spawned subagent
+
+
+      agent-&lt;agentId&gt;.meta.json                ← that subagent&#x27;s sidecar (below)
+
+
+</code></pre>
+<ul>
+<li><code>&lt;cwd-slug&gt;</code> encodes the working directory (path separators → <code>-</code>). Worktree</li>
+</ul>
+<p>directories appear as their own slugs (e.g. a <code>...--wt-feat-x</code> suffix); the</p>
+<p>store folds these to a parent project ― see <code>storage.md</code>.</p>
+<ul>
+<li>The slug is <strong>lossy</strong> (<code>-</code> in a path component is indistinguishable from a</li>
+</ul>
+<p>separator), so the real project root comes from the records themselves: most</p>
+<p>record types carry a <code>cwd</code> field with the absolute working directory. A</p>
+<p>session that changes directory stamps later records with the child path, so</p>
+<p>the adapter takes the <strong>first</strong> recorded <code>cwd</code> as the session root</p>
+<p>(<code>session_cwd</code> in <code>adapter/transcript.rs</code>) ― the directory the session</p>
+<p>started in, which is what the slug encodes. Sessions whose records carry no</p>
+<p><code>cwd</code> have an unknown root; project-config scanning simply skips them</p>
+<p>(<code>config-format.md</code>).</p>
+<ul>
+<li>A <strong>main</strong> transcript and its <strong>subagent</strong> transcripts are separate files.</li>
+</ul>
+<p>This separation is load-bearing: a main transcript&#x27;s records describe only the</p>
+<p>main thread&#x27;s context, so main-thread metrics are computed from the main file</p>
+<p>alone, uncontaminated by subagent work.</p>
+<p>Each file is JSONL ― one JSON object per line, appended over the session&#x27;s life.</p>
+<h2>Records the adapter reads</h2>
+<p>Records carry a <code>type</code>. The adapter takes the listed fields and ignores the</p>
+<p>rest; unknown types are skipped.</p>
+<h3><code>assistant</code> ― the source of all runtime cost</h3>
+<ul>
+<li><code>timestamp</code> ― ISO-8601, millisecond precision, <strong>UTC</strong> (<code>Z</code> suffix, e.g.</li>
+</ul>
+<p><code>2026-05-14T22:40:06.133Z</code>). Parsed to a UTC instant; timezone presentation</p>
+<p>happens later (<code>cli.md</code>).</p>
+<ul>
+<li><code>message.id</code> ― the API response id. One response is written as **several</li>
+</ul>
+<p>lines, one per content block** (<code>thinking</code>, <code>text</code>, <code>tool_use</code>), and every</p>
+<p>line repeats <code>message.model</code> and carries a <code>message.usage</code>; the id is what</p>
+<p>ties them back to one response. The lines take two shapes: on the main</p>
+<p>thread each line&#x27;s <code>output_tokens</code> is the response&#x27;s final value repeated;</p>
+<p>in a subagent transcript it is a running total that only grows, the last</p>
+<p>line carrying the whole response. The adapter reconciles both at parse time</p>
+<p>by emitting, per line, only the output not yet reported under that id ― the</p>
+<p>whole value on the first line and zero on a repeat, or each step of a</p>
+<p>running total (<code>adapter::transcript::assistant_records</code>). That is the</p>
+<p>per-id maximum, spread over the lines that first observed it, so the core</p>
+<p>can sum records and count each response once (<code>events.md</code>). Keeping the</p>
+<p>*first* line&#x27;s value instead would under-count subagents badly, and</p>
+<p><code>stop_reason</code> is no substitute: every main-thread line carries one, and some</p>
+<p>subagent responses carry it on no line. A line with no id reports its value</p>
+<p>as is.</p>
+<ul>
+<li><code>message.model</code> ― e.g. <code>claude-opus-4-7</code>. May be the sentinel <code>&lt;synthetic&gt;</code></li>
+</ul>
+<p>for locally-generated turns; excluded when choosing an event&#x27;s representative</p>
+<p>model (<code>events.md</code>).</p>
+<ul>
+<li><code>message.usage</code> ― token accounting: <code>input_tokens</code>,</li>
+</ul>
+<p><code>cache_read_input_tokens</code>, <code>cache_creation_input_tokens</code>, <code>output_tokens</code>.</p>
+<ul>
+<li><strong>Prompt size</strong> at a request (the full context handed to the model) is</li>
+</ul>
+<p><code>input_tokens + cache_read_input_tokens + cache_creation_input_tokens</code>. It</p>
+<p>is <strong>not monotonic</strong>: at the context limit Claude Code compacts and the next</p>
+<p>request&#x27;s prompt size drops sharply (observed ~1,000,000 → ~49,000). The</p>
+<p>context metric is defined to survive this (<code>events.md</code>).</p>
+<ul>
+<li><code>message.content[]</code> ― blocks; the adapter inspects <code>tool_use</code> blocks for skill</li>
+</ul>
+<p>invocations, subagent spawns, and tool usage (below).</p>
+<h3><code>user</code> ― human turns and slash invocations</h3>
+<ul>
+<li>A <strong>human turn</strong> is a <code>user</code> record that is not <code>isMeta</code> and whose content is</li>
+</ul>
+<p>real input (not solely a <code>tool_result</code>). Human turns delimit event ends</p>
+<p>(<code>events.md</code>).</p>
+<ul>
+<li>A <strong>slash-command invocation</strong> appears as <code>&lt;command-name&gt;/NAME&lt;/command-name&gt;</code></li>
+</ul>
+<p>in the content.</p>
+<h3><code>system</code> ― structural signals</h3>
+<p><code>system</code> records carry a <code>subtype</code>. Several are directly useful:</p>
+<div class="table-scroll" role="region" tabindex="0">
+<table><thead><tr>
+<th scope="col"><code>subtype</code></th>
+<th scope="col">Use</th>
+</tr></thead><tbody>
+<tr>
+<th scope="row"><code>compact_boundary</code></th scope="row">
+<td>Marks a context compaction <strong>structurally</strong> ― so the context metric detects compaction from the boundary record, not by guessing from a token drop.</td>
+</tr>
+<tr>
+<th scope="row"><code>turn_duration</code></th scope="row">
+<td>A measured turn wall-clock, usable for duration cross-checks.</td>
+</tr>
+<tr>
+<th scope="row"><code>local_command</code></th scope="row">
+<td>A slash command run locally (carries its own <code>&lt;command-name&gt;</code>).</td>
+</tr>
+<tr>
+<th scope="row"><code>away_summary</code>, <code>compact_boundary</code>, <code>scheduled_task_fire</code>, …</th scope="row">
+<td>Other lifecycle markers; read as needed.</td>
+</tr>
+</tbody></table></div>
+<h2>Usage signals the adapter extracts</h2>
+<p>The transcript yields <strong>events</strong> of several kinds (see <code>events.md</code> for how each</p>
+<p>becomes an event). The adapter recognises at least:</p>
+<div class="table-scroll" role="region" tabindex="0">
+<table><thead><tr>
+<th scope="col">Signal</th>
+<th scope="col">Where in the transcript</th>
+</tr></thead><tbody>
+<tr>
+<th scope="row">Skill invocation ― <code>slash</code></th scope="row">
+<td><code>&lt;command-name&gt;/NAME&lt;/command-name&gt;</code> in a <code>user</code> (or <code>system</code> <code>local_command</code>) record</td>
+</tr>
+<tr>
+<th scope="row">Skill invocation ― <code>tool</code></th scope="row">
+<td><code>assistant</code> <code>tool_use</code> with <code>name == &quot;Skill&quot;</code>, <code>input.skill == NAME</code></td>
+</tr>
+<tr>
+<th scope="row">Subagent spawn</th scope="row">
+<td><code>assistant</code> <code>tool_use</code> with <code>name == &quot;Agent&quot;</code></td>
+</tr>
+<tr>
+<th scope="row">Tool use</th scope="row">
+<td><code>assistant</code> <code>tool_use</code> blocks (built-in and MCP tools, by <code>name</code>)</td>
+</tr>
+<tr>
+<th scope="row">User prompt</th scope="row">
+<td><code>user</code> <strong>human turns</strong> (not <code>last-prompt</code>, which is a single leaf-pointer to the latest prompt ― one per region, not per turn)</td>
+</tr>
+<tr>
+<th scope="row">Tool failure</th scope="row">
+<td>a <code>tool_result</code> block flagged <code>is_error</code> or wrapping <code>&lt;tool_use_error&gt;</code>. Categorised from the entry&#x27;s <code>toolDenialKind</code> where that marker can be attributed to it (below), else from the text (<code>core::friction</code>); a short readable excerpt is kept. Linking the result&#x27;s <code>tool_use_id</code> to the assistant <code>tool_use</code> block recovers both the <strong>originating tool</strong> and the call&#x27;s <strong>target</strong> (its <code>input.file_path</code> / <code>command</code>) ― so a report shows which tool produced each failure and which file/command it hit, even when the error text omits the path (e.g. edit-precondition names no file)</td>
+</tr>
+<tr>
+<th scope="row">Permission denial</th scope="row">
+<td><code>toolDenialKind</code> on the entry that carries the denied <code>tool_result</code>, else the denial text inside it (<code>&quot;Permission for this action was denied&quot;</code>). Structural where the marker is present; a low-confidence heuristic where it is not ― see note below</td>
+</tr>
+<tr>
+<th scope="row">Compaction</th scope="row">
+<td><code>system</code> <code>subtype == compact_boundary</code></td>
+</tr>
+</tbody></table></div>
+<p>These map to configuration surfaces (<code>surfaces.md</code>): a <code>Skill</code> invocation to a</p>
+<p><code>skill</code> surface, an MCP <code>tool_use</code> to an <code>mcp_tool</code>/<code>mcp_server</code> surface, and so</p>
+<p>on. New surface kinds are added by recognising new signals here ― additively,</p>
+<p>without disturbing existing extraction.</p>
+<p><strong>Detection is structural, not substring.</strong> A skill invocation is a real</p>
+<p><code>tool_use</code> block (<code>name == &quot;Skill&quot;</code>) or a <code>&lt;command-name&gt;</code> in an actual</p>
+<p><code>user</code>/<code>local_command</code> command field ― never a <code>&lt;command-name&gt;</code> or <code>Skill</code></p>
+<p>string appearing anywhere in content. Quoted text (a transcript that discusses</p>
+<p>skills, a prompt containing the literal tags) must not be mis-read as an</p>
+<p>invocation. The adapter matches on record structure and field position.</p>
+<p><strong>Not every surface emits a usage signal.</strong> <code>rule</code>, <code>hook</code>, and <code>claude_md</code> have</p>
+<p>no discrete invocation in the transcript ― they are injected context, not</p>
+<p>events. They appear in the catalog (<code>config-format.md</code>) but acquire no events;</p>
+<p><code>surfaces.md</code> classifies surface kinds as usage-measurable vs catalog-only so the</p>
+<p>join does not mistake &quot;no event possible&quot; for &quot;unused&quot;. The permission-denial</p>
+<p>signal above is the one partly heuristic signal, and is flagged as</p>
+<p>lower-confidence wherever it is used.</p>
+<h3>Why a denial is read from its marker, not its words</h3>
+<p>A denied call carries <code>toolDenialKind</code> ― <code>permission-rule</code>, <code>user-rejected</code>,</p>
+<p><code>automode-blocked</code> ― on the entry, one level above the <code>tool_result</code> block it</p>
+<p>explains. Reading it is not an optimization but the only reliable route: the text</p>
+<p>below a hook denial is written by the <strong>user&#x27;s own hook</strong>, so its wording and its</p>
+<p>*language* are arbitrary, and no keyword list can converge on it. The marker is</p>
+<p>upstream&#x27;s fixed vocabulary, so it classifies a denial identically whatever the</p>
+<p>hook chose to say. <code>permission-rule</code> and <code>automode-blocked</code> are blocks the user&#x27;s</p>
+<p>config could relax; <code>user-rejected</code> is the user answering no.</p>
+<p>The field is optional in both directions: older transcripts predate it, and not</p>
+<p>every refusal carries one (a built-in guard may simply return an error). An</p>
+<p>unrecognised kind falls through to the text classifier rather than overriding it,</p>
+<p>so a kind added upstream degrades to today&#x27;s behavior instead of erasing it.</p>
+<p>The marker is scoped to the <strong>entry</strong>, not to a block, so it is only attributed</p>
+<p>when the entry holds exactly one failed <code>tool_result</code> ― every transcript observed</p>
+<p>writes one per entry. Were upstream to batch several, a shared marker could not</p>
+<p>say which of them it denied, so it is dropped and the text classifier decides for</p>
+<p>all. Both fallbacks follow the same rule: where the marker cannot be attributed</p>
+<p>with certainty, it does not get to assert anything.</p>
+<h3>Skill invocation has two distinct paths</h3>
+<p><code>slash</code> (the human typed it) and <code>tool</code> (the model invoked it) are **not</p>
+<p>duplicates of one event** ― empirically a <code>slash</code> is not shadowed by a matching</p>
+<p><code>tool</code> call. The adapter emits both, tagged with their <code>source</code>; the core does</p>
+<p><strong>not</strong> deduplicate them.</p>
+<h2>Subagent linkage</h2>
+<p>Subagent cost is attributed back to the event that spawned the work, but a</p>
+<p>subagent&#x27;s tokens live in a separate file, and its own transcript never names</p>
+<p>the <strong>agent type</strong> that ran. Both facts come from the sidecar; <code>promptId</code> is the</p>
+<p>fallback when there is none.</p>
+<p>Each <code>agent-&lt;agentId&gt;.jsonl</code> has a sibling <code>agent-&lt;agentId&gt;.meta.json</code>:</p>
+<div class="table-scroll" role="region" tabindex="0">
+<table><thead><tr>
+<th scope="col">Field</th>
+<th scope="col">Use</th>
+</tr></thead><tbody>
+<tr>
+<th scope="row"><code>agentType</code></th scope="row">
+<td>The agent that ran (<code>Explore</code>, a custom agent&#x27;s name) ― the only place it appears. Without it a run&#x27;s cost cannot be attributed to a type at all.</td>
+</tr>
+<tr>
+<th scope="row"><code>toolUseId</code></th scope="row">
+<td>The <code>id</code> of the <code>Agent</code> <code>tool_use</code> block that spawned this run ― an <strong>exact</strong> join to one spawn.</td>
+</tr>
+<tr>
+<th scope="row"><code>parentAgentId</code></th scope="row">
+<td>For a subagent spawned by a subagent, the parent&#x27;s <code>agentId</code>. Absent at depth 1.</td>
+</tr>
+<tr>
+<th scope="row"><code>spawnDepth</code></th scope="row">
+<td>1 for a main-thread spawn, 2+ for a nested one.</td>
+</tr>
+<tr>
+<th scope="row"><code>model</code></th scope="row">
+<td>The model the run used.</td>
+</tr>
+</tbody></table></div>
+<p>The transcript side of the same join:</p>
+<ul>
+<li>A subagent transcript&#x27;s records carry <code>agentId</code>, <code>sessionId</code>, and <code>promptId</code>;</li>
+</ul>
+<p>the file is <code>agent-&lt;agentId&gt;.jsonl</code>.</p>
+<ul>
+<li>The same <code>promptId</code> appears on the parent session&#x27;s records for the spawning</li>
+</ul>
+<p>turn. It is inherited by the <strong>whole</strong> subagent tree, so a nested run&#x27;s</p>
+<p><code>promptId</code> is still the top-level turn&#x27;s ― it identifies the turn, never the</p>
+<p>spawn.</p>
+<ul>
+<li>Several subagents share one <code>promptId</code> (parallel spawn, and every nested run),</li>
+</ul>
+<p>so <code>promptId</code> alone makes per-event attribution approximate. <code>toolUseId</code> does</p>
+<p>not: it names one call. The adapter therefore keeps the <code>Agent</code> block&#x27;s <code>id</code></p>
+<p>on the spawn record and prefers that join, falling back to <code>promptId</code> only</p>
+<p>when a sidecar is missing ― see <code>events.md</code>.</p>
+<p><strong>Nested runs exist only here.</strong> An agent spawned by an agent has no <code>Agent</code></p>
+<p><code>tool_use</code> anywhere in the main transcript, so the main thread&#x27;s spawn count is</p>
+<p>not the number of subagent runs; the <code>subagents/</code> directory is. Observed on a</p>
+<p>real tree: roughly half of all runs were nested, and one agent type ran seven</p>
+<p>times more often than the main transcript alone suggested.</p>
+<blockquote>
+<p>The sidecar was observed on transcript versions <code>2.1.220</code>-<code>2.1.246</code>, present</p>
+<p>for every subagent transcript in the tree. Earlier releases may not write it,</p>
+<p>so every field is read as optional and an absent sidecar degrades to the</p>
+<p><code>promptId</code> join with an unknown agent type ― never to a guessed one.</p>
+</blockquote>
+<h2>Subagents do not invoke skills</h2>
+<p>Empirically, subagent transcripts contain no <code>Skill</code> <code>tool_use</code> and no</p>
+<p><code>&lt;command-name&gt;</code> ― subagents are not given the Skill tool. So every skill</p>
+<p>invocation originates in a main transcript; subagent files are read only to</p>
+<p><strong>attribute tokens</strong> to the main-thread event that spawned them. If a future</p>
+<p>release gives subagents skills, this assumption is the first thing to revisit.</p>
+    <nav aria-label="Spec pages">
+      <ul class="prev-next">
+      <li><a rel="prev" href="./harness.html">← Harness Specification</a></li>
+      <li><a href="../specs.html">Specs index</a></li>
+      <li><a rel="next" href="./session-format-opencode.html">Session Format Specification — opencode →</a></li>
+      </ul>
+    </nav>
+    <p><a href="https://github.com/armaniacs/saniwalens/blob/main/docs/specs/session-format.md">Source: session-format.md</a></p>
+
+  </main>
+
+  <footer>
+    <p>
+      saniwalens — MIT. Source on <a href="https://github.com/armaniacs/saniwalens">GitHub</a>.
+    </p>
+  </footer>
+</body>
+</html>

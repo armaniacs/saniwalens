@@ -39,34 +39,33 @@ SPEC_FILES = [
     "config-format-kilocode.md",
 ]
 
-NAV_EN = [
-    ("./index.html", "Home", False),
-    ("./docs.html", "Docs", False),
-    ("./specs.html", "Specs", True),
-    ("./cli.html", "CLI", False),
-    ("https://github.com/armaniacs/saniwalens", "GitHub", False),
-    ("./index_ja.html", "日本語", False),
-]
-
-NAV_CLI = [
-    ("./index.html", "Home", False),
-    ("./docs.html", "Docs", False),
-    ("./specs.html", "Specs", False),
-    ("./cli.html", "CLI", True),
-    ("https://github.com/armaniacs/saniwalens", "GitHub", False),
-    ("./index_ja.html", "日本語", False),
+NAV_BASE_EN = [
+    ("index.html", "Home"),
+    ("docs.html", "Docs"),
+    ("specs.html", "Specs"),
+    ("cli.html", "CLI"),
+    ("https://github.com/armaniacs/saniwalens", "GitHub"),
+    ("index_ja.html", "日本語"),
 ]
 
 
-def nav_html(items: list[tuple[str, str, bool]]) -> str:
+def nav_html(items: list[tuple[str, str]], base: str, current: str | None) -> str:
     lis = []
-    for href, label, current in items:
-        aria = ' aria-current="page"' if current else ""
+    for path, label in items:
+        href = path if "://" in path else f"{base}/{path}"
+        aria = ' aria-current="page"' if label == current else ""
         lis.append(f'          <li><a href="{href}"{aria}>{html.escape(label)}</a></li>')
     return "\n".join(lis)
 
 
-def page_shell(*, title: str, desc: str, nav: list[tuple[str, str, bool]], body: str) -> str:
+def page_shell(
+    *,
+    title: str,
+    desc: str,
+    body: str,
+    base: str = ".",
+    current: str | None = None,
+) -> str:
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -81,15 +80,15 @@ def page_shell(*, title: str, desc: str, nav: list[tuple[str, str, bool]], body:
         localStorage.getItem("color-scheme") ?? "light dark";
     }} catch (e) {{}}
   </script>
-  <link rel="stylesheet" href="./styles.css">
-  <script defer src="./app.js"></script>
+  <link rel="stylesheet" href="{base}/styles.css">
+  <script defer src="{base}/app.js"></script>
 </head>
 <body>
   <a class="skip-link" href="#main">Skip to content</a>
 
   <header class="site-header">
     <div class="header-inner">
-      <a class="site-logo" href="./index.html" aria-label="saniwalens home">saniwalens</a>
+      <a class="site-logo" href="{base}/index.html" aria-label="saniwalens home">saniwalens</a>
 
       <nav class="site-nav" aria-label="Primary">
         <button
@@ -106,7 +105,7 @@ def page_shell(*, title: str, desc: str, nav: list[tuple[str, str, bool]], body:
         </button>
 
         <ul id="site-menu" class="site-menu" popover="auto">
-{nav_html(nav)}
+{nav_html(NAV_BASE_EN, base, current)}
         </ul>
       </nav>
 
@@ -153,11 +152,16 @@ def inline_md(text: str) -> str:
     return "".join(parts)
 
 
+SPEC_STEMS = {name[:-3] for name in SPEC_FILES}
+
+
 def _link_repl(m: re.Match[str]) -> str:
     label, href = m.group(1), m.group(2)
     if href.endswith(".md") and "://" not in href:
         stem = href.split("/")[-1][:-3]
-        href = f"#spec-{stem}"
+        if stem in SPEC_STEMS:
+            # Called from site/specs/<stem>.html: siblings live side by side.
+            href = f"{stem}.html"
     elif href.startswith("docs/"):
         href = f"https://github.com/armaniacs/saniwalens/blob/main/{href}"
     return f'<a href="{html.escape(href)}">{label}</a>'
@@ -285,39 +289,84 @@ def md_to_html(src: str, *, demote: int = 1, section_id: str = "") -> str:
     return "\n".join(out)
 
 
+def spec_source(name: str) -> tuple[str, str]:
+    """(title-markdown, body-markdown) with the leading `# ` line lifted out."""
+    src = (SPECS_DIR / name).read_text(encoding="utf-8")
+    lines = src.splitlines()
+    if lines and lines[0].startswith("# "):
+        return lines[0][2:].strip(), "\n".join(lines[1:])
+    return name[:-3], src
+
+
 def build_specs() -> None:
+    specs_dir = SITE_DIR / "specs"
+    specs_dir.mkdir(exist_ok=True)
+    infos = [(name, *spec_source(name)) for name in SPEC_FILES]
+
+    # Index: one h1, then the table of contents.
     toc = ["    <ul>"]
-    sections = []
-    for name in SPEC_FILES:
+    for name, title_md, _ in infos:
         stem = name[:-3]
-        src = (SPECS_DIR / name).read_text(encoding="utf-8")
-        first = next((ln for ln in src.splitlines() if ln.startswith("# ")), stem)
-        title = first[2:].strip()
-        toc.append(f'      <li><a href="#spec-{stem}"><code>{stem}.md</code> — {html.escape(title)}</a></li>')
-        body = md_to_html(src, demote=1)
-        sections.append(
-            f'    <section aria-label="{html.escape(title)}" id="spec-{stem}">\n{body}\n'
-            f'      <p><a href="{GITHUB_SPECS}/{name}">Source: {name}</a></p>\n    </section>'
+        toc.append(
+            f'      <li><a href="./specs/{stem}.html"><code>{stem}.md</code> — '
+            f"{inline_md(title_md)}</a></li>"
         )
     toc.append("    </ul>")
-    body = (
+    index_body = (
         "    <h1>Design specs</h1>\n"
         "    <p class=\"lead\">The design intent: the <em>why</em> and the contract. "
-        "This page mirrors <code>docs/specs/</code>; the files on "
+        "Each spec has its own page; the files on "
         f"<a href=\"{GITHUB_SPECS}\">GitHub</a> are the record.</p>\n"
         "    <nav aria-label=\"Specs\">\n" + "\n".join(toc) + "\n    </nav>\n"
-        + "\n".join(sections)
     )
     (SITE_DIR / "specs.html").write_text(
         page_shell(
             title="Design specs",
             desc="saniwalens design specs: the why and the contract, mirrored from docs/specs/.",
-            nav=NAV_EN,
-            body=body,
+            body=index_body,
+            current="Specs",
         ),
         encoding="utf-8",
     )
-    print("wrote site/specs.html")
+
+    # One page per spec, with prev / index / next navigation.
+    for i, (name, title_md, body_md) in enumerate(infos):
+        stem = name[:-3]
+        prev_link = next_link = ""
+        if i > 0:
+            p_name, p_title, _ = infos[i - 1]
+            prev_link = (
+                f'      <li><a rel="prev" href="./{p_name[:-3]}.html">'
+                f"← {inline_md(p_title)}</a></li>\n"
+            )
+        if i < len(infos) - 1:
+            n_name, n_title, _ = infos[i + 1]
+            next_link = (
+                f'      <li><a rel="next" href="./{n_name[:-3]}.html">'
+                f"{inline_md(n_title)} →</a></li>\n"
+            )
+        body = (
+            f"    <h1>{inline_md(title_md)}</h1>\n"
+            + md_to_html(body_md, demote=0)
+            + "\n    <nav aria-label=\"Spec pages\">\n"
+            + '      <ul class="prev-next">\n'
+            + prev_link
+            + '      <li><a href="../specs.html">Specs index</a></li>\n'
+            + next_link
+            + "      </ul>\n    </nav>\n"
+            + f'    <p><a href="{GITHUB_SPECS}/{name}">Source: {name}</a></p>\n'
+        )
+        (specs_dir / f"{stem}.html").write_text(
+            page_shell(
+                title=re.sub(r"[`*_]", "", title_md),
+                desc=f"saniwalens spec {name}, mirrored from docs/specs/.",
+                body=body,
+                base="..",
+                current="Specs",
+            ),
+            encoding="utf-8",
+        )
+    print(f"wrote site/specs.html + {len(infos)} spec pages")
 
 
 def find_binary() -> Path | None:
@@ -377,8 +426,8 @@ def build_cli() -> None:
         page_shell(
             title="CLI reference",
             desc="saniwalens CLI reference, generated from --help output.",
-            nav=NAV_CLI,
             body=body,
+            current="CLI",
         ),
         encoding="utf-8",
     )

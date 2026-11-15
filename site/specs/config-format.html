@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Config Format Specification — saniwalens</title>
+  <meta name="description" content="saniwalens spec config-format.md, mirrored from docs/specs/.">
+  <meta name="color-scheme" content="light dark">
+  <script>
+    try {
+      document.querySelector('meta[name="color-scheme"]').content =
+        localStorage.getItem("color-scheme") ?? "light dark";
+    } catch (e) {}
+  </script>
+  <link rel="stylesheet" href="../styles.css">
+  <script defer src="../app.js"></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <header class="site-header">
+    <div class="header-inner">
+      <a class="site-logo" href="../index.html" aria-label="saniwalens home">saniwalens</a>
+
+      <nav class="site-nav" aria-label="Primary">
+        <button
+          class="menu-button"
+          type="button"
+          popovertarget="site-menu"
+          popovertargetaction="toggle"
+          aria-controls="site-menu"
+        >
+          <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+            <path d="M2 4h12M2 8h12M2 12h12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" fill="none"/>
+          </svg>
+          <span>Menu</span>
+        </button>
+
+        <ul id="site-menu" class="site-menu" popover="auto">
+          <li><a href="../index.html">Home</a></li>
+          <li><a href="../docs.html">Docs</a></li>
+          <li><a href="../specs.html" aria-current="page">Specs</a></li>
+          <li><a href="../cli.html">CLI</a></li>
+          <li><a href="https://github.com/armaniacs/saniwalens">GitHub</a></li>
+          <li><a href="../index_ja.html">日本語</a></li>
+        </ul>
+      </nav>
+
+      <button
+        id="theme-toggle"
+        class="theme-toggle"
+        type="button"
+        aria-live="polite"
+      >
+        <span class="theme-toggle-dark" aria-hidden="true">☾</span>
+        <span class="theme-toggle-light" aria-hidden="true">☀</span>
+        <span class="visually-hidden" id="theme-toggle-label">Switch to dark theme</span>
+      </button>
+    </div>
+  </header>
+
+  <main id="main">
+    <h1>Config Format Specification</h1>
+<p>This spec catalogues what the <strong>adapter layer</strong> knows about Claude Code **config</p>
+<p>files** ― the catalog half of the catalog×usage model (<code>architecture.md</code>). Its</p>
+<p>sibling <code>session-format.md</code> covers the usage half. Reading config answers *what</p>
+<p>is installed and what does it cost to have installed*; the transcript answers</p>
+<p>*what was actually used*. Only the adapter uses the paths and shapes below</p>
+<p>(<code>.claude/rules/format-isolation.md</code>). Like <code>session-format.md</code>, this is a spec</p>
+<p>that tracks an upstream format and will drift.</p>
+<blockquote>
+<p>Observed against a real <code>~/.claude/</code> tree on 2026-06-14, Claude Code <code>2.1.x</code>.</p>
+</blockquote>
+<h2>Where config lives</h2>
+<p>Config exists at two scopes; project overrides/extends global. The adapter scans</p>
+<p>both and records the scope on each surface ― <code>Scope::Project</code> carries the</p>
+<p>owning project&#x27;s normalized slug, since many projects coexist in one catalog</p>
+<p>(<code>storage.md</code>). Which project roots get scanned is driven by the *sessions*:</p>
+<p><code>analyze</code> collects the distinct real session roots (<code>session-format.md</code>, the</p>
+<p>records&#x27; <code>cwd</code>, worktree folded onto the parent checkout) and hands them to the</p>
+<p>one traversal, <code>catalog_surfaces(harness, roots)</code> (<code>adapter::harness</code>), which</p>
+<p>builds each scope, owns the symlink-dedup set, and skips a root that was deleted</p>
+<p>since its sessions ran. What a harness scans is its <strong>site rows</strong> ― a path plus</p>
+<p>a loader (<code>Site</code>, listed per harness as <code>global_sites</code> / <code>project_sites</code>) ― so a</p>
+<p>new surface kind is a row and a loader, never an edit to that traversal;</p>
+<p><code>read_project_surfaces</code> in <code>adapter/config.rs</code> remains the direct single-root</p>
+<p>entry point the tests drive.</p>
+<p><code>~/.claude</code> throughout this document means <code>$CLAUDE_CONFIG_DIR</code> when that</p>
+<p>variable names a non-empty path, because Claude Code relocates the whole tree</p>
+<p>under it (<code>claude_config_dir</code> in <code>adapter/config.rs</code>); an empty value is</p>
+<p>treated as unset.</p>
+<div class="table-scroll" role="region" tabindex="0">
+<table><thead><tr>
+<th scope="col">Surface kind</th>
+<th scope="col">Global</th>
+<th scope="col">Project-local</th>
+</tr></thead><tbody>
+<tr>
+<th scope="row"><code>skill</code></th scope="row">
+<td><code>~/.claude/skills/&lt;name&gt;/SKILL.md</code> (+ plugin skills)</td>
+<td><code>&lt;project&gt;/.claude/skills/&lt;name&gt;/SKILL.md</code></td>
+</tr>
+<tr>
+<th scope="row"><code>rule</code></th scope="row">
+<td><code>~/.claude/rules/**/*.md</code></td>
+<td><code>&lt;project&gt;/.claude/rules/**/*.md</code></td>
+</tr>
+<tr>
+<th scope="row"><code>agent</code></th scope="row">
+<td><code>~/.claude/agents/&lt;name&gt;.md</code></td>
+<td><code>&lt;project&gt;/.claude/agents/&lt;name&gt;.md</code></td>
+</tr>
+<tr>
+<th scope="row"><code>claude_md</code></th scope="row">
+<td><code>~/.claude/CLAUDE.md</code></td>
+<td><code>&lt;project&gt;/CLAUDE.md</code>, <code>AGENTS.md</code>, nested</td>
+</tr>
+<tr>
+<th scope="row"><code>hook</code>, <code>permission</code></th scope="row">
+<td><code>~/.claude/settings.json</code></td>
+<td><code>&lt;project&gt;/.claude/settings.json</code>, <code>settings.local.json</code></td>
+</tr>
+<tr>
+<th scope="row"><code>mcp_server</code></th scope="row">
+<td><code>~/.claude/mcp.json</code> (top-level <code>mcpServers</code>)</td>
+<td><code>&lt;project&gt;/.mcp.json</code></td>
+</tr>
+<tr>
+<th scope="row"><code>mcp_tool</code></th scope="row">
+<td>the MCP server&#x27;s advertised tool schemas (dynamic ― see below)</td>
+<td>―</td>
+</tr>
+</tbody></table></div>
+<p><code>CLAUDE.md</code> and <code>AGENTS.md</code> are two names for the same always-on context, and a</p>
+<p>repo serving both agent conventions typically ships <code>AGENTS.md</code> as a symlink to</p>
+<p><code>CLAUDE.md</code>. Claude Code injects that content once, so the adapter weighs the</p>
+<p>file once: <code>read_claude_md_surfaces</code> resolves each candidate and keeps the first</p>
+<p>surface per resolved file, which reports the pair under <code>CLAUDE.md</code>. The</p>
+<p>deduplication key is the resolved path, not the content ― two independently</p>
+<p>maintained files are two real always-on surfaces even when their text coincides.</p>
+<p>Getting this wrong doubles the project&#x27;s <code>startup_full</code> total, which is what the</p>
+<p>always-on floor is reconciled against (<code>surfaces.md</code>).</p>
+<p>A <code>CLAUDE.md</code> can pull other files in with <code>@path</code> imports, and Claude Code</p>
+<p>injects the imported text every session just like the file&#x27;s own. Weighing only</p>
+<p>the importing file would book a config made of import lines as nearly free and</p>
+<p>push the real always-on cost into the unattributed residual ― exactly inverting</p>
+<p>the &quot;always-on heavy&quot; wedge for such a layout. So <code>read_claude_md_surfaces</code></p>
+<p>follows the imports and records **each imported file as its own <code>claude_md</code></p>
+<p>surface** (<code>startup_full</code>, id <code>@&lt;path&gt;</code>, relative to the importing top-level</p>
+<p>file&#x27;s directory when inside it), rather than folding the text into the</p>
+<p>importer: the cost lands on the file that carries it, and each one can be pruned</p>
+<p>on its own. The import rules mirror Claude Code&#x27;s documented behavior: an import</p>
+<p>is an <code>@</code> opening a whitespace-separated word (an e-mail address is not one),</p>
+<p>ignored inside code spans and fenced blocks; it resolves relative to the</p>
+<p>importing file, <code>~/</code> to the home directory, or as an absolute path; recursion</p>
+<p>stops after five hops; an import naming no readable file is skipped. Every</p>
+<p>import is further confined to the importing top-level file&#x27;s directory: a</p>
+<p>target canonicalizing outside it (<code>..</code> escapes, absolute paths, <code>~/</code>, symlink</p>
+<p>hops) is skipped with a warning, so a cloned repo cannot pull host files</p>
+<p>outside its root into the catalog. The same</p>
+<p>resolved-path deduplication as the <code>AGENTS.md</code> symlink applies across the whole</p>
+<p>import graph ― a file imported twice, imported in a cycle, or imported *and*</p>
+<p>read as a top-level <code>AGENTS.md</code> is weighed once, with the top-level name</p>
+<p>winning.</p>
+<p><code>settings.json</code> carries two surface kinds at once: <code>permissions</code> (allow/deny) and</p>
+<p><code>hooks</code> (matcher → command); the adapter splits one file into several surfaces.</p>
+<p>Each hook entry becomes a <code>hook</code> surface named <code>Event:Matcher</code> (bare event when</p>
+<p>no matcher is declared) ― the same name the transcript stamps on a firing</p>
+<p>(<code>hookName</code>), so firings join their surface. Firing is measured per window;</p>
+<p>a hook with no firings reads unused, which is exactly the dead-hook signal</p>
+<p>(<code>docs/specs/surfaces.md</code>).</p>
+<p>MCP servers are <strong>not</strong> in <code>settings.json</code> ― they live in a separate <code>mcp.json</code></p>
+<p>(verified: <code>~/.claude/settings.json</code> has no <code>mcpServers</code> key; <code>~/.claude/mcp.json</code></p>
+<p>holds them). If a future Claude Code version also accepts inline <code>mcpServers</code> in</p>
+<p><code>settings.json</code>, the adapter reads both ― but <code>mcp.json</code> is the source of record.</p>
+<h2>Static cost</h2>
+<p>A surface&#x27;s <strong>static cost</strong> is the token weight of the text it injects into the</p>
+<p>model&#x27;s context. It is computed by the adapter from the file content; it is an</p>
+<p><strong>approximation</strong> (a ranking signal, not a billing figure ― <code>architecture.md</code>),</p>
+<p>so a tokenizer that is *close* and *consistent* is sufficient. The exact</p>
+<p>tokenizer is a tuning choice (see open question) injected into the weighing</p>
+<p>function, not hard-wired.</p>
+<p>A surface is weighed <strong>twice</strong>, because one number cannot answer both questions</p>
+<p>a reader has. <code>static_tokens</code> is the whole definition ― for a skill or agent,</p>
+<p>what its body costs *when invoked*. <code>startup_tokens</code> is the part every session</p>
+<p>pays for merely having it installed: the whole text for an always-on file, the</p>
+<p>frontmatter <code>description</code> alone for a skill or agent, nothing for a body that</p>
+<p>waits (a path-conditional rule), and *unknown* for an MCP server. Only the second</p>
+<p>is what deleting the surface reclaims, and reporting the first as if it were the</p>
+<p>saving is a promise the deletion cannot keep (<code>surfaces.md</code>, &quot;Ranking by what</p>
+<p>removal actually saves&quot;). Only the description text is weighed for the startup</p>
+<p>half ― the listing scaffolding Claude Code wraps it in is upstream&#x27;s, not the</p>
+<p>config&#x27;s, so counting it would be inventing a figure.</p>
+<p><strong>Static cost is a config-side estimate, not a measured runtime component.</strong> The</p>
+<p>transcript exposes only a *total* prompt size, never a per-surface breakdown</p>
+<p>(<code>session-format.md</code>), so <code>static_tokens</code> is never validated, on its own, as the</p>
+<p>exact number of tokens that surface contributes at runtime. Two things are</p>
+<p>therefore inherently uncertain and must not be presented as fact: the tool&#x27;s</p>
+<p>tokenizer differs from Claude Code&#x27;s, and whether the text is actually injected</p>
+<p>(and when) depends on <code>load_mode</code>, which is itself an assumption (below). The one</p>
+<p>honest empirical check the tool *can* make is reconciliation against observed</p>
+<p>context ― see <code>surfaces.md</code> &quot;always-on reconciliation&quot;. Reports present</p>
+<p><code>static_tokens</code> as an estimate, labelled as such.</p>
+<h3>Load mode is an assumption table, versioned against the release</h3>
+<p><code>load_mode</code> is <strong>not read from anything</strong> ― it is the adapter&#x27;s model of how</p>
+<p>Claude Code loads each surface kind, maintained as a table pinned to the observed</p>
+<p>release (<code>2.1.x</code>). It drives the most consequential wedge (&quot;always-on heavy&quot;) and</p>
+<p>its suggested moves, so when the table is wrong every wedge built on it is wrong.</p>
+<p>It belongs in the &quot;will drift&quot; caveat alongside field names: a release that, say,</p>
+<p>lazy-loads <code>CLAUDE.md</code> invalidates the <code>startup_full</code> assumption silently. The</p>
+<p>stored enum uses underscores (<code>startup_full</code>, <code>path_conditional</code>, …); the prose</p>
+<p>labels below use hyphens for readability ― same values.</p>
+<p>What counts as &quot;the injected text&quot; differs by surface and is the crucial</p>
+<p>distinction for optimization, because <strong>always-on cost is the expensive kind</strong>:</p>
+<div class="table-scroll" role="region" tabindex="0">
+<table><thead><tr>
+<th scope="col">Load mode</th>
+<th scope="col">Surfaces</th>
+<th scope="col">Cost character</th>
+</tr></thead><tbody>
+<tr>
+<th scope="row"><strong>startup-full</strong></th scope="row">
+<td><code>CLAUDE.md</code> / <code>AGENTS.md</code>, memory index</td>
+<td>Paid every session, unconditionally. The heaviest tax.</td>
+</tr>
+<tr>
+<th scope="row"><strong>startup-description</strong></th scope="row">
+<td><code>skill</code>, <code>agent</code></td>
+<td>Only the frontmatter <code>description</code> is loaded at startup; the body is on-demand. Cheap to keep, unless many accumulate.</td>
+</tr>
+<tr>
+<th scope="row"><strong>path-conditional</strong></th scope="row">
+<td><code>rule</code> with <code>paths:</code> frontmatter</td>
+<td>Loaded only when a matching file is in play; full body when it fires.</td>
+</tr>
+<tr>
+<th scope="row"><strong>on-demand</strong></th scope="row">
+<td><code>skill</code> / <code>agent</code> body, when invoked</td>
+<td>Paid per use ― this is what <code>events</code> measures at runtime.</td>
+</tr>
+<tr>
+<th scope="row"><strong>tool-schema</strong></th scope="row">
+<td><code>mcp_tool</code>, built-in tools</td>
+<td>The tool definition injected into the system/tool context. MCP schemas can be very large (the deferred-tool catalog).</td>
+</tr>
+</tbody></table></div>
+<p>So a surface records its <strong>full static cost</strong> (whole definition), its</p>
+<p><strong>startup cost</strong> (the slice of that text the load mode actually injects at</p>
+<p>session start, per the table above), and its <strong>load mode</strong>, and the report</p>
+<p>distinguishes &quot;always-on&quot; tax from &quot;per-use&quot; cost. A skill whose body is huge but</p>
+<p>is invoked daily is a *body-trim* candidate; a <code>CLAUDE.md</code> that is huge is an</p>
+<p>*always-on* candidate; a rule that never fires is a *delete* candidate.</p>
+<h2>The MCP tool-schema hard case</h2>
+<p><code>mcp_tool</code> static cost is the one surface whose definition is not a file on disk</p>
+<p>― the schema is advertised by the running MCP server. Reading it statically</p>
+<p>requires either connecting to the server or finding a cached schema. The adapter</p>
+<p>treats this as best-effort: when a schema source is available it is weighed like</p>
+<p>any other surface; when it is not, the surface is recorded with an unknown</p>
+<p>static cost and the report flags it rather than reporting a false zero. The</p>
+<p>runtime side is unaffected ― MCP <code>tool_use</code> still shows up in <code>events</code>.</p>
+<p><strong>Investigated and found unmeasurable from local data (the honest limit).</strong> None</p>
+<p>of the would-be sources exist: <code>mcp.json</code> holds only launch config</p>
+<p>(<code>command</code>/<code>args</code>), no schema; there is no on-disk cache of advertised tool</p>
+<p>definitions (<code>mcp-needs-auth-cache.json</code> is auth state only); the transcript</p>
+<p>exposes only the tools that were *used*, so a server&#x27;s full tool count is unknown</p>
+<p>and an *unused* server ― exactly the one worth flagging ― yields no signal at</p>
+<p>all. A differential (baseline with vs without a server) is also unavailable</p>
+<p>because every project shares the global <code>mcp.json</code>. A &quot;tool count × average</p>
+<p>schema size&quot; estimate would therefore be a fabrication for the cases that matter,</p>
+<p>so the tool does <strong>not</strong> invent one. The honest substitutes it does provide:</p>
+<p>per-server <strong>call frequency</strong> (<code>inventory</code> / <code>waste</code> ― a used vs dead-weight</p>
+<p>signal), and the <strong>residual</strong> in <code>overhead</code> (an upper bound on system + built-in</p>
+<p>tools + all MCP schemas combined). Isolating one server&#x27;s cost would need runtime</p>
+<p>schema access this tool does not have.</p>
+<h2>Frontmatter the adapter reads</h2>
+<ul>
+<li><code>skill</code>: <code>name</code>, <code>description</code> (the startup-loaded text ― its weight *is*</li>
+</ul>
+<p><code>startup_tokens</code>), <code>argument-hint</code>, <code>allowed-tools</code>. Body length feeds the</p>
+<p>on-demand cost. The description is read defensively: a plain or quoted scalar,</p>
+<p>or a block scalar folded from its indented continuation lines; a skill</p>
+<p>declaring none simply costs nothing at startup.</p>
+<ul>
+<li><code>rule</code>: <code>paths:</code> (the load condition) and, when present, <code>description:</code>.</li>
+</ul>
+<p>Presence of <code>paths:</code> sets the load mode to path-conditional; its absence means</p>
+<p>the rule is always loaded. <code>description:</code> is frequently absent on real rules ―</p>
+<p>read it defensively, do not rely on it.</p>
+<ul>
+<li><code>agent</code>: <code>name</code>, <code>description</code> (weighed like a skill&#x27;s), <code>tools</code>, <code>model</code>.</li>
+</ul>
+<p>Parsing is defensive: unknown frontmatter keys are ignored, missing optional</p>
+<p>keys tolerated. A surface the adapter cannot fully parse is still catalogued</p>
+<p>(with what it could read) rather than dropped ― an unparseable surface is itself</p>
+<p>worth surfacing.</p>
+<h2>Identity and the join</h2>
+<p>Each surface has a stable <code>(kind, id)</code> ― e.g. <code>(skill, git-commit)</code>,</p>
+<p><code>(mcp_server, playwright)</code>, <code>(rule, spec-sync)</code>. The same identity is what</p>
+<p><code>events</code> carries in <code>surface_kind</code> / <code>surface_id</code>, so the catalog×usage join</p>
+<p>(<code>surfaces.md</code>) is a key match. The adapter is responsible for deriving the same</p>
+<p>id from both sides: the <code>skill</code> surface id from the directory/<code>name</code>, and the</p>
+<p>matching event id from the invoked skill name in the transcript.</p>
+<p>A surface can exist at both global and project scope under one <code>(kind, id)</code>. The</p>
+<p>catalog stores both rows (keyed with <code>scope</code>), but the join resolves to the</p>
+<p><strong>effective surface</strong> ― project shadows global, mirroring Claude Code&#x27;s own</p>
+<p>override ― so one event never matches two surface rows. The full contract is in</p>
+<p><code>storage.md</code> &quot;Surface identity, scope, and the effective join&quot;.</p>
+    <nav aria-label="Spec pages">
+      <ul class="prev-next">
+      <li><a rel="prev" href="./session-format-kilocode.html">← Session Format Specification — kilocode</a></li>
+      <li><a href="../specs.html">Specs index</a></li>
+      <li><a rel="next" href="./config-format-opencode.html">Config Format Specification — opencode →</a></li>
+      </ul>
+    </nav>
+    <p><a href="https://github.com/armaniacs/saniwalens/blob/main/docs/specs/config-format.md">Source: config-format.md</a></p>
+
+  </main>
+
+  <footer>
+    <p>
+      saniwalens — MIT. Source on <a href="https://github.com/armaniacs/saniwalens">GitHub</a>.
+    </p>
+  </footer>
+</body>
+</html>
