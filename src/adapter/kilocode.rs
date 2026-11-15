@@ -604,6 +604,21 @@ pub fn read_project_surfaces(
     )
 }
 
+/// Neutralize untrusted `kilo.json` instructions text at the log boundary
+/// (CWE-117): control bytes interpolated into the skip warning would forge
+/// log lines (CR/LF) or restyle the terminal (ESC). Every control codepoint
+/// (C0, DEL, C1 — covers `\r`, `\n`, `0x1b`) becomes U+FFFD; confinement and
+/// the skip itself are unchanged, only the displayed text is scrubbed.
+/// Scope note: exotic Unicode display controls (Cf bidi overrides, Zl/Zp
+/// line/paragraph separators) pass through — they cannot forge log lines or
+/// ANSI sequences through this sink. Terminal-sink sweep: 87 sites
+/// triaged, this sink the only finding, 0 remaining.
+fn neutralize_log_text(text: &str) -> String {
+    text.chars()
+        .map(|c| if c.is_control() { '\u{FFFD}' } else { c })
+        .collect()
+}
+
 /// The files in `kilo.json`'s `instructions[]`, as always-on instruction
 /// surfaces — the measured project pointed the array at a gitignored
 /// `AGENTS.local.md` and the measured global config at an absolute path, and
@@ -647,8 +662,9 @@ pub(crate) fn read_kilo_instructions(
             };
             if !resolved.starts_with(&root) {
                 eprintln!(
-                    "warning: skipping kilo.json instructions entry outside {}: {entry} — out-of-root files stay uncatalogued",
-                    root.display()
+                    "warning: skipping kilo.json instructions entry outside {}: {} — out-of-root files stay uncatalogued",
+                    root.display(),
+                    neutralize_log_text(entry)
                 );
                 return None;
             }
@@ -869,6 +885,19 @@ mod tests {
             std::process::id(),
             std::thread::current().id()
         ))
+    }
+
+    #[test]
+    fn neutralize_log_text_replaces_control_bytes_with_u_fffd() {
+        // Cross-platform pin of the CWE-117 gate (the E2E hostile-filename
+        // test is unix-only since Windows forbids control bytes in file
+        // names): no control byte may pass through to the stderr warning.
+        assert_eq!(neutralize_log_text("plain entry"), "plain entry");
+        assert_eq!(
+            neutralize_log_text("a\r\nb\x1b[31mc\x7fd\u{80}e\u{9f}f"),
+            "a\u{FFFD}\u{FFFD}b\u{FFFD}[31mc\u{FFFD}d\u{FFFD}e\u{FFFD}f"
+        );
+        assert_eq!(neutralize_log_text("日本語の計画"), "日本語の計画");
     }
 
     #[test]
