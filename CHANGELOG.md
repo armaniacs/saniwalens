@@ -8,6 +8,14 @@
 バージョンは [Semantic Versioning](https://semver.org/lang/ja/) に従う。
 各節はタグ間差分単位で記録する（ブランチ差分単位ではない）。
 
+## [Unreleased]
+
+### Fixed
+
+- kilocode 指示ファイルの項目名が stderr 警告にそのまま出て、改行の
+  偽造や ANSI による端末表示の改変が可能だった問題を修正。制御文字は
+  U+FFFD に置換される (VULN-001)。
+
 ## [0.6.2] - 2026-11-15
 
 ### Added
