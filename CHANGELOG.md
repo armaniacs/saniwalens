@@ -8,6 +8,27 @@
 バージョンは [Semantic Versioning](https://semver.org/lang/ja/) に従う。
 各節はタグ間差分単位で記録する（ブランチ差分単位ではない）。
 
+## [0.6.2] - 2026-11-15
+
+### Added
+
+- advisor 言語の決定ソース表示。`--verbose` 実行時に言語を決めた層
+  (flag / config / locale / default) を stderr に一行出す。通常出力と
+  JSON はバイト同一のまま。
+- `LANGUAGE` 環境変数による advisor 言語解決。`LC_ALL` > `LC_MESSAGES` >
+  `LANG` がいずれも非日本語・非 `C` のとき、先頭要素のサブタグが `ja`
+  なら日本語になる。実効ロケールが `C` / `POSIX` のときは無視する
+  (gettext の C 優先に準拠)。
+- `cleanup --list` の未読エントリ件数の可視化。読めないエントリがあっても
+  一覧は失敗せず、件数を stderr 警告に出す。通常出力と JSON はバイト同一。
+
+### Fixed
+
+- `--apply` 拒否メッセージの harness 群表記を launch 表からの生成にし、
+  将来の headless 追加で陳腐化しないようにした。空プラン失敗の文言から
+  存在しない raw log 削除の主張を除いた。
+- symlink 非解決方針の doc を `sized_path` に正典化し、他3箇所を参照に留めた。
+
 ## [0.6.1] - 2026-11-12
 
 ### Added
