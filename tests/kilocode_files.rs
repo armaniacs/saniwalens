@@ -105,7 +105,7 @@ fn hostile_instructions_entry_is_neutralized_in_stderr_warning() {
     let dir = scratch_dir("log-neutralization");
     let outside = dir.join("outside");
     std::fs::create_dir_all(&outside).unwrap();
-    let hostile_name = "pwned\nFORGED-VULN-001-LINE\n\x1b[31mRED-VULN-001\x1b[0m.md";
+    let hostile_name = "pwned\r\nFORGED-VULN-001-LINE\n\x1b[31mRED-VULN-001\x1b[0m.md";
     std::fs::write(outside.join(hostile_name), "host secret").unwrap();
     let entry = format!("{}/{}", outside.display(), hostile_name);
 
