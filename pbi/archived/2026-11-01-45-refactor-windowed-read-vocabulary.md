@@ -59,22 +59,22 @@ Scenario: help はバイト同一である
 ```
 
 ## 受け入れ基準
-- [ ] `WindowedRead` を `sess` / `format` / `window` に痩せさせ、
+- [x] `WindowedRead` を `sess` / `format` / `window` に痩せさせ、
   `ScopedRead { read: WindowedRead, filter: ScopeFilter }` を追加する
-- [ ] `open`（scope 無し）と `open_scoped`（scope -> format -> period -> store の順）に
+- [x] `open`（scope 無し）と `open_scoped`（scope -> format -> period -> store の順）に
   分ける。順序は module 内で構成的に固定し、arm の行順に戻さない
-- [ ] mod.rs の 4 unscoped arm は `open`、4 scoped arm は `ScopedRead` の分割代入にする
-- [ ] `ViewFormat`（`TableMarkdownJson` / `TableJson`）を report.rs の `Format` の隣に置き、
+- [x] mod.rs の 4 unscoped arm は `open`、4 scoped arm は `ScopedRead` の分割代入にする
+- [x] `ViewFormat`（`TableMarkdownJson` / `TableJson`）を report.rs の `Format` の隣に置き、
   doctor 専用の `open_scoped_table_json` 入口で store open 前に判定する
-- [ ] doctor の markdown 失敗は `unknown --format 'markdown' (table|json)` で、
+- [x] doctor の markdown 失敗は `unknown --format 'markdown' (table|json)` で、
   analyze / freshness / db 作成の前に起きる
-- [ ] `--scope` の e2e を 1 本、doctor markdown の失敗順序 e2e を 1 本追加する
-- [ ] 9 view の `--help` は byte 同一（`tests/cli_help_golden.rs` を更新しない）
-- [ ] `src/cli/mod.rs` の行数は ±0。動く場合は tripwire budget を spec 更新と同一 PR で
+- [x] `--scope` の e2e を 1 本、doctor markdown の失敗順序 e2e を 1 本追加する
+- [x] 9 view の `--help` は byte 同一（`tests/cli_help_golden.rs` を更新しない）
+- [x] `src/cli/mod.rs` の行数は ±0。動く場合は tripwire budget を spec 更新と同一 PR で
   再測定する（zero-slack）
-- [ ] spec 更新: cli.md の open 列挙と doctor の値域、architecture.md の report 行。
+- [x] spec 更新: cli.md の open 列挙と doctor の値域、architecture.md の report 行。
   CHANGELOG は履歴ファイルのため更新しない
-- [ ] fmt/clippy/対象テスト/フルスイートが green
+- [x] fmt/clippy/対象テスト/フルスイートが green
 
 ## テスト戦略（t_wadaスタイル）
 
@@ -135,10 +135,10 @@ Scenario: help はバイト同一である
 - `--format md` の alias は現状受理されない。挙動を変えない
 
 ## Definition of Done
-- [ ] 全BDDシナリオが自動テストとして実装されパスする
-- [ ] unscoped view が filter を受け取らない型になっている
-- [ ] doctor の markdown が store open 前に失敗する
-- [ ] help 9 view が byte 同一、mod.rs 行数 ±0
-- [ ] fmt、clippy、フルスイートが green
-- [ ] コードレビュー完了（task review + 最終 review）
-- [ ] cli.md、architecture.md 更新済み（CHANGELOG は不変）
+- [x] 全BDDシナリオが自動テストとして実装されパスする
+- [x] unscoped view が filter を受け取らない型になっている
+- [x] doctor の markdown が store open 前に失敗する
+- [x] help 9 view が byte 同一、mod.rs 行数 ±0
+- [x] fmt、clippy、フルスイートが green
+- [x] コードレビュー完了（task review + 最終 review）
+- [x] cli.md、architecture.md 更新済み（CHANGELOG は不変）

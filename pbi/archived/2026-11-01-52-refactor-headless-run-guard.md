@@ -51,22 +51,22 @@ Scenario: 成功路は不変である
 ```
 
 ## 受け入れ基準
-- [ ] `src/cli/headless.rs` を新設し、`run_headless` と `HeadlessRun` guard を移す
-- [ ] `HeadlessRun` は stop / child / heartbeat を所有し、Drop で
+- [x] `src/cli/headless.rs` を新設し、`run_headless` と `HeadlessRun` guard を移す
+- [x] `HeadlessRun` は stop / child / heartbeat を所有し、Drop で
   「stop -> child.kill + wait -> heartbeat.join」の順に後始末する。
   Drop 内で panic しない（すべて `let _ =`）
-- [ ] `src/cli/mod.rs` は `pub mod headless;` と `deliver` からの 1 呼び出しだけを持つ。
+- [x] `src/cli/mod.rs` は `pub mod headless;` と `deliver` からの 1 呼び出しだけを持つ。
   `run_headless` の移動で mod.rs は約 77 行縮むため、同一 PR で budget を実測して
   下げる（zero-slack、spec 更新と同一 PR）
-- [ ] エラーに raw log のパスを `with_context` で載せる
-- [ ] Red テスト 3 本: 走行中失敗で child が死ぬ、spawn 失敗で beat が残らない、
+- [x] エラーに raw log のパスを `with_context` で載せる
+- [x] Red テスト 3 本: 走行中失敗で child が死ぬ、spawn 失敗で beat が残らない、
   成功路の status/log が不変
-- [ ] guard の単体テスト: Drop で thread が止まり、child が reap される
-- [ ] spec 更新: `docs/specs/harness.md` の headless 節に「every exit stops the beat
+- [x] guard の単体テスト: Drop で thread が止まり、child が reap される
+- [x] spec 更新: `docs/specs/harness.md` の headless 節に「every exit stops the beat
   and reaps the child; a failure names the raw log」、`docs/specs/cli.md` の
   delivery 節に run log の寿命
-- [ ] `tests/cli_mod_line_budget.rs` の budget を実測値に更新する
-- [ ] fmt/clippy/対象テスト/フルスイートが green
+- [x] `tests/cli_mod_line_budget.rs` の budget を実測値に更新する
+- [x] fmt/clippy/対象テスト/フルスイートが green
 
 ## テスト戦略（t_wadaスタイル）
 
@@ -123,10 +123,10 @@ Scenario: 成功路は不変である
 - ① のテスト変更と衝突しないよう、① の後に rebase する
 
 ## Definition of Done
-- [ ] 全BDDシナリオが自動テストとして実装されパスする
-- [ ] 失敗経路で child が reap され、beat が残らない
-- [ ] 成功路の status/log が不変
-- [ ] mod.rs の budget が実測値に更新されている
-- [ ] fmt、clippy、フルスイートが green
-- [ ] コードレビュー完了（task review + 最終 review）
-- [ ] harness.md と cli.md 更新済み
+- [x] 全BDDシナリオが自動テストとして実装されパスする
+- [x] 失敗経路で child が reap され、beat が残らない
+- [x] 成功路の status/log が不変
+- [x] mod.rs の budget が実測値に更新されている
+- [x] fmt、clippy、フルスイートが green
+- [x] コードレビュー完了（task review + 最終 review）
+- [x] harness.md と cli.md 更新済み

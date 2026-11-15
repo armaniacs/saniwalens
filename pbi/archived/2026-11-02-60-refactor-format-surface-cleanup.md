@@ -57,29 +57,29 @@ Scenario: 宣言の重複が消える
 ```
 
 ## 受け入れ基準
-- [ ] `src/cli/window.rs` に `FormatArgs { #[arg(long)] format: Option<String> }` を
+- [x] `src/cli/window.rs` に `FormatArgs { #[arg(long)] format: Option<String> }` を
   追加し、3 値の文面を 1 箇所に持つ。trend を含む windowed view と `sql` の重複宣言を
   置き換える。doctor は 2 値の文面を自分の宣言として残す（group に入れない）
-- [ ] 7 view の文面を `Output format: table | markdown | json.` に直す
-- [ ] doctor の引数型を 2 値へ狭める。ただし clap の `value_parser` を入れると拒否
+- [x] 7 view の文面を `Output format: table | markdown | json.` に直す
+- [x] doctor の引数型を 2 値へ狭める。ただし clap の `value_parser` を入れると拒否
   message が clap の文面に変わり、`tests/windowed_flag_vocabulary.rs:188-225` の
   exact pin（`unknown --format 'markdown' (table|json)`）が壊れる。推奨: runtime の
   `ViewFormat::TableJson::parse` を入口に残したまま、doctor 以降に渡す型を解決済みの
   `Format` に狭める（`open_scoped_table_json` の中で parse を終える）。clap の
   value_parser を選ぶなら拒否 message の pin と `docs/specs/cli.md:202-208` を同一 PR
   で書き換える
-- [ ] `tests/cli_help_golden.rs` の 7 定数を新しい bytes に更新する。`PINNED` は 9 の
+- [x] `tests/cli_help_golden.rs` の 7 定数を新しい bytes に更新する。`PINNED` は 9 の
   まま。差分が `--format` の行（と桁揃えの連動）だけであることを PR 本文に記録する
-- [ ] flatten の位置を現在の `--format` の位置（`period` の直後、`read` の前）に合わせ
+- [x] flatten の位置を現在の `--format` の位置（`period` の直後、`read` の前）に合わせ
   る。位置が動くと help の行順が変わり、golden の差分が意図より広がる
-- [ ] `tests/windowed_flag_vocabulary.rs:159-186`（7 view が markdown を受ける）と
+- [x] `tests/windowed_flag_vocabulary.rs:159-186`（7 view が markdown を受ける）と
   `:188-225`（doctor の拒否）が green のまま
-- [ ] `docs/specs/cli.md` を同期する。`:98` の usage synopsis、`:202-208` の doctor の
+- [x] `docs/specs/cli.md` を同期する。`:98` の usage synopsis、`:202-208` の doctor の
   語彙。`:178` の「every command」と 7 view の文面が一致することを確認
-- [ ] `sql` の文面をどうするかを決める。推奨: 同じ 1 行修正を同 PR で行う（`sql` は
+- [x] `sql` の文面をどうするかを決める。推奨: 同じ 1 行修正を同 PR で行う（`sql` は
   `parse_format` を通り json を受ける: `src/cli/mod.rs:382-386`）。除外するなら理由を
   PR 本文に 1 行
-- [ ] fmt、clippy、フルスイートが green
+- [x] fmt、clippy、フルスイートが green
 
 ## テスト戦略（t_wadaスタイル）
 
@@ -158,11 +158,11 @@ Scenario: 宣言の重複が消える
   いる。`FormatArgs` を足しても `--last` の位置は変わらないので影響しない
 
 ## Definition of Done
-- [ ] 全BDDシナリオが自動テストとして実装されパスする
-- [ ] 7 view の help が 3 値を表示する
-- [ ] `--format` の宣言が shared 1 箇所 + doctor 1 箇所
-- [ ] doctor の拒否 message が不変（または spec と pin を同時更新）
-- [ ] golden の差分が意図した行だけ（PR 本文に記録）
-- [ ] cli.md の 3 箇所が同期している
-- [ ] fmt、clippy、フルスイートが green
-- [ ] コードレビュー完了
+- [x] 全BDDシナリオが自動テストとして実装されパスする
+- [x] 7 view の help が 3 値を表示する
+- [x] `--format` の宣言が shared 1 箇所 + doctor 1 箇所
+- [x] doctor の拒否 message が不変（または spec と pin を同時更新）
+- [x] golden の差分が意図した行だけ（PR 本文に記録）
+- [x] cli.md の 3 箇所が同期している
+- [x] fmt、clippy、フルスイートが green
+- [x] コードレビュー完了

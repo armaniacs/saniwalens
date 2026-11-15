@@ -48,21 +48,21 @@ Scenario: stop 後は終了だけを観測する
 ```
 
 ## 受け入れ基準
-- [ ] 第 1 相を「最初の beat が 0」->「3 を足す」->「count が 3 の beat まで
+- [x] 第 1 相を「最初の beat が 0」->「3 を足す」->「count が 3 の beat まで
   deadline 付き drain」の 2 段観測に置き換える。`>= 3` ではなく `== 3`
-- [ ] 第 2 相から `stragglers <= 1` を削除し、disconnect と join だけを assert する。
+- [x] 第 2 相から `stragglers <= 1` を削除し、disconnect と join だけを assert する。
   「stop 後の送信は高々 1 個」は構造不変条件として heartbeat の doc と spec に書く
-- [ ] 2 秒の magic number を `OBSERVE` 定数にまとめ、poll に対して十分大きいことを
+- [x] 2 秒の magic number を `OBSERVE` 定数にまとめ、poll に対して十分大きいことを
   1 行で書く
-- [ ] テスト冒頭に「beat はサンプル列であり、個数と時刻はテストの制御下に無い」旨を
+- [x] テスト冒頭に「beat はサンプル列であり、個数と時刻はテストの制御下に無い」旨を
   2 行書く
-- [ ] panic 時に stop する RAII ガード（`StopOnDrop`）を追加する
-- [ ] 実装（`src/cli/heartbeat.rs`）は変更しない
-- [ ] spec 更新: `docs/specs/harness.md:189-191` の「pinned by a test」を正確にする
+- [x] panic 時に stop する RAII ガード（`StopOnDrop`）を追加する
+- [x] 実装（`src/cli/heartbeat.rs`）は変更しない
+- [x] spec 更新: `docs/specs/harness.md:189-191` の「pinned by a test」を正確にする
   （cadence は未 pin、stop は終了を pin、高々 1 個は構造不変条件）
-- [ ] 変異確認: count を 1 回だけ読む変異体で新テストが赤、注入遅延 0/6/20/30ms で
+- [x] 変異確認: count を 1 回だけ読む変異体で新テストが赤、注入遅延 0/6/20/30ms で
   200 回緑
-- [ ] fmt/clippy/対象テスト/フルスイートが green
+- [x] fmt/clippy/対象テスト/フルスイートが green
 
 ## テスト戦略（t_wadaスタイル）
 
@@ -119,9 +119,9 @@ Scenario: stop 後は終了だけを観測する
 - 実装の cadence/poll を本番比にするとテストが 30 秒かかる。縮小定数のまま
 
 ## Definition of Done
-- [ ] 全BDDシナリオが自動テストとして実装されパスする
-- [ ] 注入遅延 0/6/20/30ms で 200 回緑
-- [ ] cached-count 変異体で赤
-- [ ] fmt、clippy、フルスイートが green
-- [ ] コードレビュー完了（task review + 最終 review）
-- [ ] harness.md と heartbeat doc 更新済み
+- [x] 全BDDシナリオが自動テストとして実装されパスする
+- [x] 注入遅延 0/6/20/30ms で 200 回緑
+- [x] cached-count 変異体で赤
+- [x] fmt、clippy、フルスイートが green
+- [x] コードレビュー完了（task review + 最終 review）
+- [x] harness.md と heartbeat doc 更新済み

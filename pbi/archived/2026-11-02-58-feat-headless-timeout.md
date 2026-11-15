@@ -52,26 +52,26 @@ Scenario: 期限を指定しなければ従来どおり
 ```
 
 ## 受け入れ基準
-- [ ] 既定の扱いを決めて spec に書く。推奨: 既定は無期限（既存の byte identity と
+- [x] 既定の扱いを決めて spec に書く。推奨: 既定は無期限（既存の byte identity と
   「正当に長い run を殺さない」を守る）、`--timeout <span>` を opt-in。既定を入れる
   場合は値を help・`docs/specs/cli.md`・`docs/specs/harness.md` に明記
-- [ ] `optimize` に `--timeout <span>` を追加する（`src/cli/mod.rs:223-246` の
+- [x] `optimize` に `--timeout <span>` を追加する（`src/cli/mod.rs:223-246` の
   `Command::Optimize`）。値は `30s` / `10m` / `2h` の形。`--last` の span parser とは
   別物（`7d` を受けたくない）なので専用の小さな parser を置き、単体テストを付ける
-- [ ] 期限は spawn から exit までの全体に掛ける。行読みがブロックするので、読み取りを
+- [x] 期限は spawn から exit までの全体に掛ける。行読みがブロックするので、読み取りを
   thread に移して `recv_timeout` で待つ（heartbeat と同じ構造）。期限超過は
   stop -> `wait_for_status` ではなく kill + wait -> error
-- [ ] error は `raw output: <path>`（既存の prefix）と期限値を含む
-- [ ] `--timeout` は headless のみ有効（`--print` と interactive では無効）であること
+- [x] error は `raw output: <path>`（既存の prefix）と期限値を含む
+- [x] `--timeout` は headless のみ有効（`--print` と interactive では無効）であること
   を help か spec に書く
-- [ ] `docs/specs/harness.md:156-166` に「期限超過は kill + wait + raw log、孫 process
+- [x] `docs/specs/harness.md:156-166` に「期限超過は kill + wait + raw log、孫 process
   は残り得る」を明記。`docs/specs/cli.md:469-475` の synopsis に `[--timeout <span>]`
-- [ ] Red テスト: 超過（1s で 2 秒以内に Err）/ 期限内（status と log が不変）/
+- [x] Red テスト: 超過（1s で 2 秒以内に Err）/ 期限内（status と log が不変）/
   無指定（期限なし）。`tests/headless_timeout.rs` を新設するか `tests/headless_seam.rs`
   に足す
-- [ ] kill 後の `wait` を必ず呼ぶ（zombie を残さない）。Drop の二重 kill が起きない
+- [x] kill 後の `wait` を必ず呼ぶ（zombie を残さない）。Drop の二重 kill が起きない
   こと（`wait_for_status` が成功したら child を None にする既存契約 `:143-157`）
-- [ ] fmt、clippy、フルスイートが green
+- [x] fmt、clippy、フルスイートが green
 
 ## テスト戦略（t_wadaスタイル）
 
@@ -141,10 +141,10 @@ Scenario: 期限を指定しなければ従来どおり
 - `--print` は process を起動しないので期限は無関係。混ぜない
 
 ## Definition of Done
-- [ ] 全BDDシナリオが自動テストとして実装されパスする
-- [ ] 期限超過で child が reap され、error が raw log と期限を名指す
-- [ ] 期限内の run の status / log / 出力が不変
-- [ ] `--timeout` 無指定の挙動が不変（既定の判断が spec にある）
-- [ ] harness.md と cli.md 更新済み（孫 process の残余リスクを含む）
-- [ ] fmt、clippy、フルスイートが green
-- [ ] コードレビュー完了
+- [x] 全BDDシナリオが自動テストとして実装されパスする
+- [x] 期限超過で child が reap され、error が raw log と期限を名指す
+- [x] 期限内の run の status / log / 出力が不変
+- [x] `--timeout` 無指定の挙動が不変（既定の判断が spec にある）
+- [x] harness.md と cli.md 更新済み（孫 process の残余リスクを含む）
+- [x] fmt、clippy、フルスイートが green
+- [x] コードレビュー完了

@@ -47,12 +47,12 @@ Scenario: thrash 定数が一箇所から参照される
 ```
 
 ## 受け入れ基準
-- [ ] stuck / failures / inventory / usage_by_time / savings の組立が `core/findings.rs` の pure 経由に一本化される
-- [ ] `src/cli/mod.rs` の重複定義 (1429-1433, 1534, 1544, 2041, 2139, 2180, 2289-2303) が削除または薄い委譲になる
-- [ ] `views/prompts.rs:193-224` から FS 再読込が除去され adapter/store 経由になる
-- [ ] thrash 定数が `core/thrash.rs` に集約され二重定義がない
-- [ ] 既存試験 `core/findings.rs:360-604` が緑で parity 試験が追加される
-- [ ] CLI 出力の差分がない (parity 確認)
+- [x] stuck / failures / inventory / usage_by_time / savings の組立が `core/findings.rs` の pure 経由に一本化される
+- [x] `src/cli/mod.rs` の重複定義 (1429-1433, 1534, 1544, 2041, 2139, 2180, 2289-2303) が削除または薄い委譲になる
+- [x] `views/prompts.rs:193-224` から FS 再読込が除去され adapter/store 経由になる
+- [x] thrash 定数が `core/thrash.rs` に集約され二重定義がない
+- [x] 既存試験 `core/findings.rs:360-604` が緑で parity 試験が追加される
+- [x] CLI 出力の差分がない (parity 確認)
 
 ## テスト戦略 (t-wada)
 - 単体 (多数): `core/findings.rs` の pure 組立に対する synthetic fixture 試験 (stuck 境界、split_friction 分岐、measurable 判定、bucket 境界、savings 分岐)。既存 :360-604 を拡張
@@ -77,11 +77,11 @@ Scenario: thrash 定数が一箇所から参照される
 - `docs/specs/` の該当 spec があれば同変更で更新する
 
 ## Definition of Done
-- [ ] 全 BDD シナリオが自動試験として緑
-- [ ] 重複定義がなく単一組立になっている
-- [ ] pure-join-placement 則 (結合・分類・判定の pure ロジックは core に置き views/cli/adapter の描画・取得層に置かない) を DoD としレビューで確認した
-- [ ] コードレビュー完了
-- [ ] ドキュメント更新済み
+- [x] 全 BDD シナリオが自動試験として緑
+- [x] 重複定義がなく単一組立になっている
+- [x] pure-join-placement 則 (結合・分類・判定の pure ロジックは core に置き views/cli/adapter の描画・取得層に置かない) を DoD としレビューで確認した
+- [x] コードレビュー完了
+- [x] ドキュメント更新済み
 
 ## 検証記録 (B4統合・2026-11-09)
 

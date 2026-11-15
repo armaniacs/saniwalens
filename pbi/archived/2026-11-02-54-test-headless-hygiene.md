@@ -59,25 +59,25 @@ Scenario: stop 尊重と早期自滅を区別する
 ```
 
 ## 受け入れ基準
-- [ ] `raw output: ` の prefix を module 定数 1 つにし、`run_headless` の context
+- [x] `raw output: ` の prefix を module 定数 1 つにし、`run_headless` の context
   （`src/cli/headless.rs:196`）と test 用の読み取りが同じ定数を使う。format 側と
   reader 側が別リテラルだと、prefix を変えたときに静かに壊れる
-- [ ] error から log path を取り出す module-private helper（`#[cfg(test)]`）を足す。
+- [x] error から log path を取り出す module-private helper（`#[cfg(test)]`）を足す。
   `anyhow::Error` の `chain()` を走査し、prefix で始まる context から `PathBuf` を
   返す。`to_string()` は最外の context しか返さないので使わない
-- [ ] helper 自身に単体テストを 1 本置く（prefix を変えたら赤くなる形）。加えて
+- [x] helper 自身に単体テストを 1 本置く（prefix を変えたら赤くなる形）。加えて
   `err.chain()` に log path が無い場合に `None` を返すことを 1 本
-- [ ] 失敗系 2 本（`:269`、`:306`）が helper で log を取り出し、`remove_file` する。
+- [x] 失敗系 2 本（`:269`、`:306`）が helper で log を取り出し、`remove_file` する。
   成功路（`:334`）と同じ後片付けに揃える
-- [ ] `tests/headless_seam.rs` の `StopOnDrop` が `Arc<AtomicBool>` +
+- [x] `tests/headless_seam.rs` の `StopOnDrop` が `Arc<AtomicBool>` +
   `Option<JoinHandle<()>>` + deadline を持つ。Drop は stop -> `is_finished()` を
   deadline まで回す -> `join()`。deadline 超過は stderr に 1 行だけ出し、panic しない
-- [ ] テスト本体は handle を `StopOnDrop` に渡し、`:184` の明示 join を guard に寄せる
+- [x] テスト本体は handle を `StopOnDrop` に渡し、`:184` の明示 join を guard に寄せる
   （二重 join しない）。stop を立てる箇所（`:169`）も guard 経由にする
-- [ ] 早期自滅の検知: 対象 beat（count == 3）の後にさらに 1 beat 届くことを確認して
+- [x] 早期自滅の検知: 対象 beat（count == 3）の後にさらに 1 beat 届くことを確認して
   から stop を立てる。この 1 beat が「loop はまだ生きている」の証拠になる
-- [ ] 既存の `dropping_the_guard_stops_the_beat`（`src/cli/headless.rs:338`）は不変
-- [ ] `cargo test --lib`、`cargo test --test headless_seam`、fmt、clippy が green。
+- [x] 既存の `dropping_the_guard_stops_the_beat`（`src/cli/headless.rs:338`）は不変
+- [x] `cargo test --lib`、`cargo test --test headless_seam`、fmt、clippy が green。
   `$TMPDIR` の `saniwalens-run*` がテスト前後で増えないこと
 
 ## テスト戦略（t_wadaスタイル）
@@ -151,9 +151,9 @@ Scenario: stop 尊重と早期自滅を区別する
   消えている」に寄せ、ディレクトリ全体の比較は手動確認にする
 
 ## Definition of Done
-- [ ] 全BDDシナリオが自動テストとして実装されパスする
-- [ ] 失敗系 2 本が log を残さない
-- [ ] `StopOnDrop` が panic 時に deadline 内で join する
-- [ ] stop 尊重と早期自滅を区別する assert が入っている
-- [ ] fmt、clippy、フルスイートが green
-- [ ] コードレビュー完了
+- [x] 全BDDシナリオが自動テストとして実装されパスする
+- [x] 失敗系 2 本が log を残さない
+- [x] `StopOnDrop` が panic 時に deadline 内で join する
+- [x] stop 尊重と早期自滅を区別する assert が入っている
+- [x] fmt、clippy、フルスイートが green
+- [x] コードレビュー完了

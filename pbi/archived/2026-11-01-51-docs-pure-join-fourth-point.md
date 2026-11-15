@@ -54,22 +54,22 @@ Scenario: 移動後は tripwire が core 在を確認する
 ```
 
 ## 受け入れ基準
-- [ ] rule の同一 PR 契約を 4 点に拡張する。4 点目は「tripwire の移動側を反転する。
+- [x] rule の同一 PR 契約を 4 点に拡張する。4 点目は「tripwire の移動側を反転する。
   定数の空化・エントリ削除・墓標コメントでの充足は禁止。廃止する場合は rule と
   architecture の 2 つの prose 錨を同時に書き換える」
-- [ ] `tests/pure_join_placement.rs` の失敗メッセージを `MOVE_REMEDY` 定数に切り出し、
+- [x] `tests/pure_join_placement.rs` の失敗メッセージを `MOVE_REMEDY` 定数に切り出し、
   4 点を含める。定数文言自体を assert する
-- [ ] `FIRST_PATTERN_JOINS` が空でないことを assert するテストを追加する
-- [ ] rule が名指すシンボル集合と `FIRST_PATTERN_JOINS` のシンボル集合が一致する
+- [x] `FIRST_PATTERN_JOINS` が空でないことを assert するテストを追加する
+- [x] rule が名指すシンボル集合と `FIRST_PATTERN_JOINS` のシンボル集合が一致する
   ことを assert する（片方向の contains だけでなく）
-- [ ] tripwire doc を 4 点に同期する
-- [ ] `docs/specs/architecture.md` の pure-join 節に、移動時に検知器の方向が反転する
+- [x] tripwire doc を 4 点に同期する
+- [x] `docs/specs/architecture.md` の pure-join 節に、移動時に検知器の方向が反転する
   事実を 1 段落で書く
-- [ ] 台帳の deferral note に 4 点目を追記する
-- [ ] 移動側テスト（T2）は本 PBI では反転しない。移動 PR まで現行のまま
-- [ ] spec-sync の陳腐化（"even while they still sit in src/store.rs"）は別候補として
+- [x] 台帳の deferral note に 4 点目を追記する
+- [x] 移動側テスト（T2）は本 PBI では反転しない。移動 PR まで現行のまま
+- [x] spec-sync の陳腐化（"even while they still sit in src/store.rs"）は別候補として
   記録し、本 PBI では触らない
-- [ ] fmt/clippy/`cargo test --test pure_join_placement` が green
+- [x] fmt/clippy/`cargo test --test pure_join_placement` が green
 
 ## テスト戦略（t_wadaスタイル）
 
@@ -125,10 +125,10 @@ Scenario: 移動後は tripwire が core 在を確認する
 - `.claude/rules/*.md` も docs-charset の対象。`―` を使い、em dash を避ける
 
 ## Definition of Done
-- [ ] 全BDDシナリオが自動テストとして実装されパスする
-- [ ] 定数非空と集合一致が pin されている
-- [ ] 失敗メッセージが 4 点を教える
-- [ ] rule / architecture / 台帳が 4 点に同期している
-- [ ] fmt、clippy、フルスイートが green
-- [ ] コードレビュー完了（task review + 最終 review）
-- [ ] docs-charset clean
+- [x] 全BDDシナリオが自動テストとして実装されパスする
+- [x] 定数非空と集合一致が pin されている
+- [x] 失敗メッセージが 4 点を教える
+- [x] rule / architecture / 台帳が 4 点に同期している
+- [x] fmt、clippy、フルスイートが green
+- [x] コードレビュー完了（task review + 最終 review）
+- [x] docs-charset clean

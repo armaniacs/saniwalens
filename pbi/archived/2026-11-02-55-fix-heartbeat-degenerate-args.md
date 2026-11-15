@@ -54,22 +54,22 @@ Scenario: 正常な値と既定は不変
 ```
 
 ## 受け入れ基準
-- [ ] `Beat::new(cadence: Duration, poll: Duration) -> Result<Self>` を足し、
+- [x] `Beat::new(cadence: Duration, poll: Duration) -> Result<Self>` を足し、
   `Duration::ZERO` を両 field で拒否する。message は field 名（cadence / poll）と
   受け付ける下限を含める
-- [ ] `Beat::default()` は production 定数から同じ構築経路を通る。`new` が `Result` な
+- [x] `Beat::default()` は production 定数から同じ構築経路を通る。`new` が `Result` な
   ので、`Default` は定数が非ゼロであることを 1 箇所で表明する（`expect` を置くなら
   message に「production constants are non-zero」と書き、test で守る）
-- [ ] `fast_beat()`（`src/cli/headless.rs:261-266`）を `Beat::new(...).expect(...)` に
+- [x] `fast_beat()`（`src/cli/headless.rs:261-266`）を `Beat::new(...).expect(...)` に
   置き換える
-- [ ] seam の入口を 1 つにする。`heartbeat::spawn` が `Beat` を受け取る形に変え、
+- [x] seam の入口を 1 つにする。`heartbeat::spawn` が `Beat` を受け取る形に変え、
   `src/cli/headless.rs:93` と `tests/headless_seam.rs:128` を更新する（代替:
   signature を変えず doc と `debug_assert!` で非ゼロを契約化。推奨は型で受ける方）
-- [ ] 赤くなる test 3 本: cadence 0 / poll 0 / 既定の非ゼロ一致
-- [ ] `docs/specs/harness.md:156-166` の headless 節に「cadence と poll は非ゼロ」を 1 句
-- [ ] clamp 案（0 を最小値に丸める）は採らない。静かに別の走り方を許すと、seam の誤用
+- [x] 赤くなる test 3 本: cadence 0 / poll 0 / 既定の非ゼロ一致
+- [x] `docs/specs/harness.md:156-166` の headless 節に「cadence と poll は非ゼロ」を 1 句
+- [x] clamp 案（0 を最小値に丸める）は採らない。静かに別の走り方を許すと、seam の誤用
   が観測できなくなる。採る場合は spec と test で丸めを明示する
-- [ ] fmt、clippy、`cargo test --lib`、`cargo test --test headless_seam` が green
+- [x] fmt、clippy、`cargo test --lib`、`cargo test --test headless_seam` が green
 
 ## テスト戦略（t_wadaスタイル）
 
@@ -140,9 +140,9 @@ Scenario: 正常な値と既定は不変
   `src/cli/mod.rs` の再輸出は不要（`cli::headless::Beat` で届く）
 
 ## Definition of Done
-- [ ] 全BDDシナリオが自動テストとして実装されパスする
-- [ ] 0 の cadence / poll が構築時に拒否される
-- [ ] seam の入口が 1 つ（`Beat`）になっている
-- [ ] harness.md に非ゼロの契約が 1 句入っている
-- [ ] fmt、clippy、対象テスト、フルスイートが green
-- [ ] コードレビュー完了
+- [x] 全BDDシナリオが自動テストとして実装されパスする
+- [x] 0 の cadence / poll が構築時に拒否される
+- [x] seam の入口が 1 つ（`Beat`）になっている
+- [x] harness.md に非ゼロの契約が 1 句入っている
+- [x] fmt、clippy、対象テスト、フルスイートが green
+- [x] コードレビュー完了

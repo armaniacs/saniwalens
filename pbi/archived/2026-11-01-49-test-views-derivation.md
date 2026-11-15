@@ -48,23 +48,23 @@ Scenario: window.rs と mod.rs の列挙が消える
 ```
 
 ## 受け入れ基準
-- [ ] `tests/cli_help_golden.rs` の VIEWS + HELP を `PINNED: [(&str, &str); 9]` の
+- [x] `tests/cli_help_golden.rs` の VIEWS + HELP を `PINNED: [(&str, &str); 9]` の
   1 表に畳み、zip を削除する
-- [ ] `windowed_views()` を `Cli::command().get_subcommands()` から導出する。
+- [x] `windowed_views()` を `Cli::command().get_subcommands()` から導出する。
   `--last` を持つ subcommand を windowed と判定し、`build()` は呼ばない
   （build すると help subcommand が混入する）
-- [ ] PINNED の名前集合と導出集合の一致、および件数 9 を assert する。
+- [x] PINNED の名前集合と導出集合の一致、および件数 9 を assert する。
   失敗メッセージに missing / stale と `cli-view-addition.md` への参照を含める
-- [ ] `src/cli/window.rs` の `SINGLE_WINDOW_VIEWS` を削除し、テスト内で導出する。
+- [x] `src/cli/window.rs` の `SINGLE_WINDOW_VIEWS` を削除し、テスト内で導出する。
   trend も loop に入れ、`windowed_flags` の Trend アームを使う
-- [ ] `src/cli/mod.rs:3002-3012` の 3 つ目の配列を削除し、同じ導出に置き換える。
+- [x] `src/cli/mod.rs:3002-3012` の 3 つ目の配列を削除し、同じ導出に置き換える。
   mod.rs は約 8 行縮むため、同一 PR で budget を実測して下げる（zero-slack）
-- [ ] 失敗メッセージを定数化し、文面自体を単体 assert する
-- [ ] 任意: `WHOLE_HISTORY = ["analyze", "sql", "optimize"]` との partition assert を
+- [x] 失敗メッセージを定数化し、文面自体を単体 assert する
+- [x] 任意: `WHOLE_HISTORY = ["analyze", "sql", "optimize"]` との partition assert を
   足し、windowed と whole-history が全 subcommand を覆うことを pin する
-- [ ] 契約更新: `.claude/rules/cli-view-addition.md` に capture 1 行 + tripwire、
+- [x] 契約更新: `.claude/rules/cli-view-addition.md` に capture 1 行 + tripwire、
   `docs/specs/cli.md:74` / `:181` / `:209` の nine/eight を数え直すか数を使わない文にする
-- [ ] `cargo test --test cli_help_golden` と `cargo test --lib cli::window` が green
+- [x] `cargo test --test cli_help_golden` と `cargo test --lib cli::window` が green
 
 ## テスト戦略（t_wadaスタイル）
 
@@ -124,10 +124,10 @@ Scenario: window.rs と mod.rs の列挙が消える
 - budget を下げ忘れると slack が残る。zero-slack 規範を守る
 
 ## Definition of Done
-- [ ] 全BDDシナリオが自動テストとして実装されパスする
-- [ ] 3 つの手書き列挙が 0 になり、clap 導出 + PINNED 1 表になっている
-- [ ] PINNED から 1 行消す / 合成 view 追加で赤
-- [ ] budget が実測値に更新されている
-- [ ] fmt、clippy、フルスイートが green
-- [ ] コードレビュー完了（task review + 最終 review）
-- [ ] cli-view-addition.md と cli.md 更新済み
+- [x] 全BDDシナリオが自動テストとして実装されパスする
+- [x] 3 つの手書き列挙が 0 になり、clap 導出 + PINNED 1 表になっている
+- [x] PINNED から 1 行消す / 合成 view 追加で赤
+- [x] budget が実測値に更新されている
+- [x] fmt、clippy、フルスイートが green
+- [x] コードレビュー完了（task review + 最終 review）
+- [x] cli-view-addition.md と cli.md 更新済み

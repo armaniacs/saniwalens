@@ -59,18 +59,18 @@ Scenario: core が store を import しない
 ```
 
 ## 受け入れ基準
-- [ ] `src/core/trend.rs` を新設し、`SkillUsage` / `KindRollup` / `TwoWindow<T>` /
+- [x] `src/core/trend.rs` を新設し、`SkillUsage` / `KindRollup` / `TwoWindow<T>` /
   `TrendWindowAggregates` / `SkillDelta` / `skill_deltas` / `kind_pairs` を定義する。
   `src/core.rs` に `pub mod trend;` を足す
-- [ ] `src/store.rs` から 5 型 + 1 関数（`SkillUsage` / `KindRollup` / `TwoWindow` /
+- [x] `src/store.rs` から 5 型 + 1 関数（`SkillUsage` / `KindRollup` / `TwoWindow` /
   `TrendWindowAggregates` / `SkillDelta` / `skill_deltas`）の定義を削除し、
   `crate::core::trend` から import する。`kind_pairs` は `cli/trend.rs` から移す。
   `Store::trend_aggregates` / `trend_window_aggregates` の戻り値は core の型にする
-- [ ] `src/cli/trend.rs` の import を `crate::core::trend` に張り替え、`kind_pairs` の
+- [x] `src/cli/trend.rs` の import を `crate::core::trend` に張り替え、`kind_pairs` の
   定義を削除して core から import する。`crate::store` の分析型 import を残さない
-- [ ] `skill_deltas_order_by_the_largest_absolute_delta` を core の module へ移す。
+- [x] `skill_deltas_order_by_the_largest_absolute_delta` を core の module へ移す。
   `two_window_aggregation_splits_events_between_the_windows` は store に残す
-- [ ] `tests/pure_join_placement.rs`:
+- [x] `tests/pure_join_placement.rs`:
   (a) `FIRST_PATTERN_JOINS` を 5 エントリにし、`kind_pairs` を足す
   (b) `the_enumerated_joins_still_sit_in_store_rs` を「core に在り、store に無い」へ
   反転する
@@ -80,16 +80,16 @@ Scenario: core が store を import しない
   `src/cli/trend.rs` が `crate::store` の分析型を import しない
   (e) `docs/specs/architecture.md` の「still sit in `store.rs`」が消えていることを
   assert する（prose の外部 pin）
-- [ ] 4 点を同一 PR で更新する:
+- [x] 4 点を同一 PR で更新する:
   (a) `.claude/rules/pure-join-placement.md` の Rules と「The 1st pattern, named」を
   core 在 + store 不在へ、(b) `docs/specs/architecture.md:99` の core row と
   `:139-152` の段落、(c) 台帳の deferral note を「移動済み（日付・PR）」へ、
   (d) tripwire の move side
-- [ ] `docs/specs/cli.md` に trend の型が store 由来と読める記述があれば core に直す。
+- [x] `docs/specs/cli.md` に trend の型が store 由来と読める記述があれば core に直す。
   現状は型名を出していないため変更不要であることを確認して PR に記録する
-- [ ] trend の JSON が byte 同一、markdown / 表の既存出力テストが green、fmt、
+- [x] trend の JSON が byte 同一、markdown / 表の既存出力テストが green、fmt、
   clippy、フルスイートが green
-- [ ] 旧 PBI 61 の「単独着手しない」「trigger 待ち」の記述を、trigger 発火済みの
+- [x] 旧 PBI 61 の「単独着手しない」「trigger 待ち」の記述を、trigger 発火済みの
   本再スコープに置き換える。台帳の RICE と順位も更新する
 
 ## テスト戦略（t_wadaスタイル）

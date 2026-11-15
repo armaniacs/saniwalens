@@ -59,24 +59,24 @@ Scenario: 位置主張を書き戻すと赤になる
 ```
 
 ## 受け入れ基準
-- [ ] `.claude/rules/spec-sync.md:28` から「even while they still sit in
+- [x] `.claude/rules/spec-sync.md:28` から「even while they still sit in
   `src/store.rs`」を削除する。行は 1 行のまま（表のセルなので折り返すと表が壊れる）。
   pure shaping の concern と owning spec（`docs/specs/cli.md`）は残し、「位置は
   `.claude/rules/pure-join-placement.md` と `docs/specs/architecture.md` が所有する」
   を 1 句で指す
-- [ ] `tests/pure_join_placement.rs` に assert を 1 本足す。既存
+- [x] `tests/pure_join_placement.rs` に assert を 1 本足す。既存
   `the_spec_carries_the_placement_rule`（`:212-224`）を拡張するか、新 test
   `the_spec_sync_map_does_not_pin_the_join_location` を置く。内容は (a) spec-sync を
   読み、(b) 「Pure shaping of fetched rows」を含む行を特定し、(c) その行に
   `src/store.rs` と `still` が現れないこと、(d) `docs/specs/cli.md` を名指すこと
-- [ ] 代替案 B を選ぶ場合のみ: 5 点目として spec-sync を rule の remedy に足し、
+- [x] 代替案 B を選ぶ場合のみ: 5 点目として spec-sync を rule の remedy に足し、
   `tests/pure_join_placement.rs:41-66`（MOVE_REMEDY）と `:170-210`
   （the_move_remedy_names_all_four_points）を 5 点に更新し、`docs/specs/architecture.md`
   の 4 点段落も 5 点にする。B を選んだら台帳に理由を 1 行残す
-- [ ] 推奨は A（4 点に揃える）。spec-sync の表は concern の振り分けが仕事で、位置は
+- [x] 推奨は A（4 点に揃える）。spec-sync の表は concern の振り分けが仕事で、位置は
   他の行も書いていない。位置を 3 箇所に増やすと移動のたびに 3 箇所を直すことになる
-- [ ] pure-join の移動そのものは実行しない（PBI 61 の範囲）
-- [ ] `cargo test --test pure_join_placement`、fmt、clippy が green
+- [x] pure-join の移動そのものは実行しない（PBI 61 の範囲）
+- [x] `cargo test --test pure_join_placement`、fmt、clippy が green
 
 ## テスト戦略（t_wadaスタイル）
 
@@ -138,9 +138,9 @@ Scenario: 位置主張を書き戻すと赤になる
   architecture が所有する」と所有を明示すれば、責務の移動であって情報の欠落ではない
 
 ## Definition of Done
-- [ ] 全BDDシナリオが自動テストとして実装されパスする
-- [ ] `.claude/rules/spec-sync.md:28` が位置主張を含まない
-- [ ] tripwire が spec-sync の位置主張の再混入を検知する
-- [ ] PBI 61 の move PR が spec-sync を触らずに済む
-- [ ] fmt、clippy、フルスイートが green
-- [ ] コードレビュー完了
+- [x] 全BDDシナリオが自動テストとして実装されパスする
+- [x] `.claude/rules/spec-sync.md:28` が位置主張を含まない
+- [x] tripwire が spec-sync の位置主張の再混入を検知する
+- [x] PBI 61 の move PR が spec-sync を触らずに済む
+- [x] fmt、clippy、フルスイートが green
+- [x] コードレビュー完了

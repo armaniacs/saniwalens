@@ -54,24 +54,24 @@ Scenario: 適用外の metric は table で省略され JSON で理由を持つ
 ```
 
 ## 受け入れ基準
-- [ ] `Baseline<T> { Absent, Measured(T) }` と
+- [x] `Baseline<T> { Absent, Measured(T) }` と
   `UnavailableReason { NoBaseline, NotApplicable }` を trend.rs に追加する
-- [ ] `Metric<T>` に `reason: Option<UnavailableReason>` を持たせ、
+- [x] `Metric<T>` に `reason: Option<UnavailableReason>` を持たせ、
   `direction == Unavailable` と `reason.is_some()` の同値を不変条件にする
-- [ ] metric 構築を 1 関数に集約し、`Baseline::Measured(0)` / `Measured(0.0)` は
+- [x] metric 構築を 1 関数に集約し、`Baseline::Measured(0)` / `Measured(0.0)` は
   表示精度 0.1 で比較する。`Absent` だけが `NoBaseline` になる
-- [ ] point kind の適用外は `NotApplicable` + `delta: None` とし、table の行省略は
+- [x] point kind の適用外は `NotApplicable` + `delta: None` とし、table の行省略は
   payload の reason を読んで決める（PBI 30 の決定を維持）
-- [ ] `TrendPayload` に `previous_window_is_empty()` と `has_no_baseline()` を追加し、
+- [x] `TrendPayload` に `previous_window_is_empty()` と `has_no_baseline()` を追加し、
   note と preamble の理由文を payload 経由にする。`trend()` は `agg` を直読みしない
-- [ ] JSON の各 metric に `"reason": null | "no_baseline" | "not_applicable"` を追加し、
+- [x] JSON の各 metric に `"reason": null | "no_baseline" | "not_applicable"` を追加し、
   `tests/trend_json_golden.rs` を再 pin する。present-zero の第 2 ケースを追加する
-- [ ] table の present-zero 回帰テストを追加する（`tests/trend_markdown.rs`）
-- [ ] 理由文を「その行の previous side に比較対象が無い」と行スコープで明示し、
+- [x] table の present-zero 回帰テストを追加する（`tests/trend_markdown.rs`）
+- [x] 理由文を「その行の previous side に比較対象が無い」と行スコープで明示し、
   kind / skill / totals の 3 ケースを 1 文で覆う
-- [ ] spec 更新: cli.md の trend 行、machine contract の `reason`、Reporting honesty の
+- [x] spec 更新: cli.md の trend 行、machine contract の `reason`、Reporting honesty の
   n/a 条項。PBI 39 の byte-identity 基準がこの入力クラスで反転したことを台帳に記録する
-- [ ] `store.rs` / `report.rs` / `mod.rs` は触らない。fmt/clippy/フルスイート green
+- [x] `store.rs` / `report.rs` / `mod.rs` は触らない。fmt/clippy/フルスイート green
 
 ## テスト戦略（t_wadaスタイル）
 
@@ -132,10 +132,10 @@ Scenario: 適用外の metric は table で省略され JSON で理由を持つ
 - `Measured(0.0)` の float 比較は表示精度 0.1 を維持する
 
 ## Definition of Done
-- [ ] 全BDDシナリオが自動テストとして実装されパスする
-- [ ] present-zero の table が比較を出し、n/a に潰れない
-- [ ] JSON が `reason` を返し、golden が再 pin されている
-- [ ] note と理由文が payload 経由で、`agg` 直読みが無い
-- [ ] fmt、clippy、フルスイートが green
-- [ ] コードレビュー完了（task review + 最終 review）
-- [ ] cli.md 更新済み（CHANGELOG は不変）
+- [x] 全BDDシナリオが自動テストとして実装されパスする
+- [x] present-zero の table が比較を出し、n/a に潰れない
+- [x] JSON が `reason` を返し、golden が再 pin されている
+- [x] note と理由文が payload 経由で、`agg` 直読みが無い
+- [x] fmt、clippy、フルスイートが green
+- [x] コードレビュー完了（task review + 最終 review）
+- [x] cli.md 更新済み（CHANGELOG は不変）

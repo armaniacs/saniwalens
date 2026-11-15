@@ -57,10 +57,10 @@ Scenario: 比較期間指定が従来通り解決される
 
 ## DoD
 
-- [ ] BDD 2 シナリオ以上が自動テストで担保される
-- [ ] help capture テストがグリーン (出力バイト同一)
-- [ ] `cargo test` / `cargo clippy` がグリーン
-- [ ] 重複構造体・重複パースが残存しない
+- [x] BDD 2 シナリオ以上が自動テストで担保される
+- [x] help capture テストがグリーン (出力バイト同一)
+- [x] `cargo test` / `cargo clippy` がグリーン
+- [x] 重複構造体・重複パースが残存しない（`PeriodArgs` / `PairArgs` は help 文言保持の薄いシムとして残置。parse は `parse_window` に一本化済み）
 
 ## 検証記録 (B4統合・2026-11-09)
 

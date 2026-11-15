@@ -31,11 +31,11 @@ Scenario: 不一致時は stamp を中断する
 
 ## 受け入れ基準
 
-- [ ] 読取後に再 stat し、不一致なら stamp しない（claude / opencode / kilocode 共通）
-- [ ] 追記分が次回 analyze で取り込まれる
-- [ ] 一致時は従来通り stamp し、余計な再 ingest をしない
-- [ ] 不一致検出の単体テストが全 harness 分ある
-- [ ] 既存の skip / stamp テストが壊れない
+- [x] 読取後に再 stat し、不一致なら stamp しない（claude / opencode / kilocode 共通）
+- [x] 追記分が次回 analyze で取り込まれる
+- [x] 一致時は従来通り stamp し、余計な再 ingest をしない
+- [x] 不一致検出の単体テストが全 harness 分ある
+- [x] 既存の skip / stamp テストが壊れない
 
 ## テスト戦略（t_wada 式・合成 fixture）
 
@@ -56,8 +56,8 @@ Scenario: 不一致時は stamp を中断する
 
 ## Definition of Done
 
-- [ ] 全 BDD シナリオが自動テストとしてパスする
-- [ ] `cargo fmt` / `clippy` / `test` が green
+- [x] 全 BDD シナリオが自動テストとしてパスする
+- [x] `cargo fmt` / `clippy` / `test` が green
 
 ## 検証記録 (B1統合・2026-11-09)
 

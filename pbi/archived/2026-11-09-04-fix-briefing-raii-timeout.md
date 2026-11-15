@@ -33,12 +33,12 @@ Scenario: ハングしたadvisorは既定timeoutで打ち切られる
 
 ## 受け入れ基準
 
-- [ ] briefing tempの削除が `Drop` ベース (RAII guard) になり、正常/異常系の全パスで残留しない
-- [ ] `timeout: Option` の既定値が有限 (例: 60s) になり、`None` の無限待ちが明示指定時のみ
-- [ ] `headless.rs:140-171,381-398` の待機がdeadline付きになる
-- [ ] `abandon_reader` パスでもguardが有効、またはdetach後の回収方針が明記される
-- [ ] 既存テスト (`mod.rs` / `headless.rs` 関連) が全て通る
-- [ ] C9とコンフリクトしない (C9適用後にrebase/適用)
+- [x] briefing tempの削除が `Drop` ベース (RAII guard) になり、正常/異常系の全パスで残留しない
+- [x] `timeout: Option` の既定値が有限 (例: 60s) になり、`None` の無限待ちが明示指定時のみ
+- [x] `headless.rs:140-171,381-398` の待機がdeadline付きになる
+- [x] `abandon_reader` パスでもguardが有効、またはdetach後の回収方針が明記される
+- [x] 既存テスト (`mod.rs` / `headless.rs` 関連) が全て通る
+- [x] C9とコンフリクトしない (C9適用後にrebase/適用)
 
 ## テスト戦略 (t-wada, Outside-In)
 
@@ -57,10 +57,10 @@ Scenario: ハングしたadvisorは既定timeoutで打ち切られる
 
 ## Definition of Done
 
-- [ ] 全BDDシナリオが自動テストとしてパスする
-- [ ] guard drop test + timeout plumbing testが追加されパスする
-- [ ] `clippy` / 関連既存テストが通る
-- [ ] 残留temp・無限待ちの再発チェック手順が本ファイルに記載済み
+- [x] 全BDDシナリオが自動テストとしてパスする
+- [x] guard drop test + timeout plumbing testが追加されパスする
+- [x] `clippy` / 関連既存テストが通る
+- [x] 残留temp・無限待ちの再発チェック手順が本ファイルに記載済み
 
 ## 検証記録 (B2統合・2026-11-09)
 

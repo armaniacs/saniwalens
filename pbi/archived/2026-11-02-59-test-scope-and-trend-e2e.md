@@ -61,26 +61,26 @@ Scenario: filter を All に固定した変異で赤
 ```
 
 ## 受け入れ基準
-- [ ] `tests/windowed_flag_vocabulary.rs` に、`--scope` を持つ view を clap から導出
+- [x] `tests/windowed_flag_vocabulary.rs` に、`--scope` を持つ view を clap から導出
   する helper を追加する（`get_arguments()` に `--scope` があるかで filter）。既存の
   `table_markdown_views()`（`:28-42`）と同じ導出流儀にし、view 名を手で並べない
-- [ ] inventory 以外の 3 view で row 差分を assert する。比較は view ごとの行抽出
+- [x] inventory 以外の 3 view で row 差分を assert する。比較は view ごとの行抽出
   helper（inventory の `inventory_ids`（`:92-105`）に相当）で行い、`--frozen` を付ける
-- [ ] 合成 store を surfaces + sessions + events に拡張する。`SessionMeta` /
+- [x] 合成 store を surfaces + sessions + events に拡張する。`SessionMeta` /
   `IngestBatch` の組み立ては `tests/trend_markdown.rs:14-54` の helper と同型なので、
   重複を避けるなら `tests/common` へ昇格する（PBI 50 の `ScratchDir` とは独立）
-- [ ] waste: global に高コスト未使用 surface、project に別の未使用 surface を 1 つずつ
-- [ ] failures: 同じ失敗 tool_use を global 側と project 側に 1 つずつ
-- [ ] doctor: `--format markdown` は拒否されるので `table` で比較する。routed 行
+- [x] waste: global に高コスト未使用 surface、project に別の未使用 surface を 1 つずつ
+- [x] failures: 同じ失敗 tool_use を global 側と project 側に 1 つずつ
+- [x] doctor: `--format markdown` は拒否されるので `table` で比較する。routed 行
   （global セクション / project セクション）が scope で入れ替わることを assert
-- [ ] `tests/trend_markdown.rs` に
+- [x] `tests/trend_markdown.rs` に
   `trend_note_fires_when_the_previous_window_holds_sessions_but_no_events` を追加。
   helper `write_session_only_store`（session を ingest し events を空に）を足す
-- [ ] note の文言と、totals の `sessions` 行が `n/a` でないことを両方 assert する
+- [x] note の文言と、totals の `sessions` 行が `n/a` でないことを両方 assert する
   （片方だけだと filter の取り違えを見逃す）
-- [ ] 変異確認を PR 本文に記録: waste の filter を `All` に固定 -> 赤 /
+- [x] 変異確認を PR 本文に記録: waste の filter を `All` に固定 -> 赤 /
   `previous_events_are_empty` を `has_no_baseline` に置換 -> 赤
-- [ ] fmt、clippy、対象テスト、フルスイートが green
+- [x] fmt、clippy、対象テスト、フルスイートが green
 
 ## テスト戦略（t_wadaスタイル）
 
@@ -151,9 +151,9 @@ Scenario: filter を All に固定した変異で赤
   「全部返す」変異を落とせない
 
 ## Definition of Done
-- [ ] 全BDDシナリオが自動テストとして実装されパスする
-- [ ] 4 view すべてで scope の行差分が pin されている
-- [ ] trend の session-only previous window の note が e2e で pin されている
-- [ ] 変異 2 種で赤になることを PR 本文に記録
-- [ ] fmt、clippy、フルスイートが green
-- [ ] コードレビュー完了
+- [x] 全BDDシナリオが自動テストとして実装されパスする
+- [x] 4 view すべてで scope の行差分が pin されている
+- [x] trend の session-only previous window の note が e2e で pin されている
+- [x] 変異 2 種で赤になることを PR 本文に記録
+- [x] fmt、clippy、フルスイートが green
+- [x] コードレビュー完了

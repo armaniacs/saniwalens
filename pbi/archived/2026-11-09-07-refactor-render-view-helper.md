@@ -33,12 +33,12 @@ Scenario: 空結果と window 注記は共通ヘルパー経由になる
   And   prompts bespoke empty と mod.rs inline 判定が残っていない
 
 ## 受け入れ基準
-- [ ] `render_view`（eprint_window → JSON → empty → preamble → render を一括）が新設され 5 ビューが移行済み
-- [ ] help / table / JSON 出力が移行前とバイト同一（golden で固定）
-- [ ] `prompts.rs:70-84` bespoke empty が削除され共通 empty 経路に一本化
-- [ ] `mod.rs:2150` inline `window.is_all` が削除され `window.rs:380` 語彙に一本化
-- [ ] `cargo test`・`cargo clippy --all-targets --all-features -- -D warnings` が green
-- [ ] C6（mod.rs 分割）が着手可能な状態（deliver + 描画が views 側に寄っている）
+- [x] `render_view`（eprint_window → JSON → empty → preamble → render を一括）が新設され 5 ビューが移行済み
+- [x] help / table / JSON 出力が移行前とバイト同一（golden で固定）
+- [x] `prompts.rs:70-84` bespoke empty が削除され共通 empty 経路に一本化
+- [x] `mod.rs:2150` inline `window.is_all` が削除され `window.rs:380` 語彙に一本化
+- [x] `cargo test`・`cargo clippy --all-targets --all-features -- -D warnings` が green
+- [x] C6（mod.rs 分割）が着手可能な状態（deliver + 描画が views 側に寄っている）
 
 ## テスト戦略
 - Golden: 5 ビュー ×（table / json / json+window / 空）の golden 出力を移行前後でバイト比較

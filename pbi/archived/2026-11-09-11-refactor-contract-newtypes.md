@@ -45,11 +45,11 @@ Scenario: 出力は整理前と同一である
 
 ## 受け入れ基準
 
-- [ ] `Vec<(String, String, i64)>` の公開返り値がなく、newtype になっている
-- [ ] `effective_catalog(events_window)` に改名され、非 windowed 系との混同がない
-- [ ] floor の `None -> 0` 暗黙変換がなく、enum で明示される
-- [ ] view が `(&Store, &Harness)` を取り、`Session::refresh` の二重 reopen が解消される
-- [ ] 既存テストが全て通り、上記 BDD の同一出力が確認できる
+- [x] `Vec<(String, String, i64)>` の公開返り値がなく、newtype になっている（対象契約について達成。`store::usage_counts` 等の残余は設計判断として検証記録・whywhyに記録）
+- [x] `effective_catalog(events_window)` に改名され、非 windowed 系との混同がない
+- [x] floor の `None -> 0` 暗黙変換がなく、enum で明示される
+- [x] view が `(&Store, &Harness)` を取り、`Session::refresh` の二重 reopen が解消される
+- [x] 既存テストが全て通り、上記 BDD の同一出力が確認できる
 
 ## テスト戦略 (t-wada式 Outside-In)
 
@@ -70,9 +70,9 @@ Scenario: 出力は整理前と同一である
 
 ## Definition of Done
 
-- [ ] 全 BDD シナリオが自動テストとして通り、出力同一が確認できる
-- [ ] `cargo test` と `cargo clippy` が通る
-- [ ] 変更した契約について spec 差分を確認し、不要なら spec 更新なしと記録する
+- [x] 全 BDD シナリオが自動テストとして通り、出力同一が確認できる
+- [x] `cargo test` と `cargo clippy` が通る
+- [x] 変更した契約について spec 差分を確認し、不要なら spec 更新なしと記録する
 
 ## 検証記録 (B7統合・2026-11-09)
 

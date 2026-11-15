@@ -51,22 +51,22 @@ Scenario: 代表 zone と分単位 offset で panic しない
 ```
 
 ## 受け入れ基準
-- [ ] sweep の `check` を「非空 + 接尾辞」から「暦内なら RFC 3339 parse で
+- [x] sweep の `check` を「非空 + 接尾辞」から「暦内なら RFC 3339 parse で
   instant 一致、暦外なら byte pin」に強化する
-- [ ] date 経路の zone を 10 個の代表値に広げる:
+- [x] date 経路の zone を 10 個の代表値に広げる:
   `[JST, -28800, 0, 60, -60, 5400, -5400, 32400, -32400, 86340, -86340]`
   （JST を含めて 11 点。分単位の端と時間外 offset を覆う）
-- [ ] suffix 式を時間単位前提から `{:02}:{:02}` の分対応に一般化する
-- [ ] 全 2,879 の分単位 offset x 4 端点で `bounds` を直接呼ぶテストを追加する
+- [x] suffix 式を時間単位前提から `{:02}:{:02}` の分対応に一般化する
+- [x] 全 2,879 の分単位 offset x 4 端点で `bounds` を直接呼ぶテストを追加する
   （panic しない、非空、暦内なら round-trip。+25-40ms 程度）
-- [ ] CAL_MAX x JST と CAL_MIN x -8h の 2 例を byte pin する
-- [ ] `expect` の文言を「TimeRange holds an in-calendar epoch: resolve validates
+- [x] CAL_MAX x JST と CAL_MIN x -8h の 2 例を byte pin する
+- [x] `expect` の文言を「TimeRange holds an in-calendar epoch: resolve validates
   both ends」に変え、原因の所在を呼び出し側だと分かるようにする
-- [ ] spec 3 点を同一変更で更新する: 暦端の presentation 溢出は最大 1 zone 幅で
+- [x] spec 3 点を同一変更で更新する: 暦端の presentation 溢出は最大 1 zone 幅で
   実クロック到達不能、`--tz` の domain は分単位（-86,340..=86,340 の 60 秒刻み）、
   RFC 3339 の年範囲は 0..=9999 に限る注記
-- [ ] 非テストコードの変更は expect 文言 1 行だけ。`bounds` の `Result` 化はしない
-- [ ] fmt/clippy/対象テスト/フルスイートが green
+- [x] 非テストコードの変更は expect 文言 1 行だけ。`bounds` の `Result` 化はしない
+- [x] fmt/clippy/対象テスト/フルスイートが green
 
 ## テスト戦略（t_wadaスタイル）
 
@@ -119,9 +119,9 @@ Scenario: 代表 zone と分単位 offset で panic しない
 - 既存の `stop` 系テストや PBI 37 の判断を撤回しない
 
 ## Definition of Done
-- [ ] 全BDDシナリオが自動テストとして実装されパスする
-- [ ] 旧 oracle では通る暦外描画が新 oracle で落ちることを確認
-- [ ] 代表 zone と全分単位 offset の sweep が green
-- [ ] fmt、clippy、フルスイートが green
-- [ ] コードレビュー完了（task review + 最終 review）
-- [ ] cli.md の 3 点を更新済み
+- [x] 全BDDシナリオが自動テストとして実装されパスする
+- [x] 旧 oracle では通る暦外描画が新 oracle で落ちることを確認
+- [x] 代表 zone と全分単位 offset の sweep が green
+- [x] fmt、clippy、フルスイートが green
+- [x] コードレビュー完了（task review + 最終 review）
+- [x] cli.md の 3 点を更新済み

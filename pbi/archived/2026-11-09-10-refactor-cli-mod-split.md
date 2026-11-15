@@ -48,14 +48,14 @@ Scenario: views ルールが守られる
 ```
 
 ## 受け入れ基準
-- [ ] delivery 系が `cli/deliver.rs` に移動している
-- [ ] renderer 系が `views/*` に移動し `(&Store, &Harness)` を取る
-- [ ] 全ゴールデンがバイト同一である
-- [ ] `tests/cli_mod_line_budget.rs` がパスする（上限引き締め済み）
-- [ ] `mod.rs` が設定した行数上限以下である
-- [ ] views 着陸ルール違反がない
-- [ ] 公開 CLI の振る舞い変更がない
-- [ ] `cargo test` / `cargo clippy` が通る
+- [x] delivery 系が `cli/deliver.rs` に移動している
+- [x] renderer 系が `views/*` に移動し `(&Store, &Harness)` を取る
+- [x] 全ゴールデンがバイト同一である
+- [x] `tests/cli_mod_line_budget.rs` がパスする（上限引き締め済み）
+- [x] `mod.rs` が設定した行数上限以下である
+- [x] views 着陸ルール違反がない
+- [x] 公開 CLI の振る舞い変更がない
+- [x] `cargo test` / `cargo clippy` が通る
 
 ## テスト戦略（t_wada式）
 - E2E: 全 CLI ゴールデン比較（バイト同一）
@@ -84,10 +84,10 @@ wc -l src/cli/mod.rs src/cli/*.rs src/views/*.rs
 - window.rs の budget テストと二重に上限を緩めない
 
 ## Definition of Done
-- [ ] 全 BDD シナリオが自動テストとしてパスする
-- [ ] ゴールデン差分ゼロである
-- [ ] コードレビュー完了
-- [ ] ドキュメント更新不要であることが確認済み
+- [x] 全 BDD シナリオが自動テストとしてパスする
+- [x] ゴールデン差分ゼロである
+- [x] コードレビュー完了
+- [x] ドキュメント更新不要であることが確認済み
 
 ## 検証記録 (B6統合・2026-11-09)
 

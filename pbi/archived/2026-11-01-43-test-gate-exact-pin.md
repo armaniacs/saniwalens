@@ -49,17 +49,17 @@ Scenario: 親ディレクトリ参照を履歴判定に使わない
 ```
 
 ## 受け入れ基準
-- [ ] `tests/prose_reference_gate.rs` に root 相対化と分類の純関数
+- [x] `tests/prose_reference_gate.rs` に root 相対化と分類の純関数
   (`rel` / `is_current_prose` / `is_history` 相当) を追加する
-- [ ] 肯定・否定の両 assert を `Path::starts_with` など成分比較へ差し替え、
+- [x] 肯定・否定の両 assert を `Path::starts_with` など成分比較へ差し替え、
   絶対パスへの `contains` を残さない
-- [ ] `..` (ParentDir) を history と誤認しない pin を追加する
-- [ ] 実ツリーの履歴ディレクトリ (`docs/pr`、`docs/exploration`、`pbi`) が存在し、
+- [x] `..` (ParentDir) を history と誤認しない pin を追加する
+- [x] 実ツリーの履歴ディレクトリ (`docs/pr`、`docs/exploration`、`pbi`) が存在し、
   scan されないことを pin する
-- [ ] 除外リストを 1 つの定数に集約し、doc comment 3 箇所と
+- [x] 除外リストを 1 つの定数に集約し、doc comment 3 箇所と
   `.claude/rules/spec-sync.md` の current prose 記述を同じ変更で更新する
-- [ ] ゲート本体（span 抽出・fence 判定・resolves）は変更しない
-- [ ] `cargo fmt --check` / `cargo clippy --all-targets --all-features -- -D warnings` /
+- [x] ゲート本体（span 抽出・fence 判定・resolves）は変更しない
+- [x] `cargo fmt --check` / `cargo clippy --all-targets --all-features -- -D warnings` /
   `cargo test --test prose_reference_gate` が green
 
 ## テスト戦略（t_wadaスタイル）
@@ -114,8 +114,8 @@ Scenario: 親ディレクトリ参照を履歴判定に使わない
 - 行番号は既にずれているため、PBI 36 の行番号ではなく関数名で参照する
 
 ## Definition of Done
-- [ ] 全BDDシナリオが自動テストとして実装されパスする
-- [ ] 否定・肯定 assert がパス成分比較になっている
-- [ ] 対象テスト、fmt、clippy、フルスイートが green
-- [ ] コードレビュー完了（task review + 最終 review）
-- [ ] spec-sync と doc comment 更新済み
+- [x] 全BDDシナリオが自動テストとして実装されパスする
+- [x] 否定・肯定 assert がパス成分比較になっている
+- [x] 対象テスト、fmt、clippy、フルスイートが green
+- [x] コードレビュー完了（task review + 最終 review）
+- [x] spec-sync と doc comment 更新済み

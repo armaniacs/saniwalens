@@ -59,23 +59,23 @@ Scenario: 両方を同じく壊しても赤（順序 assert）
 ```
 
 ## 受け入れ基準
-- [ ] `tests/scratch_dir_contract.rs` に `the_two_copies_share_the_drop_contract` を
+- [x] `tests/scratch_dir_contract.rs` に `the_two_copies_share_the_drop_contract` を
   追加する。2 ファイルを読み、`impl Drop for ScratchDir` ブロックを抽出し、(a) コメント
   行と空行を除去して前後空白を正規化した本体が一致、(b) 各ブロックで `remove_dir_all`
   の位置 < 最後の `unclaim(` の位置、(c) `keep_scratch` の早期 return が remove より
   前、を assert する
-- [ ] 抽出は helper 1 本（`drop_body(path) -> String`）に閉じる。ブロックが見つから
+- [x] 抽出は helper 1 本（`drop_body(path) -> String`）に閉じる。ブロックが見つから
   ない・2 つ以上ある・backtick 不整合などの異常は panic にする（緑にしない）
-- [ ] helper の自己テストを 2 本: 片方だけ順序を変えた fixture で「一致しない」こと、
+- [x] helper の自己テストを 2 本: 片方だけ順序を変えた fixture で「一致しない」こと、
   両方同じく順序を変えた fixture で「順序 assert が落ちる」こと。fixture は
   `tempfile` を足さず、既存の `ScratchDir`（PBI 50）に書く
-- [ ] 変異確認を PR 本文に記録: 片方だけ `unclaim` を前に移す -> 赤 / 両方移す -> 赤 /
+- [x] 変異確認を PR 本文に記録: 片方だけ `unclaim` を前に移す -> 赤 / 両方移す -> 赤 /
   `keep_scratch` の早期 return を remove の後に移す -> 赤
-- [ ] production code は変えない。test-only hook（Drop 段階を AtomicUsize に記録する
+- [x] production code は変えない。test-only hook（Drop 段階を AtomicUsize に記録する
   等）は採らない。production と test で別経路になり、2 コピーの一致を保証しない
-- [ ] `.claude/rules/tdd.md` の Scratch dirs 節に「2 コピーは順序契約を共有 test で
+- [x] `.claude/rules/tdd.md` の Scratch dirs 節に「2 コピーは順序契約を共有 test で
   pin する」を 1 句
-- [ ] `cargo test --test scratch_dir_contract`、`cargo test --lib`、fmt、clippy が green
+- [x] `cargo test --test scratch_dir_contract`、`cargo test --lib`、fmt、clippy が green
 
 ## テスト戦略（t_wadaスタイル）
 
@@ -142,10 +142,10 @@ Scenario: 両方を同じく壊しても赤（順序 assert）
   インデントだけを正規化する
 
 ## Definition of Done
-- [ ] 全BDDシナリオが自動テストとして実装されパスする
-- [ ] 片方だけ順序を変えた変異で赤になる（PR 本文に証拠）
-- [ ] 両方同じく壊した場合も順序 assert で赤になる
-- [ ] 既存の scratch 契約テストが green のまま
-- [ ] tdd.md に 2 コピー契約の 1 句が入っている
-- [ ] fmt、clippy、フルスイートが green
-- [ ] コードレビュー完了
+- [x] 全BDDシナリオが自動テストとして実装されパスする
+- [x] 片方だけ順序を変えた変異で赤になる（PR 本文に証拠）
+- [x] 両方同じく壊した場合も順序 assert で赤になる
+- [x] 既存の scratch 契約テストが green のまま
+- [x] tdd.md に 2 コピー契約の 1 句が入っている
+- [x] fmt、clippy、フルスイートが green
+- [x] コードレビュー完了

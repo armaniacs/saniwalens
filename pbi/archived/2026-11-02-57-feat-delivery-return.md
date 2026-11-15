@@ -54,25 +54,25 @@ Scenario: 失敗は今までどおり Err
 ```
 
 ## 受け入れ基準
-- [ ] spike（timebox 0.5 日）: 呼び出し側が結果を使って何を変えるかを 3 案で比較し、
+- [x] spike（timebox 0.5 日）: 呼び出し側が結果を使って何を変えるかを 3 案で比較し、
   判断を PR 本文に記録する。(a) `DeliveryOutcome` enum を返す、(b)
   `Result<(DeliveryMode, ExitStatus)>` を返す、(c) 現状維持
-- [ ] 消費者が無いなら (c) を結論にし、`docs/specs/cli.md:543-560` の delivery 節に
+- [x] 消費者が無いなら (c) を結論にし、`docs/specs/cli.md:543-560` の delivery 節に
   「戻り型は `Result<()>` のまま。結果を必要とする消費者が現れた時点で再評価する」と
   1 文足す。型は足さない
-- [ ] 消費者があるなら (a) を採り、`pub enum DeliveryOutcome { Printed, Launched {
+- [x] 消費者があるなら (a) を採り、`pub enum DeliveryOutcome { Printed, Launched {
   mode, status }, Headless { status, log } }` を追加して
   `deliver -> Result<DeliveryOutcome>` にする。既存の `?` と `bail!` は変えない
-- [ ] 出力 byte 同一: `--print` の stdout、quiet / verbose headless の stderr、失敗
+- [x] 出力 byte 同一: `--print` の stdout、quiet / verbose headless の stderr、失敗
   message（`raw output:` を含む経路と含まない経路の両方）を capture で比較する
-- [ ] test double の更新は `src/cli/mod.rs:2818-2890` の 4 本と
+- [x] test double の更新は `src/cli/mod.rs:2818-2890` の 4 本と
   `tests/headless_seam.rs:89` のみ。double の記録内容は増やさない
-- [ ] `#[must_use]` を付けるなら呼び出し側で明示的に扱う（`let _ =` で黙らせない）。
+- [x] `#[must_use]` を付けるなら呼び出し側で明示的に扱う（`let _ =` で黙らせない）。
   付けないなら doc に「無視してよい」と書く。`let _ =` を許すなら型を足す意味が無い
   ので、(a) を採る場合は `optimize` が結果を 1 箇所で使う形にする
-- [ ] `docs/specs/cli.md` の delivery 節を結論に合わせて更新（(a) なら戻り値の意味、
+- [x] `docs/specs/cli.md` の delivery 節を結論に合わせて更新（(a) なら戻り値の意味、
   (c) なら現状維持の理由）
-- [ ] fmt、clippy、フルスイートが green
+- [x] fmt、clippy、フルスイートが green
 
 ## テスト戦略（t_wadaスタイル）
 
@@ -138,9 +138,9 @@ Scenario: 失敗は今までどおり Err
 - spike を 0.5 日で切る。結論が出ない場合は (c) に倒し、判断材料を spec に残す
 
 ## Definition of Done
-- [ ] spike の結論が PR 本文と `docs/specs/cli.md` に残っている
-- [ ] (a) を採った場合、全BDDシナリオが自動テストとして実装されパスする
-- [ ] (c) を採った場合、出力がバイト同一で、再評価の条件が spec に書かれている
-- [ ] 失敗 message が不変
-- [ ] fmt、clippy、フルスイートが green
-- [ ] コードレビュー完了
+- [x] spike の結論が PR 本文と `docs/specs/cli.md` に残っている
+- [x] (a) を採った場合、全BDDシナリオが自動テストとして実装されパスする
+- [x] (c) を採った場合、出力がバイト同一で、再評価の条件が spec に書かれている
+- [x] 失敗 message が不変
+- [x] fmt、clippy、フルスイートが green
+- [x] コードレビュー完了

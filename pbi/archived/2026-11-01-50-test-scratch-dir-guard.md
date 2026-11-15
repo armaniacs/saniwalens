@@ -48,26 +48,26 @@ Scenario: shadow で 1 個残らない
 ```
 
 ## 受け入れ基準
-- [ ] `tests/common/mod.rs` に `ScratchDir` guard を追加する
+- [x] `tests/common/mod.rs` に `ScratchDir` guard を追加する
   （`new` は既存を削除し、NotFound のみ許容 -> `create_dir` で作成 ->
   `Drop` で削除、失敗は stderr に 1 行。`SANIWALENS_KEEP_SCRATCH=1` で保持）
-- [ ] `src/scratch.rs` に同じ契約の `#[cfg(test)]` guard を追加し、`src/lib.rs` から
+- [x] `src/scratch.rs` に同じ契約の `#[cfg(test)]` guard を追加し、`src/lib.rs` から
   `#[cfg(test)] mod scratch;` で読み込む（統合テストからは見えないため 2 コピー。
   相互参照コメントを必須にする）
-- [ ] `tests/trend_json_golden.rs`、`tests/trend_markdown.rs`、`tests/period_errors.rs`
+- [x] `tests/trend_json_golden.rs`、`tests/trend_markdown.rs`、`tests/period_errors.rs`
   の helper を `tests/common` の guard に置き換える。末尾の `remove_dir_all` を削除する
-- [ ] `tests/trend_markdown.rs` の shadow を解消し、2 つの dir をそれぞれ guard で
+- [x] `tests/trend_markdown.rs` の shadow を解消し、2 つの dir をそれぞれ guard で
   保持する（`reason-two-sided` / `reason-one-sided`）
-- [ ] `src/cli/window.rs` の test module の `example_dir` を `crate::scratch::ScratchDir`
+- [x] `src/cli/window.rs` の test module の `example_dir` を `crate::scratch::ScratchDir`
   に置き換え、guard を `opened` より先に宣言する（Drop 順で store が先に閉じる）
-- [ ] panic 経路の契約テストを `catch_unwind` で追加する（guard 生成 -> panic ->
+- [x] panic 経路の契約テストを `catch_unwind` で追加する（guard 生成 -> panic ->
   dir が存在しない）
-- [ ] stale dir の再利用テストを追加する（古い dir + STALE ROWS -> 新しい空 dir）
-- [ ] `.claude/rules/tdd.md` に Scratch dirs 節を追加する（4 文: 合成のみ、
+- [x] stale dir の再利用テストを追加する（古い dir + STALE ROWS -> 新しい空 dir）
+- [x] `.claude/rules/tdd.md` に Scratch dirs 節を追加する（4 文: 合成のみ、
   temp に置く、guard を使う、リポジトリに置かない）
-- [ ] `tempfile` などの dev-dependency は追加しない。inline の 25 箇所は本 PBI の
+- [x] `tempfile` などの dev-dependency は追加しない。inline の 25 箇所は本 PBI の
   範囲外とし、台帳に follow-up として記録する
-- [ ] fmt/clippy/対象テスト/フルスイートが green
+- [x] fmt/clippy/対象テスト/フルスイートが green
 
 ## テスト戦略（t_wadaスタイル）
 
@@ -126,9 +126,9 @@ Scenario: shadow で 1 個残らない
 - `src/scratch.rs` は `#[cfg(test)]` のみ。統合テストからは見えない
 
 ## Definition of Done
-- [ ] 全BDDシナリオが自動テストとして実装されパスする
-- [ ] 成功時・panic 時・shadow 時に scratch dir が残らない
-- [ ] stale dir を再利用しない
-- [ ] fmt、clippy、フルスイートが green
-- [ ] コードレビュー完了（task review + 最終 review）
-- [ ] tdd.md 更新済み
+- [x] 全BDDシナリオが自動テストとして実装されパスする
+- [x] 成功時・panic 時・shadow 時に scratch dir が残らない
+- [x] stale dir を再利用しない
+- [x] fmt、clippy、フルスイートが green
+- [x] コードレビュー完了（task review + 最終 review）
+- [x] tdd.md 更新済み

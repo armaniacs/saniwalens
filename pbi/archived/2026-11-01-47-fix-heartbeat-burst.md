@@ -48,17 +48,17 @@ Scenario: stop 後は送らない
 ```
 
 ## 受け入れ基準
-- [ ] `heartbeat.rs` の `next` 更新を `next = elapsed + cadence` に変え、
+- [x] `heartbeat.rs` の `next` 更新を `next = elapsed + cadence` に変え、
   取りこぼした beat は捨てる（catch-up しない）
-- [ ] 次回締切の計算を純関数に抽出し、単体テストで直接検証できるようにする
-- [ ] 単体テスト 3 本: 連続 beat の間隔が cadence 以上、cadence 超の欠損で 1 beat、
+- [x] 次回締切の計算を純関数に抽出し、単体テストで直接検証できるようにする
+- [x] 単体テスト 3 本: 連続 beat の間隔が cadence 以上、cadence 超の欠損で 1 beat、
   stop 後の送信 0
-- [ ] 既存の退化設定（cadence 1ms < poll 5ms）を cadence > poll の代表値に直すか、
+- [x] 既存の退化設定（cadence 1ms < poll 5ms）を cadence > poll の代表値に直すか、
   その意図をコメントで明示する
-- [ ] `docs/specs/harness.md` の heartbeat 段落に、cadence / poll / 欠損 skip の
+- [x] `docs/specs/harness.md` の heartbeat 段落に、cadence / poll / 欠損 skip の
   契約を 1 段落で書く
-- [ ] `src/cli/mod.rs` は触らない（行数予算 3,100 に影響させない）
-- [ ] fmt/clippy/対象テスト/フルスイートが green
+- [x] `src/cli/mod.rs` は触らない（行数予算 3,100 に影響させない）
+- [x] fmt/clippy/対象テスト/フルスイートが green
 
 ## テスト戦略（t_wadaスタイル）
 
@@ -110,9 +110,9 @@ Scenario: stop 後は送らない
 - mod.rs の行数予算に触らない
 
 ## Definition of Done
-- [ ] 全BDDシナリオが自動テストとして実装されパスする
-- [ ] stall 復帰後に 1 beat だけ出る
-- [ ] 連続 beat の間隔 >= cadence が単体テストで pin されている
-- [ ] fmt、clippy、フルスイートが green
-- [ ] コードレビュー完了（task review + 最終 review）
-- [ ] harness.md 更新済み
+- [x] 全BDDシナリオが自動テストとして実装されパスする
+- [x] stall 復帰後に 1 beat だけ出る
+- [x] 連続 beat の間隔 >= cadence が単体テストで pin されている
+- [x] fmt、clippy、フルスイートが green
+- [x] コードレビュー完了（task review + 最終 review）
+- [x] harness.md 更新済み

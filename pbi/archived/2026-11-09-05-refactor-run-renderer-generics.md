@@ -32,12 +32,12 @@ Scenario: guide の harness 表記がバイト同一のまま重複だけ消え�
 ```
 
 ## 受け入れ基準
-- [ ] `RunLineRenderer` が `opencode::` 型に依存しない定義になり、呼び出し側が opencode 型名を書かずに済む
-- [ ] Kilocode の headless 描画結果が変更前と同一 (行単位比較で差分なし)
-- [ ] `guide` の harness 名表示と `equivalent_command` 出力が全組み合わせでバイト同一
-- [ ] `equivalent_command` の Claude 特殊扱い arm が消え、`harness_name()` 単一起点になる
-- [ ] catalog / analyze 分岐のコピー arm が減り、追加 harness が 1 箇所の追加で済む形になる
-- [ ] `cargo fmt --check`、`cargo clippy --all-targets --all-features -- -D warnings`、`cargo test` が green
+- [x] `RunLineRenderer` が `opencode::` 型に依存しない定義になり、呼び出し側が opencode 型名を書かずに済む
+- [x] Kilocode の headless 描画結果が変更前と同一 (行単位比較で差分なし)
+- [x] `guide` の harness 名表示と `equivalent_command` 出力が全組み合わせでバイト同一
+- [x] `equivalent_command` の Claude 特殊扱い arm が消え、`harness_name()` 単一起点になる
+- [x] catalog / analyze 分岐のコピー arm が減り、追加 harness が 1 箇所の追加で済む形になる
+- [x] `cargo fmt --check`、`cargo clippy --all-targets --all-features -- -D warnings`、`cargo test` が green
 
 ## テスト戦略 (t-wada式 Outside-In)
 - 統合: kilocode headless ストリームを行単位で描画し、変更前出力と diff して同一を確認 (RED: 新シグネチャ未導入では型名参照が残る)
@@ -61,10 +61,10 @@ Scenario: guide の harness 表記がバイト同一のまま重複だけ消え�
   - spec 変更は不要見込み (表示契約の変更なし)。変えた場合は `docs/specs/harness.md` を同変更で更新する
 
 ## Definition of Done
-- [ ] 全 BDD シナリオが自動テストとして実装されパスする
-- [ ] 受け入れ基準の 6 項目を満たす
-- [ ] コードレビュー完了
-- [ ] ドキュメント更新済み (spec 変更なしなら不要と明記)
+- [x] 全 BDD シナリオが自動テストとして実装されパスする
+- [x] 受け入れ基準の 6 項目を満たす
+- [x] コードレビュー完了
+- [x] ドキュメント更新済み (spec 変更なしなら不要と明記)
 
 ## 検証記録 (B3統合・2026-11-09)
 
