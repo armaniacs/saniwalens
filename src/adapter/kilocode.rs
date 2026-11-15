@@ -604,6 +604,17 @@ pub fn read_project_surfaces(
     )
 }
 
+/// Neutralize untrusted `kilo.json` instructions text at the log boundary
+/// (CWE-117): control bytes interpolated into the skip warning would forge
+/// log lines (CR/LF) or restyle the terminal (ESC). Every control codepoint
+/// (C0, DEL, C1 — covers `\r`, `\n`, `0x1b`) becomes U+FFFD; confinement and
+/// the skip itself are unchanged, only the displayed text is scrubbed.
+fn neutralize_log_text(text: &str) -> String {
+    text.chars()
+        .map(|c| if c.is_control() { '\u{FFFD}' } else { c })
+        .collect()
+}
+
 /// The files in `kilo.json`'s `instructions[]`, as always-on instruction
 /// surfaces — the measured project pointed the array at a gitignored
 /// `AGENTS.local.md` and the measured global config at an absolute path, and
@@ -647,8 +658,9 @@ pub(crate) fn read_kilo_instructions(
             };
             if !resolved.starts_with(&root) {
                 eprintln!(
-                    "warning: skipping kilo.json instructions entry outside {}: {entry} — out-of-root files stay uncatalogued",
-                    root.display()
+                    "warning: skipping kilo.json instructions entry outside {}: {} — out-of-root files stay uncatalogued",
+                    root.display(),
+                    neutralize_log_text(entry)
                 );
                 return None;
             }

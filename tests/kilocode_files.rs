@@ -93,3 +93,64 @@ fn metadata_files_become_file_read_events_and_missing_metadata_stays_quiet() {
         "the metadata-less task stays quiet: {stdout}"
     );
 }
+
+/// VULN-001 (CWE-117): a hostile `kilo.json` instructions entry must not
+/// reach the stderr skip-warning verbatim — raw CR/LF would forge log lines
+/// and a raw ESC would restyle the terminal. The warning only fires for an
+/// entry that resolves to a real file outside the config root, so the
+/// payload lives in the outside file's name (legal on unix). Confinement is
+/// unchanged: the entry is still skipped, loudly, on one sanitized line.
+#[test]
+fn hostile_instructions_entry_is_neutralized_in_stderr_warning() {
+    let dir = scratch_dir("log-neutralization");
+    let outside = dir.join("outside");
+    std::fs::create_dir_all(&outside).unwrap();
+    let hostile_name = "pwned\nFORGED-VULN-001-LINE\n\x1b[31mRED-VULN-001\x1b[0m.md";
+    std::fs::write(outside.join(hostile_name), "host secret").unwrap();
+    let entry = format!("{}/{}", outside.display(), hostile_name);
+
+    let cfg_kilo = dir.join("cfg-home").join("kilo");
+    std::fs::create_dir_all(&cfg_kilo).unwrap();
+    std::fs::write(
+        cfg_kilo.join("kilo.json"),
+        serde_json::to_string(&serde_json::json!({ "instructions": [entry] })).unwrap(),
+    )
+    .unwrap();
+
+    let tasks = dir.join("tasks");
+    write_task(&tasks, "task-1", None);
+    std::fs::create_dir_all(dir.join("cfg-home")).unwrap();
+
+    let db = dir.join("kilo.db");
+    let db_arg = db.display().to_string();
+    let out = run(
+        &dir,
+        &[
+            "--harness",
+            "kilocode",
+            "analyze",
+            "--projects",
+            &tasks.display().to_string(),
+            "--db",
+            &db_arg,
+        ],
+    );
+    assert!(out.status.success(), "kilocode analyze exits 0: {out:?}");
+
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("skipping kilo.json instructions entry"),
+        "the skip warning still fires: {stderr:?}"
+    );
+    assert!(
+        !stderr.contains('\x1b'),
+        "no ESC byte from the entry in stderr: {stderr:?}"
+    );
+    assert!(
+        !stderr
+            .lines()
+            .any(|line| line.trim() == "FORGED-VULN-001-LINE"),
+        "no forged standalone line from the entry in stderr: {stderr:?}"
+    );
+    assert!(!stderr.contains('\r'), "no CR byte in stderr: {stderr:?}");
+}
