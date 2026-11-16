@@ -92,10 +92,22 @@ nix profile install github:armaniacs/saniwalens  # `saniwalens` を PATH に入�
     </section>
 
     <section aria-labelledby="quickstart-heading">
-      <h2 id="quickstart-heading">まず doctor、次に waste</h2>
-      <p>インストールが済んだら、この順番で回します。</p>
+      <h2 id="quickstart-heading">まず対話モードで触る</h2>
+      <p>
+        何から手を付けるか迷ったら、引数なしで <code>saniwalens</code> と打ちます
+        （<code>saniwalens tui</code> でも同じ）。聞かれる順に答えるだけで一通りの流れが回ります。
+      </p>
+      <ol>
+        <li>使う harness を聞かれます（<code>claude</code> / <code>opencode</code> / <code>kilocode</code>。<code>--harness</code> を付ければ聞かれません）。</li>
+        <li>見るものを聞かれます（<code>doctor</code> / <code>waste</code> / <code>failures</code>）。</li>
+        <li>範囲を聞かれます（<code>global</code> / <code>project</code> / <code>project:&lt;slug&gt;</code>）。</li>
+        <li>相当するコマンドを表示してから実行するので、後から同じものを再現できます。</li>
+        <li>実行後、その harness・範囲での <code>optimize</code> をその場で動かすか聞かれます。</li>
+        <li>最後に、使った harness を <code>config.toml</code> に残すか聞かれます。</li>
+      </ol>
+      <p>流れが分かったら、直接コマンドを打ちます。</p>
       <figure>
-        <figcaption id="quickstart-code">健康診断から始め、所見をもとに改善案を作る:</figcaption>
+        <figcaption id="quickstart-code">直接コマンドを打つなら、この順番:</figcaption>
         <pre role="region" aria-labelledby="quickstart-code" tabindex="0"><code># 1. 一画面の健康診断（初回は自動で analyze）
 saniwalens doctor
 saniwalens doctor --scope global

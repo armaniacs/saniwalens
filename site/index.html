@@ -93,9 +93,22 @@ nix profile install github:armaniacs/saniwalens  # install `saniwalens` onto PAT
     </section>
 
     <section aria-labelledby="quickstart-heading">
-      <h2 id="quickstart-heading">Quick start</h2>
+      <h2 id="quickstart-heading">Start with the guided tour</h2>
+      <p>
+        Not sure where to begin? Run <code>saniwalens</code> with no arguments
+        (or <code>saniwalens tui</code>) and answer what it asks:
+      </p>
+      <ol>
+        <li>Which harness to use (<code>claude</code> / <code>opencode</code> / <code>kilocode</code>; skipped with <code>--harness</code>).</li>
+        <li>What to look at (<code>doctor</code> / <code>waste</code> / <code>failures</code>).</li>
+        <li>Which scope (<code>global</code> / <code>project</code> / <code>project:&lt;slug&gt;</code>).</li>
+        <li>It shows the equivalent command before running it, so you can reproduce the same run later.</li>
+        <li>After the report, it offers to run <code>optimize</code> for that harness and scope right there.</li>
+        <li>Finally, it asks whether to save the harness to <code>config.toml</code>.</li>
+      </ol>
+      <p>Once you know the flow, call the commands directly:</p>
       <figure>
-        <figcaption id="quickstart-code">Start with the health check, then hand findings to an advisor:</figcaption>
+        <figcaption id="quickstart-code">The direct-command order:</figcaption>
         <pre role="region" aria-labelledby="quickstart-code" tabindex="0"><code># 1. One-screen health check (analyzes automatically on first run)
 saniwalens doctor
 saniwalens doctor --scope global
