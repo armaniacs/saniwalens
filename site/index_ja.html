@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>saniwalens — coding-agent の利用を見るレンズ</title>
+  <title>saniwalens ― coding-agent の利用を見るレンズ</title>
   <meta name="description" content="saniwalens は agent セッションの transcript と live の設定をローカルの SQLite ストアに展開し、時間・トークン・手間の無駄と直し方を示します。">
   <meta name="color-scheme" content="light dark">
   <script>
@@ -52,8 +52,8 @@
         type="button"
         aria-live="polite"
       >
-        <span class="theme-toggle-dark" aria-hidden="true">☾</span>
-        <span class="theme-toggle-light" aria-hidden="true">☀</span>
+        <span class="theme-toggle-dark" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 16 16" focusable="false"><path d="M14 10.2A6 6 0 0 1 5.8 2 6 6 0 1 0 14 10.2Z" fill="currentColor"/></svg></span>
+        <span class="theme-toggle-light" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 16 16" focusable="false"><circle cx="8" cy="8" r="3.2" fill="currentColor"/><g stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M8 1v1.8M8 13.2V15M1 8h1.8M13.2 8H15M3 3l1.3 1.3M11.7 11.7 13 13M13 3l-1.3 1.3M4.3 11.7 3 13"/></g></svg></span>
         <span class="visually-hidden" id="theme-toggle-label">ダークテーマに切り替え</span>
       </button>
     </div>
@@ -62,15 +62,15 @@
   <main id="main">
     <h1>coding-agent の利用を見るレンズ</h1>
     <p class="lead">
-      <code>saniwalens</code> は agent セッションの transcript と live の設定を読み、
-      ローカルの SQLite ストアに展開して、<strong>時間・トークン・手間がどこで無駄になり、
-      どう直すか</strong>を示します。使われていない・重い設定、繰り返す tool 失敗、
-      行き詰まり箇所、その背後のコスト像です。
+      <code>saniwalens</code> は agent との対話履歴（transcript）と現在の設定を読み、
+      ローカルの SQLite ストアに展開します。<strong>時間・トークン・手間がどこで無駄になり、
+      どう直すか</strong>を示す道具です。使われていない・重い設定、繰り返すツールの失敗、
+      行き詰まり箇所、どこにコストがかかっているかの全体像が分かります。
     </p>
     <p>
-      外に何も送りません。分析は読み取り専用・増分です。詳しくは
+      外部サーバには何も送りません。分析は読み取り専用で、変わった分だけ追加で取り込みます。詳しくは
       <a href="https://github.com/armaniacs/saniwalens/tree/main/docs/specs">設計 spec</a> と
-      <a href="./docs_ja.html">ドキュメント頁</a> をどうぞ。英語版は
+      <a href="./docs_ja.html">ドキュメントページ</a> をどうぞ。英語版は
       <a href="./index.html">こちら</a>。
     </p>
 
@@ -85,16 +85,17 @@
         <pre role="region" aria-labelledby="install-cargo" tabindex="0"><code>cargo install saniwalens</code></pre>
       </figure>
       <figure>
-        <figcaption id="install-nix">Nix（toolchain の用意が要らない）:</figcaption>
+        <figcaption id="install-nix">何も入れずに試すなら Nix:</figcaption>
         <pre role="region" aria-labelledby="install-nix" tabindex="0"><code>nix run github:armaniacs/saniwalens -- doctor   # 入れずに動かす
 nix profile install github:armaniacs/saniwalens  # `saniwalens` を PATH に入れる</code></pre>
       </figure>
     </section>
 
     <section aria-labelledby="quickstart-heading">
-      <h2 id="quickstart-heading">クイックスタート</h2>
+      <h2 id="quickstart-heading">まず doctor、次に waste</h2>
+      <p>インストールが済んだら、この順番で回します。</p>
       <figure>
-        <figcaption id="quickstart-code">健康診断から始め、所見を advisor に渡す:</figcaption>
+        <figcaption id="quickstart-code">健康診断から始め、所見をもとに改善案を作る:</figcaption>
         <pre role="region" aria-labelledby="quickstart-code" tabindex="0"><code># 1. 一画面の健康診断（初回は自動で analyze）
 saniwalens doctor
 saniwalens doctor --scope global
@@ -104,24 +105,26 @@ saniwalens doctor --scope project:&lt;slug&gt;
 saniwalens waste
 saniwalens inventory   # 全 surface × 実際の利用
 saniwalens failures    # 繰り返す tool 失敗を分類別に
-saniwalens stuck       # agent が書き直しを繰り返した箇所
+saniwalens stuck       # 同じファイルを書き直し続けた箇所
 
-# 3. 所見を動かす
+# 3. 改善案を作って適用する
 saniwalens optimize --scope global</code></pre>
       </figure>
       <p>
-        読み取りコマンドは報告の前に自動でストアを更新し（変わっていない transcript
-        は飛ばすので速い）、鮮度行を stderr に出します。あるがまま読むなら
-        <code>--frozen</code>。PR 貼り付け用に <code>--format markdown</code>、
-        機械読み用に <code>--format json</code> もあります。
+        読み取りコマンドは報告の前にストアを自動で更新します。変わっていない履歴は
+        飛ばすので速く、取り込み時刻の 1 行を stderr に出します。更新せずに今の
+        ストアのまま読むなら <code>--frozen</code>。PR 貼り付け用に
+        <code>--format markdown</code>、機械読み用に <code>--format json</code> もあります。
       </p>
     </section>
 
     <section aria-labelledby="harness-heading">
       <h2 id="harness-heading">対応 harness</h2>
       <p>
-        1 回の実行で 1 つの harness を分析し、<code>--harness</code> で選びます。
-        既定は <code>claude</code> のままなので、既存の呼び方はバイト単位で変わりません。
+        既定のまま動かす分には意識しなくて構いません。複数の agent 環境を
+        使い分けるときだけ読みます。1 回の実行で 1 つの harness を分析し、
+        <code>--harness</code> で選びます。harness は使う agent 環境のことで、
+        既定は <code>claude</code> のままなので、これまでの使い方はそのまま動きます。
         harness ごとにストアを持つので、所見が混ざりません。
       </p>
       <div class="table-scroll" role="region" aria-label="対応 harness" tabindex="0">
@@ -162,20 +165,23 @@ saniwalens optimize --scope global</code></pre>
     <section aria-labelledby="links-heading">
       <h2 id="links-heading">さらに深く</h2>
       <ul>
-        <li><a href="./docs_ja.html">ドキュメント — コマンド・ビュー・spec 対応表</a></li>
-        <li><a href="./specs.html">設計 spec（英語）</a> — なぜ・契約</li>
-        <li><a href="./cli.html">CLI リファレンス（英語）</a> — <code>--help</code> から生成</li>
+        <li><a href="./docs_ja.html">ドキュメント ― コマンド・ビュー・spec 対応表</a></li>
+        <li><a href="./specs.html">設計 spec（英語）</a> ― なぜ・契約</li>
+        <li><a href="./cli.html">CLI リファレンス（英語）</a> ― <code>--help</code> から生成</li>
         <li><a href="https://github.com/armaniacs/saniwalens/blob/main/CHANGELOG.md">CHANGELOG</a></li>
         <li><a href="https://github.com/armaniacs/saniwalens/blob/main/README.ja.md">README（日本語・GitHub 上）</a></li>
-        <li><a href="https://github.com/armaniacs/saniwalens/blob/main/SECURITY.ja.md">セキュリティ — 非公開 advisory、公開 issue 禁止</a></li>
+        <li><a href="https://github.com/armaniacs/saniwalens/blob/main/CONTRIBUTING.ja.md">コントリビュート ― 新 harness 対応に要るもの</a></li>
+        <li><a href="https://github.com/armaniacs/saniwalens/blob/main/SECURITY.ja.md">セキュリティ ― 非公開 advisory、公開 issue 禁止</a></li>
       </ul>
     </section>
   </main>
 
   <footer>
     <p>
-      saniwalens — MIT。数値は順位付け用の利用シグナルであり、課金台帳ではありません。
+      saniwalens ― MIT。数値は順位付け用の利用シグナルであり、課金台帳ではありません。
       ソースは <a href="https://github.com/armaniacs/saniwalens">GitHub</a>。
+      使い方の質問は <a href="https://github.com/armaniacs/saniwalens/issues">GitHub の issue</a> へ
+     （セキュリティ報告は非公開 advisory。公開 issue 禁止）。
     </p>
   </footer>
 </body>

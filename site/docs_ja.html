@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>ドキュメント — saniwalens</title>
+  <title>ドキュメント ― saniwalens</title>
   <meta name="description" content="saniwalens のコマンド・ビュー・設計 spec 対応表（日本語）。">
   <meta name="color-scheme" content="light dark">
   <script>
@@ -52,8 +52,8 @@
         type="button"
         aria-live="polite"
       >
-        <span class="theme-toggle-dark" aria-hidden="true">☾</span>
-        <span class="theme-toggle-light" aria-hidden="true">☀</span>
+        <span class="theme-toggle-dark" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 16 16" focusable="false"><path d="M14 10.2A6 6 0 0 1 5.8 2 6 6 0 1 0 14 10.2Z" fill="currentColor"/></svg></span>
+        <span class="theme-toggle-light" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 16 16" focusable="false"><circle cx="8" cy="8" r="3.2" fill="currentColor"/><g stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M8 1v1.8M8 13.2V15M1 8h1.8M13.2 8H15M3 3l1.3 1.3M11.7 11.7 13 13M13 3l-1.3 1.3M4.3 11.7 3 13"/></g></svg></span>
         <span class="visually-hidden" id="theme-toggle-label">ダークテーマに切り替え</span>
       </button>
     </div>
@@ -62,7 +62,8 @@
   <main id="main">
     <h1>ドキュメント</h1>
     <p class="lead">
-      設計意図は <code>docs/specs/</code> にあり、この頁は動かし方への地図です。
+      設計意図は <code>docs/specs/</code> にあり、このページは操作方法の案内です。
+      初回は上から順に読み、2 回目以降は表とリンク集を引いてください。
       英語版は <a href="./docs.html">こちら</a>。
     </p>
 
@@ -70,7 +71,7 @@
       <h2 id="pipeline-heading">パイプライン</h2>
       <div class="table-scroll" role="region" aria-label="パイプラインのコマンド" tabindex="0">
         <table>
-          <caption>一度 analyze して何度も読む — ストアが段階をつなぐ</caption>
+          <caption>一度 analyze して何度も読む ― ストアが段階をつなぐ</caption>
           <thead>
             <tr>
               <th scope="col">コマンド</th>
@@ -80,19 +81,19 @@
           <tbody>
             <tr>
               <th scope="row"><code>saniwalens doctor</code></th>
-              <td>健康診断。全体 / プロジェクト別に分ける — <strong>まずここ</strong>。</td>
+              <td>健康診断。全体／プロジェクト別に表示 ― <strong>まずここ</strong>。</td>
             </tr>
             <tr>
               <th scope="row"><code>saniwalens analyze</code></th>
-              <td>transcript + 設定をストアに展開（増分）。読み取りは自動で走る。</td>
+              <td>transcript（対話履歴）と設定をストアに展開（変わった分だけ追加）。読み取りコマンドの実行時に自動で走ります。</td>
             </tr>
             <tr>
               <th scope="row"><code>saniwalens sql '&lt;query&gt;'</code></th>
-              <td>ストアへの任意の読み取り専用 SQL。ストアこそ本体。</td>
+              <td>ストアへの読み取り専用 SQL なら何でも書けます。分析の中心はストアです。</td>
             </tr>
             <tr>
               <th scope="row"><code>saniwalens optimize</code></th>
-              <td>所見を advisor セッションに渡して動かす。</td>
+              <td>所見をもとに改善案を作ります。advisor（相談相手のセッション）と対話しながら進めます。</td>
             </tr>
             <tr>
               <th scope="row"><code>saniwalens cleanup</code></th>
@@ -104,35 +105,36 @@
     </section>
 
     <section aria-labelledby="views-heading">
-      <h2 id="views-heading">ビュー</h2>
+      <h2 id="views-heading">定番の切り口（ビュー）</h2>
       <p>
-        素のクエリにできない一手間（分類・アルゴリズム・提案）を持った切り口です。
-        範囲は <code>--scope global | project | project:&lt;slug&gt;</code>。
+        定番の見方が要るときは、SQL を書く前にここを見ます。
+        単なるクエリでは書けない分類・提案をまとめた切り口です。
+        使う範囲は <code>--scope global | project | project:&lt;slug&gt;</code> で絞ります。
       </p>
       <figure>
         <figcaption id="views-code">よく使う切り口:</figcaption>
-        <pre role="region" aria-labelledby="views-code" tabindex="0"><code>saniwalens waste                 # 改善余地のランク付けと提案動作
+        <pre role="region" aria-labelledby="views-code" tabindex="0"><code>saniwalens waste                 # どこに無駄があるかを順位付きで見る
 saniwalens inventory               # 全 surface × 実際の利用
 saniwalens overhead                # セッション毎の常時読み込み
 saniwalens usage                   # skill 別の利用回数順
 saniwalens failures                # 繰り返す失敗の分類別ランクと直し方
 saniwalens prompts                 # 指示の出し方の内訳
-saniwalens stuck                   # 書き直しを繰り返した箇所</code></pre>
+saniwalens stuck                   # 同じファイルを書き直し続けた箇所</code></pre>
       </figure>
     </section>
 
     <section aria-labelledby="specs-heading">
       <h2 id="specs-heading">spec 対応表</h2>
-      <p>仕様本文は英語です。各頁の GitHub 上の原文へリンクしています。</p>
+      <p>仕様本文は英語です。下はこのサイト内の spec ページへの対応表で、各ページの末尾から GitHub の原文にも飛べます。</p>
       <ul class="spec-list">
-        <li><a href="./specs/architecture.html"><code>architecture.md</code></a> — SQLite を挟んだ二段階。カタログ × 利用の結合</li>
-        <li><a href="./specs/cli.html"><code>cli.md</code></a> — コマンド契約と報告モデル</li>
-        <li><a href="./specs/surfaces.html"><code>surfaces.md</code></a> — 設定 surface のカタログ</li>
-        <li><a href="./specs/events.html"><code>events.md</code></a> — 利用イベントの spine</li>
-        <li><a href="./specs/storage.html"><code>storage.md</code></a> — ストアの schema と移行</li>
-        <li><a href="./specs/harness.html"><code>harness.md</code></a> — harness 別の契約</li>
-        <li><a href="./specs/session-format.html"><code>session-format*.md</code></a> — harness 別の transcript 形式</li>
-        <li><a href="./specs/config-format.html"><code>config-format*.md</code></a> — harness 別の設定形式</li>
+        <li><a href="./specs/architecture.html"><code>architecture.md</code></a> ― SQLite を挟んだ二段階。カタログ × 利用の結合</li>
+        <li><a href="./specs/cli.html"><code>cli.md</code></a> ― コマンド契約と報告モデル（<a href="./cli.html">生成済み CLI リファレンス</a>も参照）</li>
+        <li><a href="./specs/surfaces.html"><code>surfaces.md</code></a> ― 設定 surface のカタログ</li>
+        <li><a href="./specs/events.html"><code>events.md</code></a> ― 利用イベントの spine</li>
+        <li><a href="./specs/storage.html"><code>storage.md</code></a> ― ストアの schema と移行</li>
+        <li><a href="./specs/harness.html"><code>harness.md</code></a> ― harness 別の契約</li>
+        <li><a href="./specs/session-format.html"><code>session-format*.md</code></a> ― harness 別の transcript 形式</li>
+        <li><a href="./specs/config-format.html"><code>config-format*.md</code></a> ― harness 別の設定形式</li>
       </ul>
     </section>
 
@@ -140,16 +142,18 @@ saniwalens stuck                   # 書き直しを繰り返した箇所</code>
       <h2 id="notes-heading">はまる前の注意</h2>
       <ul>
         <li>数値は順位付け用の利用シグナルであり、<strong>課金台帳ではありません</strong>。</li>
-        <li>ストアは transcript より長生きします — 消すのはキャッシュ破棄ではなく本当の損失です。</li>
-        <li>schema 変更時はその場で移行するので、消して作り直す必要はありません。</li>
-        <li>表本体は英語のまま。<code>--language en|ja</code> が切り替えるのは advisor の促し文だけです。</li>
+        <li>ストアは transcript が消えても残ります ― 消すのはキャッシュ破棄ではなく本当の損失です。</li>
+        <li>schema 変更時は自動でその場で移行されるので、消して作り直す必要はありません。</li>
+        <li>一覧表は英語のまま。<code>--language en|ja</code> が切り替えるのは advisor への指示文だけです。</li>
       </ul>
     </section>
   </main>
 
   <footer>
     <p>
-      saniwalens — MIT。ソースは <a href="https://github.com/armaniacs/saniwalens">GitHub</a>。
+      saniwalens ― MIT。ソースは <a href="https://github.com/armaniacs/saniwalens">GitHub</a>。
+      使い方の質問は <a href="https://github.com/armaniacs/saniwalens/issues">GitHub の issue</a> へ
+     （セキュリティ報告は非公開 advisory。公開 issue 禁止）。
     </p>
   </footer>
 </body>

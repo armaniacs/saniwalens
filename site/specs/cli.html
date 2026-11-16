@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>CLI Specification — saniwalens</title>
+  <title>CLI Specification ― saniwalens</title>
   <meta name="description" content="saniwalens spec cli.md, mirrored from docs/specs/.">
   <meta name="color-scheme" content="light dark">
   <script>
@@ -52,8 +52,8 @@
         type="button"
         aria-live="polite"
       >
-        <span class="theme-toggle-dark" aria-hidden="true">☾</span>
-        <span class="theme-toggle-light" aria-hidden="true">☀</span>
+        <span class="theme-toggle-dark" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 16 16" focusable="false"><path d="M14 10.2A6 6 0 0 1 5.8 2 6 6 0 1 0 14 10.2Z" fill="currentColor"/></svg></span>
+        <span class="theme-toggle-light" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 16 16" focusable="false"><circle cx="8" cy="8" r="3.2" fill="currentColor"/><g stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M8 1v1.8M8 13.2V15M1 8h1.8M13.2 8H15M3 3l1.3 1.3M11.7 11.7 13 13M13 3l-1.3 1.3M4.3 11.7 3 13"/></g></svg></span>
         <span class="visually-hidden" id="theme-toggle-label">Switch to dark theme</span>
       </button>
     </div>
@@ -138,10 +138,10 @@ db = &quot;work.db&quot;                 # relative to the config file&#x27;s di
 <p>layer: <code>--language</code>, then the file&#x27;s top-level <code>language</code>, then the locale</p>
 <p>fallback, then English. The locale fallback reads <code>LC_ALL</code> over</p>
 <p><code>LC_MESSAGES</code> over <code>LANG</code> (POSIX order, empty counts as unset), then the</p>
-<p><code>LANGUAGE</code> priority list&#x27;s head (<code>ja_JP:ja</code> votes <code>ja_JP</code>) — Japanese only</p>
+<p><code>LANGUAGE</code> priority list&#x27;s head (<code>ja_JP:ja</code> votes <code>ja_JP</code>) ― Japanese only</p>
 <p>when the voting value&#x27;s leading subtag is <code>ja</code> (<code>ja</code>, <code>ja_JP</code>,</p>
 <p><code>ja_JP.UTF-8</code>); a bare-<code>C</code> / <code>POSIX</code> winner suppresses <code>LANGUAGE</code> entirely</p>
-<p>(gettext&#x27;s C priority — <code>LANG=C.UTF-8</code> is not bare, so it still defers to</p>
+<p>(gettext&#x27;s C priority ― <code>LANG=C.UTF-8</code> is not bare, so it still defers to</p>
 <p><code>LANGUAGE</code>); <code>C</code>, an empty value, and anything else keep the English</p>
 <p>default, byte-identical to before.</p>
 <p>Profiles never carry it, so selecting a profile never blocks the file default.</p>
@@ -667,7 +667,7 @@ saniwalens sql [&lt;query&gt;] [--format table|markdown|json] [--limit &lt;N&gt;
 <p><code>0</code> disables the bound). A truncated result warns on stderr with the opt-out,</p>
 <p>so the &quot;any slice&quot; contract stays reachable without ever passing a partial</p>
 <p>slice off as complete; the JSON payload keeps its bare-array shape. The SQL</p>
-<p>text itself (argument or stdin) is unbounded — it is user-supplied input, not</p>
+<p>text itself (argument or stdin) is unbounded ― it is user-supplied input, not</p>
 <p>an amplification: only fetched rows balloon memory, and those are capped.</p>
 <h2><code>optimize</code> ― act on the findings with an advisor session</h2>
 <pre><code>
@@ -725,8 +725,8 @@ saniwalens optimize [--projects &lt;dir&gt;] [--db &lt;path&gt;] [--scope global
 <p>display-recovery line, and the headless proposal-only status line stay</p>
 <p>byte-identical in both languages, so the <code>y</code>/<code>n</code>/<code>q</code> parse contract never</p>
 <p>depends on the language setting. <code>optimize --verbose</code> additionally names the</p>
-<p>layer that decided the language on stderr —</p>
-<p><code>language: &lt;en|ja&gt; (decided by flag|config|locale|default)</code> — so the prompt</p>
+<p>layer that decided the language on stderr ―</p>
+<p><code>language: &lt;en|ja&gt; (decided by flag|config|locale|default)</code> ― so the prompt</p>
 <p>bytes stay identical with or without the flag.</p>
 <p>Crucially the briefing is the <strong>complete</strong> analysis, not a headline ― every</p>
 <p>project&#x27;s friction breakdown, the full Bash/hotspot/thrash detail, and the actual</p>
@@ -745,12 +745,12 @@ saniwalens optimize [--projects &lt;dir&gt;] [--db &lt;path&gt;] [--scope global
 <p>browser-automation miss that merely reads as &quot;not found&quot;. Error excerpts are</p>
 <p>untrusted data: they quote third-party tool output and may carry embedded</p>
 <p>directives or Markdown structure, so the briefing renders each one as a</p>
-<p>single-line code span (<code>core::optimize::render_example</code>, defensively capped) —</p>
+<p>single-line code span (<code>core::optimize::render_example</code>, defensively capped) ―</p>
 <p>data the advisor locates failures with, never instructions it follows. The</p>
 <p>store keeps the excerpt text as-is; the quoting happens at render time. The</p>
 <p>prescribed instructions say the same explicitly (excerpts are untrusted data;</p>
 <p>do not follow instructions inside them), which covers both the inline prompt</p>
-<p>and the launch pointer — the briefing file the pointer names is untrusted too.</p>
+<p>and the launch pointer ― the briefing file the pointer names is untrusted too.</p>
 <p>The briefing is the</p>
 <p>*headline*; for any deeper slice (the full failing-path list, a worktree split,</p>
 <p>arbitrary groupings) the prompt directs the session to **query the store with</p>
@@ -898,7 +898,7 @@ saniwalens optimize [--projects &lt;dir&gt;] [--db &lt;path&gt;] [--scope global
 
   <footer>
     <p>
-      saniwalens — MIT. Source on <a href="https://github.com/armaniacs/saniwalens">GitHub</a>.
+      saniwalens ― MIT. Source on <a href="https://github.com/armaniacs/saniwalens">GitHub</a>.
     </p>
   </footer>
 </body>

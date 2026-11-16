@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Config Format Specification — opencode — saniwalens</title>
+  <title>Config Format Specification ― opencode ― saniwalens</title>
   <meta name="description" content="saniwalens spec config-format-opencode.md, mirrored from docs/specs/.">
   <meta name="color-scheme" content="light dark">
   <script>
@@ -52,30 +52,30 @@
         type="button"
         aria-live="polite"
       >
-        <span class="theme-toggle-dark" aria-hidden="true">☾</span>
-        <span class="theme-toggle-light" aria-hidden="true">☀</span>
+        <span class="theme-toggle-dark" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 16 16" focusable="false"><path d="M14 10.2A6 6 0 0 1 5.8 2 6 6 0 1 0 14 10.2Z" fill="currentColor"/></svg></span>
+        <span class="theme-toggle-light" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 16 16" focusable="false"><circle cx="8" cy="8" r="3.2" fill="currentColor"/><g stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M8 1v1.8M8 13.2V15M1 8h1.8M13.2 8H15M3 3l1.3 1.3M11.7 11.7 13 13M13 3l-1.3 1.3M4.3 11.7 3 13"/></g></svg></span>
         <span class="visually-hidden" id="theme-toggle-label">Switch to dark theme</span>
       </button>
     </div>
   </header>
 
   <main id="main">
-    <h1>Config Format Specification — opencode</h1>
+    <h1>Config Format Specification ― opencode</h1>
 <p>This spec catalogues what the <strong>adapter layer</strong> knows about opencode **config</p>
-<p>files** — the catalog half for the opencode harness. Its Claude Code sibling</p>
+<p>files** ― the catalog half for the opencode harness. Its Claude Code sibling</p>
 <p>is <code>config-format.md</code>; the join semantics are shared (<code>surfaces.md</code>). Only the</p>
 <p>adapter uses the paths and shapes below. Like every upstream-tracking spec,</p>
 <p>this one describes what was observed and marks what was not.</p>
 <blockquote>
 <p>Observed against a real <code>~/.config/opencode/</code> tree (opencode <code>1.x</code>). No</p>
 <p>project-level <code>.opencode/</code> directory and no MCP definition were present in</p>
-<p>this environment — the project layout and the MCP site below follow the</p>
+<p>this environment ― the project layout and the MCP site below follow the</p>
 <p>documented conventions and are marked as such until a live tree confirms</p>
 <p>them.</p>
 </blockquote>
 <h2>Where config lives</h2>
 <p>Config exists at two scopes; project overrides/extends global. The adapter</p>
-<p>scans both and records the scope on each surface — <code>Scope::Project</code> carries</p>
+<p>scans both and records the scope on each surface ― <code>Scope::Project</code> carries</p>
 <p>the owning project&#x27;s directory, since many projects coexist in one store</p>
 <p>(<code>harness.md</code>: <code>project</code> is the session&#x27;s <code>directory</code> verbatim).</p>
 <div class="table-scroll" role="region" tabindex="0">
@@ -96,12 +96,12 @@
 </tr>
 <tr>
 <th scope="row"><code>claude_md</code></th scope="row">
-<td>— (unverified; not scanned)</td>
+<td>― (unverified; not scanned)</td>
 <td><code>&lt;project&gt;/AGENTS.md</code> (+ its <code>@import</code>s)</td>
 </tr>
 </tbody></table></div>
 <p><code>~/.config</code> throughout means <code>$XDG_CONFIG_HOME</code> when that variable names an</p>
-<p>absolute path, else <code>~/.config</code> — the XDG rule, mirroring how the store</p>
+<p>absolute path, else <code>~/.config</code> ― the XDG rule, mirroring how the store</p>
 <p>resolution treats <code>XDG_STATE_HOME</code>.</p>
 <p>Which project roots get scanned is driven by the *sessions*, exactly as for</p>
 <p>Claude Code: <code>analyze</code> collects the distinct session directories and scans</p>
@@ -113,7 +113,7 @@
 <p>surface records the whole file as <code>static_tokens</code> (its invocation cost) and</p>
 <p>the description alone as <code>startup_tokens</code>, under</p>
 <p><code>LoadMode::StartupDescription</code>. The token estimator is the shared</p>
-<p><code>approx_tokens</code> (roughly four characters per token) — a ranking signal, not</p>
+<p><code>approx_tokens</code> (roughly four characters per token) ― a ranking signal, not</p>
 <p>a billing figure.</p>
 <p><strong>The startup-listing is an assumption</strong>, stated here so a wrong table entry</p>
 <p>can be found: it was not verified against opencode&#x27;s prompt construction the</p>
@@ -125,7 +125,7 @@
 <p>continuation lines); a file declaring none costs zero at startup. Unknown</p>
 <p>frontmatter keys are ignored.</p>
 <p><code>AGENTS.md</code> reuses the shared <code>claude_md</code> weighing (whole text,</p>
-<p><code>StartupFull</code>, <code>@import</code> files as their own surfaces) — opencode reads the</p>
+<p><code>StartupFull</code>, <code>@import</code> files as their own surfaces) ― opencode reads the</p>
 <p>same file the Claude Code adapter weighs, so the cost lands identically.</p>
 <p><code>CLAUDE.md</code> is deliberately <strong>not</strong> scanned: opencode&#x27;s documented</p>
 <p>instruction file is <code>AGENTS.md</code>, and cataloguing a file the harness never</p>
@@ -139,27 +139,27 @@
 <p>substring-matching it would misread discussions *about* commands), so no</p>
 <p>event can ever join them. The core already treats unknown kinds as</p>
 <p>catalog-only (<code>is_usage_measurable</code> lists only measurable kinds), which is</p>
-<p>why no core change backs this spec — absence of events is never read as</p>
+<p>why no core change backs this spec ― absence of events is never read as</p>
 <p>disuse.</p>
 <ul>
 <li><code>agent</code> surfaces take the file stem as id and join <code>agent_spawn</code> events by</li>
 </ul>
 <p>the <code>task</code> tool&#x27;s <code>subagent_type</code>. Built-in agents (<code>build</code>, <code>explore</code>,</p>
 <p>…) exercised without a matching file surface appear as <strong>orphaned usage</strong>,</p>
-<p>the mirror of unused config — reported, not hidden.</p>
+<p>the mirror of unused config ― reported, not hidden.</p>
 <ul>
 <li>A surface existing at both scopes under one <code>(kind, id)</code> resolves per</li>
 </ul>
 <p>project (project shadows global), exactly as for Claude Code.</p>
 <h2>Deliberately out of v1</h2>
 <ul>
-<li><strong>Skills — catalogued from the six documented sites</strong> (<code>docs/skills/</code>):</li>
+<li><strong>Skills ― catalogued from the six documented sites</strong> (<code>docs/skills/</code>):</li>
 </ul>
 <p>opencode-native (<code>.opencode/skills/</code>, <code>~/.config/opencode/skills/</code>) first,</p>
 <p>then the compatible homes opencode also loads (<code>.claude/skills/</code>,</p>
 <p><code>.agents/skills/</code>, and their global forms). Sites may reach one shared</p>
 <p>directory through symlinks (<code>.opencode/skills -&gt; ../.agents/skills</code> is the</p>
-<p>observed shape), so surfaces dedup by <strong>canonical path</strong> — one row per</p>
+<p>observed shape), so surfaces dedup by <strong>canonical path</strong> ― one row per</p>
 <p>actual definition, no matter how many sites reach it. Deduping by name</p>
 <p>instead would mark the shared definition unused at one scope (a wedge the</p>
 <p>catalog manufactured); deduping by path keeps one honest row joined by</p>
@@ -168,13 +168,13 @@
 <li><strong>MCP servers.</strong> No MCP definition was present (<code>opencode.json</code> carries no</li>
 </ul>
 <p><code>mcp</code> key here), and no MCP-namespaced tool appeared in the usage sample,</p>
-<p>so the server↔tool join cannot be pinned down. Skipped until both halves</p>
+<p>so the server⇔tool join cannot be pinned down. Skipped until both halves</p>
 <p>are observed together.</p>
 <ul>
 <li>**<code>permission</code> surfaces.** The <code>opencode.json</code> permission table is real,</li>
 </ul>
 <p>but no runtime denial signal joins it (see <code>session-format-opencode.md</code>),</p>
-<p>so every entry would read &quot;unused&quot; — a false wedge manufactured by the</p>
+<p>so every entry would read &quot;unused&quot; ― a false wedge manufactured by the</p>
 <p>catalog, not found in usage. Skipped until a denial marker is found.</p>
 <ul>
 <li>**Global <code>AGENTS.md</code>.** Whether opencode loads one is unverified; only the</li>
@@ -184,7 +184,7 @@
       <ul class="prev-next">
       <li><a rel="prev" href="./config-format.html">← Config Format Specification</a></li>
       <li><a href="../specs.html">Specs index</a></li>
-      <li><a rel="next" href="./config-format-kilocode.html">Config Format Specification — kilocode →</a></li>
+      <li><a rel="next" href="./config-format-kilocode.html">Config Format Specification ― kilocode →</a></li>
       </ul>
     </nav>
     <p><a href="https://github.com/armaniacs/saniwalens/blob/main/docs/specs/config-format-opencode.md">Source: config-format-opencode.md</a></p>
@@ -193,7 +193,7 @@
 
   <footer>
     <p>
-      saniwalens — MIT. Source on <a href="https://github.com/armaniacs/saniwalens">GitHub</a>.
+      saniwalens ― MIT. Source on <a href="https://github.com/armaniacs/saniwalens">GitHub</a>.
     </p>
   </footer>
 </body>

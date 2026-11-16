@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Docs — saniwalens</title>
+  <title>Docs ― saniwalens</title>
   <meta name="description" content="saniwalens commands, views, and the design-spec map.">
   <meta name="color-scheme" content="light dark">
   <script>
@@ -52,8 +52,8 @@
         type="button"
         aria-live="polite"
       >
-        <span class="theme-toggle-dark" aria-hidden="true">☾</span>
-        <span class="theme-toggle-light" aria-hidden="true">☀</span>
+        <span class="theme-toggle-dark" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 16 16" focusable="false"><path d="M14 10.2A6 6 0 0 1 5.8 2 6 6 0 1 0 14 10.2Z" fill="currentColor"/></svg></span>
+        <span class="theme-toggle-light" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 16 16" focusable="false"><circle cx="8" cy="8" r="3.2" fill="currentColor"/><g stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M8 1v1.8M8 13.2V15M1 8h1.8M13.2 8H15M3 3l1.3 1.3M11.7 11.7 13 13M13 3l-1.3 1.3M4.3 11.7 3 13"/></g></svg></span>
         <span class="visually-hidden" id="theme-toggle-label">Switch to dark theme</span>
       </button>
     </div>
@@ -70,7 +70,7 @@
       <h2 id="pipeline-heading">Pipeline</h2>
       <div class="table-scroll" role="region" aria-label="Pipeline commands" tabindex="0">
         <table>
-          <caption>Analyze once, read many times — the store decouples the stages</caption>
+          <caption>Analyze once, read many times ― the store decouples the stages</caption>
           <thead>
             <tr>
               <th scope="col">Command</th>
@@ -80,7 +80,7 @@
           <tbody>
             <tr>
               <th scope="row"><code>saniwalens doctor</code></th>
-              <td>The health check, split global / per-project — <strong>start here</strong>.</td>
+              <td>The health check, split global / per-project ― <strong>start here</strong>.</td>
             </tr>
             <tr>
               <th scope="row"><code>saniwalens analyze</code></th>
@@ -124,14 +124,14 @@ saniwalens stuck                  # files the agent got stuck re-editing</code><
     <section aria-labelledby="specs-heading">
       <h2 id="specs-heading">Spec map</h2>
       <ul class="spec-list">
-        <li><a href="./specs/architecture.html"><code>architecture.md</code></a> — two stages decoupled by SQLite; catalog × usage join</li>
-        <li><a href="./specs/cli.html"><code>cli.md</code></a> — command contract and reporting model (<a href="./cli.html">generated CLI reference</a>)</li>
-        <li><a href="./specs/surfaces.html"><code>surfaces.md</code></a> — configuration-surface catalog</li>
-        <li><a href="./specs/events.html"><code>events.md</code></a> — usage-event spine</li>
-        <li><a href="./specs/storage.html"><code>storage.md</code></a> — store schema and migration</li>
-        <li><a href="./specs/harness.html"><code>harness.md</code></a> — per-harness contract</li>
-        <li><a href="./specs/session-format.html"><code>session-format*.md</code></a> — transcript formats per harness</li>
-        <li><a href="./specs/config-format.html"><code>config-format*.md</code></a> — config formats per harness</li>
+        <li><a href="./specs/architecture.html"><code>architecture.md</code></a> ― two stages decoupled by SQLite; catalog × usage join</li>
+        <li><a href="./specs/cli.html"><code>cli.md</code></a> ― command contract and reporting model (<a href="./cli.html">generated CLI reference</a>)</li>
+        <li><a href="./specs/surfaces.html"><code>surfaces.md</code></a> ― configuration-surface catalog</li>
+        <li><a href="./specs/events.html"><code>events.md</code></a> ― usage-event spine</li>
+        <li><a href="./specs/storage.html"><code>storage.md</code></a> ― store schema and migration</li>
+        <li><a href="./specs/harness.html"><code>harness.md</code></a> ― per-harness contract</li>
+        <li><a href="./specs/session-format.html"><code>session-format*.md</code></a> ― transcript formats per harness</li>
+        <li><a href="./specs/config-format.html"><code>config-format*.md</code></a> ― config formats per harness</li>
       </ul>
     </section>
 
@@ -139,7 +139,7 @@ saniwalens stuck                  # files the agent got stuck re-editing</code><
       <h2 id="notes-heading">Notes that save you a surprise</h2>
       <ul>
         <li>Counts are usage signals for ranking, <strong>not a billing ledger</strong>.</li>
-        <li>The store outlives your transcripts — deleting it is a real loss, not a cache flush.</li>
+        <li>The store outlives your transcripts ― deleting it is a real loss, not a cache flush.</li>
         <li>The store migrates in place across schema changes; you never need to delete it.</li>
         <li>Report tables stay English; <code>--language en|ja</code> switches only the advisor prompt.</li>
       </ul>
@@ -148,7 +148,7 @@ saniwalens stuck                  # files the agent got stuck re-editing</code><
 
   <footer>
     <p>
-      saniwalens — MIT. Source on <a href="https://github.com/armaniacs/saniwalens">GitHub</a>.
+      saniwalens ― MIT. Source on <a href="https://github.com/armaniacs/saniwalens">GitHub</a>.
     </p>
   </footer>
 </body>

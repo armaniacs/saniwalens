@@ -4,7 +4,7 @@
 Reads `docs/specs/*.md` and (optionally) the built `saniwalens` binary's
 `--help` output, and writes `site/specs.html` / `site/cli.html` using the same
 header/nav/footer shell as the hand-written pages (so the modern-web-guidance
-patterns — landmarks, popover nav, color-scheme handling — carry over).
+patterns ― landmarks, popover nav, color-scheme handling ― carry over).
 
 The generated files are committed: Pages deploys `site/` with no build step,
 so what you see here is what ships. Re-run after editing specs or CLI help:
@@ -71,7 +71,7 @@ def page_shell(
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>{html.escape(title)} — saniwalens</title>
+  <title>{html.escape(title)} ― saniwalens</title>
   <meta name="description" content="{html.escape(desc)}">
   <meta name="color-scheme" content="light dark">
   <script>
@@ -115,8 +115,8 @@ def page_shell(
         type="button"
         aria-live="polite"
       >
-        <span class="theme-toggle-dark" aria-hidden="true">☾</span>
-        <span class="theme-toggle-light" aria-hidden="true">☀</span>
+        <span class="theme-toggle-dark" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 16 16" focusable="false"><path d="M14 10.2A6 6 0 0 1 5.8 2 6 6 0 1 0 14 10.2Z" fill="currentColor"/></svg></span>
+        <span class="theme-toggle-light" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 16 16" focusable="false"><circle cx="8" cy="8" r="3.2" fill="currentColor"/><g stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M8 1v1.8M8 13.2V15M1 8h1.8M13.2 8H15M3 3l1.3 1.3M11.7 11.7 13 13M13 3l-1.3 1.3M4.3 11.7 3 13"/></g></svg></span>
         <span class="visually-hidden" id="theme-toggle-label">Switch to dark theme</span>
       </button>
     </div>
@@ -128,7 +128,7 @@ def page_shell(
 
   <footer>
     <p>
-      saniwalens — MIT. Source on <a href="https://github.com/armaniacs/saniwalens">GitHub</a>.
+      saniwalens ― MIT. Source on <a href="https://github.com/armaniacs/saniwalens">GitHub</a>.
     </p>
   </footer>
 </body>
@@ -153,6 +153,18 @@ def inline_md(text: str) -> str:
 
 
 SPEC_STEMS = {name[:-3] for name in SPEC_FILES}
+
+# docs-charset 置換表のうち本文に出るもの。コードブロックは対象外にする
+# (生成物を --fix しても再生成で戻るため、生成時に正規化する)。
+PROSE_CHAR_MAP = str.maketrans({"\u2014": "\u2015", "\u2013": "-", "\u2194": "\u21d4", "\u2195": "\u21d4", "\u2248": "\u2252"})
+
+
+def normalize_prose(fragment: str) -> str:
+    """Apply PROSE_CHAR_MAP outside <pre>…</pre> regions."""
+    parts = re.split(r"(<pre>.*?</pre>)", fragment, flags=re.DOTALL)
+    return "".join(
+        p if p.startswith("<pre>") else p.translate(PROSE_CHAR_MAP) for p in parts
+    )
 
 
 def _link_repl(m: re.Match[str]) -> str:
@@ -308,8 +320,8 @@ def build_specs() -> None:
     for name, title_md, _ in infos:
         stem = name[:-3]
         toc.append(
-            f'      <li><a href="./specs/{stem}.html"><code>{stem}.md</code> — '
-            f"{inline_md(title_md)}</a></li>"
+            f'      <li><a href="./specs/{stem}.html"><code>{stem}.md</code> ― '
+            f"{inline_md(title_md).translate(PROSE_CHAR_MAP)}</a></li>"
         )
     toc.append("    </ul>")
     index_body = (
@@ -337,17 +349,17 @@ def build_specs() -> None:
             p_name, p_title, _ = infos[i - 1]
             prev_link = (
                 f'      <li><a rel="prev" href="./{p_name[:-3]}.html">'
-                f"← {inline_md(p_title)}</a></li>\n"
+                f"← {inline_md(p_title).translate(PROSE_CHAR_MAP)}</a></li>\n"
             )
         if i < len(infos) - 1:
             n_name, n_title, _ = infos[i + 1]
             next_link = (
                 f'      <li><a rel="next" href="./{n_name[:-3]}.html">'
-                f"{inline_md(n_title)} →</a></li>\n"
+                f"{inline_md(n_title).translate(PROSE_CHAR_MAP)} →</a></li>\n"
             )
         body = (
-            f"    <h1>{inline_md(title_md)}</h1>\n"
-            + md_to_html(body_md, demote=0)
+            f"    <h1>{inline_md(title_md).translate(PROSE_CHAR_MAP)}</h1>\n"
+            + normalize_prose(md_to_html(body_md, demote=0))
             + "\n    <nav aria-label=\"Spec pages\">\n"
             + '      <ul class="prev-next">\n'
             + prev_link
@@ -358,7 +370,7 @@ def build_specs() -> None:
         )
         (specs_dir / f"{stem}.html").write_text(
             page_shell(
-                title=re.sub(r"[`*_]", "", title_md),
+                title=re.sub(r"[`*_]", "", title_md).translate(PROSE_CHAR_MAP),
                 desc=f"saniwalens spec {name}, mirrored from docs/specs/.",
                 body=body,
                 base="..",

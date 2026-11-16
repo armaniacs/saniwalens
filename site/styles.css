@@ -253,6 +253,12 @@ a:hover {
   line-height: 1;
 }
 
+.theme-toggle svg {
+  inline-size: 1em;
+  block-size: 1em;
+  vertical-align: -0.125em;
+}
+
 /* System light (or pinned light): offer dark. Pinned dark (or system dark): offer light. */
 .theme-toggle-light {
   display: none;

@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Surfaces Specification — saniwalens</title>
+  <title>Surfaces Specification ― saniwalens</title>
   <meta name="description" content="saniwalens spec surfaces.md, mirrored from docs/specs/.">
   <meta name="color-scheme" content="light dark">
   <script>
@@ -52,8 +52,8 @@
         type="button"
         aria-live="polite"
       >
-        <span class="theme-toggle-dark" aria-hidden="true">☾</span>
-        <span class="theme-toggle-light" aria-hidden="true">☀</span>
+        <span class="theme-toggle-dark" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 16 16" focusable="false"><path d="M14 10.2A6 6 0 0 1 5.8 2 6 6 0 1 0 14 10.2Z" fill="currentColor"/></svg></span>
+        <span class="theme-toggle-light" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 16 16" focusable="false"><circle cx="8" cy="8" r="3.2" fill="currentColor"/><g stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M8 1v1.8M8 13.2V15M1 8h1.8M13.2 8H15M3 3l1.3 1.3M11.7 11.7 13 13M13 3l-1.3 1.3M4.3 11.7 3 13"/></g></svg></span>
         <span class="visually-hidden" id="theme-toggle-label">Switch to dark theme</span>
       </button>
     </div>
@@ -61,7 +61,7 @@
 
   <main id="main">
     <h1>Surfaces Specification</h1>
-<p>A <strong>surface</strong> is one configurable thing in a Claude Code setup — a skill, a</p>
+<p>A <strong>surface</strong> is one configurable thing in a Claude Code setup ― a skill, a</p>
 <p>rule, an MCP server, a hook, a permission, an <code>CLAUDE.md</code>, an agent. This spec</p>
 <p>defines the surface catalog and the <strong>catalog × usage join</strong> that is the whole</p>
 <p>point of the tool (<code>architecture.md</code>): relating *what is installed and what it</p>
@@ -70,13 +70,13 @@
 <h2>The catalog</h2>
 <p>The adapter reads config into one <code>surface</code> per configurable thing, each with:</p>
 <ul>
-<li>a stable <code>(kind, id)</code> identity — the join key events also carry;</li>
+<li>a stable <code>(kind, id)</code> identity ― the join key events also carry;</li>
 <li>two <strong>costs</strong>, because one figure cannot answer both questions: a **static</li>
 </ul>
-<p>cost** (the whole definition — for a skill or agent, what invoking it costs)</p>
+<p>cost** (the whole definition ― for a skill or agent, what invoking it costs)</p>
 <p>and a <strong>startup cost</strong> (the slice loaded into every session, which is all that</p>
 <p>removing the surface reclaims), plus its <strong>load mode</strong> (startup-full /</p>
-<p>startup-description / path-conditional / on-demand / tool-schema — see</p>
+<p>startup-description / path-conditional / on-demand / tool-schema ― see</p>
 <p><code>config-format.md</code>). Load mode is what separates always-on tax from per-use</p>
 <p>cost, and which slice of the text each cost covers;</p>
 <ul>
@@ -85,13 +85,13 @@
 <p>The catalog is the denominator of every optimization question: you cannot call a</p>
 <p>surface &quot;unused&quot; without knowing it was installed in the first place. A surface</p>
 <p>exercised in a transcript but absent from the catalog (e.g. a skill that was</p>
-<p>since deleted) is also meaningful — it is reported as <strong>orphaned usage</strong>, the</p>
+<p>since deleted) is also meaningful ― it is reported as <strong>orphaned usage</strong>, the</p>
 <p>mirror of unused config.</p>
 <p>A surface exists at the global scope, in any number of projects, or both. The</p>
 <p>catalog keeps every row (scope + owning project), and the join resolves each</p>
-<p>event against the <strong>effective surface for its session&#x27;s project</strong> — that</p>
+<p>event against the <strong>effective surface for its session&#x27;s project</strong> ― that</p>
 <p>project&#x27;s copy shadows global there, while other projects&#x27; events still land on</p>
-<p>the global row — so one event never double-counts across scopes and one</p>
+<p>the global row ― so one event never double-counts across scopes and one</p>
 <p>project&#x27;s usage never inflates another&#x27;s copy (<code>storage.md</code> &quot;Surface identity,</p>
 <p>scope, and the effective join&quot;). Scope is also the routing key for reports: a</p>
 <p>wedge on a project-scoped surface is that project&#x27;s finding, not a global one</p>
@@ -101,7 +101,7 @@
 <p><code>~/Desktop</code>, <code>~/Downloads</code> behind a permission prompt), so a catalog scan of a</p>
 <p>project there can fail with a permission error. A silent empty result would</p>
 <p>read as &quot;nothing configured here&quot; and turn every live surface into orphaned</p>
-<p>usage — a wedge the environment manufactures, not found in the input. So a</p>
+<p>usage ― a wedge the environment manufactures, not found in the input. So a</p>
 <p>missing directory stays silent (the scope may simply not exist), while any</p>
 <p>other read failure prints one stderr warning naming the directory; the affected</p>
 <p>surfaces stay uncatalogued until the permission is granted or the config moves.</p>
@@ -132,7 +132,7 @@
 <tr>
 <th scope="row"><code>permission</code></th scope="row">
 <td>usage-measurable (partly heuristic)</td>
-<td><code>permission_prompt</code> from the denial marker, falling back to denial text — lower confidence</td>
+<td><code>permission_prompt</code> from the denial marker, falling back to denial text ― lower confidence</td>
 </tr>
 <tr>
 <th scope="row"><code>rule</code></th scope="row">
@@ -147,10 +147,10 @@
 <tr>
 <th scope="row"><code>claude_md</code></th scope="row">
 <td><strong>catalog-only</strong></td>
-<td>none (always-on; usage is not the question — static cost is)</td>
+<td>none (always-on; usage is not the question ― static cost is)</td>
 </tr>
 </tbody></table></div>
-<p>For a <strong>catalog-only</strong> surface, absence of events is *not* evidence of disuse —</p>
+<p>For a <strong>catalog-only</strong> surface, absence of events is *not* evidence of disuse ―</p>
 <p>no event could ever appear. The join still lists it (with zero usage), but the</p>
 <p>wedges below gate on this class so a rule is never flagged &quot;unused →</p>
 <p>delete&quot; merely for emitting nothing. Hooks left that class once firings became</p>
@@ -178,7 +178,7 @@ flowchart LR
 <p>recommendation possible; neither alone does.</p>
 <h2>Optimization wedges</h2>
 <p>A wedge is a surface-shaped opportunity. The core computes these from the joined</p>
-<p>rows; the report ranks them. None is a verdict — the tool surfaces the wedge with</p>
+<p>rows; the report ranks them. None is a verdict ― the tool surfaces the wedge with</p>
 <p>its evidence; acting (or the future AI layer proposing) is downstream.</p>
 <div class="table-scroll" role="region" tabindex="0">
 <table><thead><tr>
@@ -214,7 +214,7 @@ flowchart LR
 <tr>
 <th scope="row"><strong>Redundant</strong></th scope="row">
 <td>surfaces with overlapping purpose, usage splitting between them</td>
-<td>a similarity signal (not in v1 schema — below)</td>
+<td>a similarity signal (not in v1 schema ― below)</td>
 <td>merge</td>
 </tr>
 <tr>
@@ -232,23 +232,23 @@ flowchart LR
 </tbody></table></div>
 <h3>Ranking by what removal actually saves</h3>
 <p>A wedge is only useful if it says how much *removing the surface saves at</p>
-<p>session start* — and that is not its static token count. Skills and agents load</p>
+<p>session start* ― and that is not its static token count. Skills and agents load</p>
 <p>only their <strong>description</strong> at startup (their body is on-demand), so deleting an</p>
 <p>unused one is <strong>decluttering</strong>, not a token win, even if its body tokenizes</p>
 <p>large. Every view that names a surface therefore ranks by <code>startup_savings</code> and</p>
-<p>reports the two costs <strong>apart</strong> — <code>startup_tokens</code> (what removal reclaims) beside</p>
+<p>reports the two costs <strong>apart</strong> ― <code>startup_tokens</code> (what removal reclaims) beside</p>
 <p>the on-demand body (what invoking it costs), never one figure standing for both.</p>
 <p>The ranking (see <code>core::surface</code>):</p>
 <ul>
-<li><strong>measured tokens</strong> — always-on config (<code>startup_full</code>): removing it saves that</li>
+<li><strong>measured tokens</strong> ― always-on config (<code>startup_full</code>): removing it saves that</li>
 </ul>
 <p>many tokens every session. Ranked first, largest first.</p>
 <ul>
-<li><strong>unknown schema</strong> — an MCP server (<code>tool_schema</code>): a real every-session cost</li>
+<li><strong>unknown schema</strong> ― an MCP server (<code>tool_schema</code>): a real every-session cost</li>
 </ul>
 <p>the catalog cannot weigh; flagged, ranked next.</p>
 <ul>
-<li><strong>declutter</strong> — on-demand / path-conditional bodies (skills, agents,</li>
+<li><strong>declutter</strong> ― on-demand / path-conditional bodies (skills, agents,</li>
 </ul>
 <p>conditional rules): ~no startup cost, so an unused one is namespace hygiene,</p>
 <p>not savings. Ranked last and labelled as such.</p>
@@ -263,12 +263,12 @@ flowchart LR
 <ul>
 <li><strong>Never-fires rule</strong> needs evidence a rule&#x27;s <code>paths:</code> glob *could* have fired.</li>
 </ul>
-<p>The only honest source is session activity — did any file matching the glob</p>
+<p>The only honest source is session activity ― did any file matching the glob</p>
 <p>appear as a read target in the window? Read targets are extracted per</p>
 <p><code>tool_use</code> (<code>file_read</code> events, <code>docs/specs/events.md</code>) and the catalog</p>
 <p>carries each rule&#x27;s globs (<code>attrs_json</code>, <code>docs/specs/storage.md</code>); the waste</p>
 <p>view flags a rule whose globs matched nothing read, with the globs as</p>
-<p>evidence. A window with no read targets at all flags nothing — no evidence,</p>
+<p>evidence. A window with no read targets at all flags nothing ― no evidence,</p>
 <p>never an accusation (this also keeps harnesses without read extraction from</p>
 <p>false-flagging every rule).</p>
 <ul>
@@ -284,7 +284,7 @@ flowchart LR
 <p>identically, which is the documented recall limit.</p>
 <p><strong>Load mode</strong> is a first-class part of a surface because the same static-token</p>
 <p>figure means something very different for a <code>CLAUDE.md</code> paid every session than</p>
-<p>for a skill body paid only when invoked — but load mode is an assumption, so the</p>
+<p>for a skill body paid only when invoked ― but load mode is an assumption, so the</p>
 <p>always-on wedge is confirmed empirically, not asserted:</p>
 <h3>Always-on reconciliation</h3>
 <p><code>static_tokens</code> is a config-side estimate, never a measured runtime component</p>
@@ -297,15 +297,15 @@ flowchart LR
 <p>every session start too, so leaving descriptions out understated the config&#x27;s</p>
 <p>share of the floor by however many skills had accumulated. Surfaces whose startup</p>
 <p>weight is unknown (an MCP schema) stay out of the sum rather than entering it as</p>
-<p>zero — they land in the unattributed residual, where the report already says the</p>
+<p>zero ― they land in the unattributed residual, where the report already says the</p>
 <p>figure is an upper bound on system + tools + MCP.</p>
-<p>The floor must come from an actual session start (the <code>session_start</code> event —</p>
+<p>The floor must come from an actual session start (the <code>session_start</code> event ―</p>
 <p><code>events.md</code>), never from a skill span&#x27;s <code>ctx_start</code>. Spans were the original</p>
 <p>source and are a rejected alternative, not a supported one: a span&#x27;s <code>ctx_start</code></p>
 <p>is the prompt size wherever that skill happened to run, which in a long or</p>
 <p>resumed session is far above what the session started with, so a project whose</p>
 <p>only skill invocations came late reported a mid-session size as its startup cost</p>
-<p>— inverting the advice this section exists to give.</p>
+<p>― inverting the advice this section exists to give.</p>
 <p>What still bounds the figure is the observation set, not the source: a start is a</p>
 <p>lower bound only for a *fresh* session, since a resumed one begins with its</p>
 <p>context already restored. The minimum across a project&#x27;s sessions filters those</p>
@@ -313,8 +313,8 @@ flowchart LR
 <p>the floor, and a project with no observed session start contributes no floor</p>
 <p>rather than a substitute.</p>
 <p>This is implemented as the <code>overhead</code> command (<code>cli.md</code>): it reports the observed</p>
-<p>floor, the readable config that accounts for part of it, and the <strong>residual</strong> —</p>
-<p>the floor minus the config — which is everything not in the user&#x27;s files: the</p>
+<p>floor, the readable config that accounts for part of it, and the <strong>residual</strong> ―</p>
+<p>the floor minus the config ― which is everything not in the user&#x27;s files: the</p>
 <p>system prompt, built-in tools, and <strong>MCP tool schemas</strong> the catalog cannot weigh</p>
 <p>(<code>config-format.md</code> marks <code>mcp_tool</code> static cost unknown). The residual is how</p>
 <p>the tool gives an empirical handle on MCP cost despite not reading the schema:</p>
@@ -329,18 +329,18 @@ flowchart LR
 <p>Because events carry a timestamp, every wedge can be evaluated over a window</p>
 <p>(<code>cli.md</code> bucketing). &quot;Unused&quot; means unused *in the window*; a surface used</p>
 <p>heavily last quarter but never this month is a different signal from one never</p>
-<p>used at all. The catalog is current (read now); usage is historical — the report</p>
+<p>used at all. The catalog is current (read now); usage is historical ― the report</p>
 <p>states the window so &quot;unused&quot; is never mistaken for &quot;never installed&quot;.</p>
 <h2>What the core computes vs. what it leaves open</h2>
 <p>The core computes the join and the wedge classifications above from thresholds</p>
 <p>injected as tuning constants (what counts as &quot;high cost&quot;, &quot;low usage&quot;). It does</p>
 <p><strong>not</strong> rank surfaces against each other by importance, infer intent, or decide</p>
-<p>that a wedge should be acted on — those judgements belong to the human reading</p>
+<p>that a wedge should be acted on ― those judgements belong to the human reading</p>
 <p>the report, or to the <code>optimize</code> AI-proposal session that consumes this same</p>
 <p>joined data.</p>
 <p>Rows whose <code>load_mode</code> label is unknown to the core (not one of the five known</p>
-<p>labels) are <strong>excluded from wedge routing</strong> — no default mode is assumed, since</p>
-<p>any default would misstate savings — and are counted in</p>
+<p>labels) are <strong>excluded from wedge routing</strong> ― no default mode is assumed, since</p>
+<p>any default would misstate savings ― and are counted in</p>
 <p><code>ScopedWedges::unknown_load_modes</code> (raw labels; the count is its length). The</p>
 <p>core stays pure: the CLI renders the warning and the JSON field from that</p>
 <p>count.</p>
@@ -357,7 +357,7 @@ flowchart LR
 
   <footer>
     <p>
-      saniwalens — MIT. Source on <a href="https://github.com/armaniacs/saniwalens">GitHub</a>.
+      saniwalens ― MIT. Source on <a href="https://github.com/armaniacs/saniwalens">GitHub</a>.
     </p>
   </footer>
 </body>

@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Session Format Specification — kilocode — saniwalens</title>
+  <title>Session Format Specification ― kilocode ― saniwalens</title>
   <meta name="description" content="saniwalens spec session-format-kilocode.md, mirrored from docs/specs/.">
   <meta name="color-scheme" content="light dark">
   <script>
@@ -52,32 +52,32 @@
         type="button"
         aria-live="polite"
       >
-        <span class="theme-toggle-dark" aria-hidden="true">☾</span>
-        <span class="theme-toggle-light" aria-hidden="true">☀</span>
+        <span class="theme-toggle-dark" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 16 16" focusable="false"><path d="M14 10.2A6 6 0 0 1 5.8 2 6 6 0 1 0 14 10.2Z" fill="currentColor"/></svg></span>
+        <span class="theme-toggle-light" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 16 16" focusable="false"><circle cx="8" cy="8" r="3.2" fill="currentColor"/><g stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M8 1v1.8M8 13.2V15M1 8h1.8M13.2 8H15M3 3l1.3 1.3M11.7 11.7 13 13M13 3l-1.3 1.3M4.3 11.7 3 13"/></g></svg></span>
         <span class="visually-hidden" id="theme-toggle-label">Switch to dark theme</span>
       </button>
     </div>
   </header>
 
   <main id="main">
-    <h1>Session Format Specification — kilocode</h1>
+    <h1>Session Format Specification ― kilocode</h1>
 <p>This spec catalogues what the <strong>adapter layer</strong> knows about the **kilocode</p>
-<p>session** format — the usage half for the kilocode harness. Its siblings are</p>
+<p>session** format ― the usage half for the kilocode harness. Its siblings are</p>
 <p><code>session-format.md</code> (Claude Code) and <code>session-format-opencode.md</code>; all three</p>
 <p>share the same downstream contract (the internal domain model,</p>
 <p><code>core::span::Record</code>) but describe different upstream shapes. Only the</p>
 <p>adapter may use the field names below</p>
 <p>(<code>.claude/rules/format-isolation.md</code>). The kilocode store is <strong>separate</strong></p>
 <p>from the other stores (one DB per harness), so nothing here constrains the</p>
-<p>other mappings, and vice versa. The shell contract around this mapping — the</p>
+<p>other mappings, and vice versa. The shell contract around this mapping ― the</p>
 <p>harness&#x27;s default <code>--db</code> name, per-task ingest keys, and extraction version</p>
-<p>key — is the <code>harness.md</code> addendum that lands with the CLI wiring, as</p>
+<p>key ― is the <code>harness.md</code> addendum that lands with the CLI wiring, as</p>
 <p>opencode&#x27;s did.</p>
 <blockquote>
 <p>Observed against a real <code>&lt;VSCode globalStorage&gt;/kilocode.kilo-code/tasks/</code></p>
 <p>directory (92 task directories; the <strong>shapes</strong> below come from six of</p>
 <p>them). Counts drift as tasks accumulate; the <strong>shapes</strong> are what matter.</p>
-<p>Every value in an example position is a synthetic stand-in — no real ids,</p>
+<p>Every value in an example position is a synthetic stand-in ― no real ids,</p>
 <p>paths, or prompt text.</p>
 </blockquote>
 <h2>Where sessions live</h2>
@@ -104,13 +104,13 @@
 <p>(<code>~/Library/Application Support/Code/User/globalStorage</code> on macOS,</p>
 <p><code>~/.config/Code/User/globalStorage</code> on Linux). The path varies with the</p>
 <p>editor install (Code / Cursor / VSCodium), so the adapter resolves the</p>
-<p>tasks directory from the harness&#x27;s input root — <code>--projects</code>, whose</p>
+<p>tasks directory from the harness&#x27;s input root ― <code>--projects</code>, whose</p>
 <p>default the <code>harness.md</code> addendum settles when the wiring lands.</p>
 <ul>
 <li>One task directory is <strong>one saniwalens session</strong>. kilocode&#x27;s own</li>
 </ul>
 <p>task⇔session mapping (<code>sessions/&lt;id&gt;/session.json</code>, holding</p>
-<p><code>taskSessionMap</code>) lives outside the tasks tree and is not read — the</p>
+<p><code>taskSessionMap</code>) lives outside the tasks tree and is not read ― the</p>
 <p>adapter never needs it.</p>
 <ul>
 <li>Timestamps are <strong>milliseconds since the Unix epoch</strong> (13 digits), in both</li>
@@ -120,10 +120,10 @@
 <p>kilocode splits what other harnesses keep in one place. The <strong>conversation</strong></p>
 <p>records what the model did but carries <strong>no usage at all</strong>; the **display</p>
 <p>log** carries the usage but no structured conversation. An <code>Assistant</code></p>
-<p>record needs both, so the adapter joins the two files in time order — this</p>
+<p>record needs both, so the adapter joins the two files in time order ― this</p>
 <p>join is the kilocode adapter&#x27;s crux, the way the <code>message.id</code> repetition</p>
 <p>reconciliation is Claude Code&#x27;s.</p>
-<h3><code>api_conversation_history.json</code> — the record spine</h3>
+<h3><code>api_conversation_history.json</code> ― the record spine</h3>
 <p>An array of <code>{role, content, ts, reasoning_details?}</code> messages; <code>content</code></p>
 <p>is an array of blocks in the observed data (a bare string is tolerated as</p>
 <p>text material). The blocks map as follows.</p>
@@ -141,7 +141,7 @@
 <tr>
 <th scope="row"><code>tool_result</code></th scope="row">
 <td>user message</td>
-<td>the tool-result mirror — never a human turn</td>
+<td>the tool-result mirror ― never a human turn</td>
 </tr>
 <tr>
 <th scope="row"><code>tool_use</code></th scope="row">
@@ -151,37 +151,37 @@
 <tr>
 <th scope="row"><code>text</code></th scope="row">
 <td>assistant message</td>
-<td>display only — no record</td>
+<td>display only ― no record</td>
 </tr>
 <tr>
 <th scope="row"><code>reasoning_details</code> (message key)</th scope="row">
 <td>assistant message</td>
-<td>display only — no record</td>
+<td>display only ― no record</td>
 </tr>
 </tbody></table></div>
 <ul>
 <li>A user message is a <code>HumanTurn</code> <strong>when it carries text material</strong> (a</li>
 </ul>
-<p>string or a <code>text</code> block) — including the observed case of a user message</p>
+<p>string or a <code>text</code> block) ― including the observed case of a user message</p>
 <p>carrying text alongside a <code>tool_result</code>. A <code>tool_result</code>-only user message</p>
 <p>is the Anthropic-format mirror of a tool result and must not delimit</p>
 <p>spans.</p>
 <ul>
 <li><code>ts</code> orders the file; there is no message id.</li>
 </ul>
-<h3><code>ui_messages.json</code> — the token source of record</h3>
+<h3><code>ui_messages.json</code> ― the token source of record</h3>
 <p>An array of <code>{ts, type: say|ask, say?/ask?, text, partial?}</code> display rows,</p>
 <p>of which the adapter reads exactly one kind.</p>
 <ul>
-<li><code>say=api_req_started</code> — its <code>text</code> is a JSON string payload</li>
+<li><code>say=api_req_started</code> ― its <code>text</code> is a JSON string payload</li>
 </ul>
 <p>`{apiProtocol, tokensIn, tokensOut, cacheWrites, cacheReads, cost,</p>
 <p>usageMissing, inferenceProvider}<code>. Sampled rows carry </code>usageMissing=false`</p>
 <p>with real tokens; the exception is a request that failed or never</p>
 <p>completed, which stays <code>usageMissing=true</code> with no tokens.</p>
-<p>Everything else — <code>say=text</code> / <code>reasoning</code> / <code>command_output</code> /</p>
+<p>Everything else ― <code>say=text</code> / <code>reasoning</code> / <code>command_output</code> /</p>
 <p><code>checkpoint_saved</code> / <code>user_feedback</code>, and the <code>ask=tool</code> / <code>command</code> /</p>
-<p><code>command_output</code> / <code>followup</code> / <code>resume_task</code> / <code>completion_result</code> rows —</p>
+<p><code>command_output</code> / <code>followup</code> / <code>resume_task</code> / <code>completion_result</code> rows ―</p>
 <p>is display or interaction furniture, unread in v1 (<code>ask=tool</code> is the</p>
 <p>approval point; the signals table explains why it is still not a usage</p>
 <p>signal).</p>
@@ -192,14 +192,14 @@
 <ul>
 <li>Each <code>api_req_started</code> row claims the assistant conversation messages</li>
 </ul>
-<p><strong>strictly between it and the next row</strong> — its *request window*.</p>
+<p><strong>strictly between it and the next row</strong> ― its *request window*.</p>
 <ul>
 <li>One window can hold <strong>more than one assistant message</strong> (observed: pairs</li>
 </ul>
-<p>6–30 s apart, each carrying a <code>tool_use</code> block). The join pairs the row</p>
+<p>6-30 s apart, each carrying a <code>tool_use</code> block). The join pairs the row</p>
 <p>with the whole window, never a single message.</p>
 <ul>
-<li>The row yields **one <code>Assistant</code> record** — never one per assistant</li>
+<li>The row yields **one <code>Assistant</code> record** ― never one per assistant</li>
 </ul>
 <p>message, so there is no repetition to reconcile (the Claude Code</p>
 <p><code>message.id</code> problem does not exist here either)</p>
@@ -209,25 +209,25 @@
 <p>assumption, below)</p>
 <ul>
 <li><code>out_tokens = tokensOut</code></li>
-<li><code>model = &quot;unknown&quot;</code> — the payload carries no model name</li>
+<li><code>model = &quot;unknown&quot;</code> ― the payload carries no model name</li>
 </ul>
 <p>(<code>inferenceProvider</code> is a provider, never a model; mapping one to the</p>
 <p>other would be a guess). The reporting-honesty label for this missing</p>
 <p>model is a <code>cli.md</code> addendum, alongside <code>sub_tokens_estimated</code></p>
 <ul>
-<li>The record is stamped with the window&#x27;s <strong>last</strong> assistant message <code>ts</code> —</li>
+<li>The record is stamped with the window&#x27;s <strong>last</strong> assistant message <code>ts</code> ―</li>
 </ul>
-<p>the request&#x27;s completion point — so the cost record sits *after* its</p>
+<p>the request&#x27;s completion point ― so the cost record sits *after* its</p>
 <p>window&#x27;s tool records instead of inverting the stream (the same lesson</p>
 <p>the opencode adapter recorded about creation-time stamping). A window</p>
 <p>holding no assistant message stamps the row&#x27;s own <code>ts</code>: that row is a</p>
-<p>failed or cancelled request (<code>usageMissing=true</code>, zero tokens) — the</p>
+<p>failed or cancelled request (<code>usageMissing=true</code>, zero tokens) ― the</p>
 <p>request still happened, and it is recorded with zeros, as the opencode</p>
 <p>adapter records an errored request.</p>
 <ul>
 <li>Assistant messages <strong>outside</strong> any window (before the first row) carry no</li>
 </ul>
-<p>cost record — no measured request row, never fabricated.</p>
+<p>cost record ― no measured request row, never fabricated.</p>
 <p>Record order within a session is <code>ts</code> order; within a window the tool</p>
 <p>records come <strong>before</strong> that window&#x27;s <code>Assistant</code> cost record, mirroring the</p>
 <p>opencode adapter&#x27;s ordering.</p>
@@ -239,11 +239,11 @@
 </tr></thead><tbody>
 <tr>
 <th scope="row">Skill invocation</th scope="row">
-<td><strong>none observed</strong> — kilocode config installs <code>skills/</code> and <code>command/*.md</code>, but neither file carries an invocation marker in the samples. The signal stays absent until a marker is measured; a later skills catalog would show live <code>Skill</code> usage as orphaned rows in <code>inventory</code>, which is the honest missing-site signal</td>
+<td><strong>none observed</strong> ― kilocode config installs <code>skills/</code> and <code>command/*.md</code>, but neither file carries an invocation marker in the samples. The signal stays absent until a marker is measured; a later skills catalog would show live <code>Skill</code> usage as orphaned rows in <code>inventory</code>, which is the honest missing-site signal</td>
 </tr>
 <tr>
 <th scope="row">Subagent spawn</th scope="row">
-<td><strong>none observed</strong> — no spawn marker or join key measured. Subagent runs are not ingested; <code>sub_tokens</code>/<code>sub_agent_count</code> stay zero and the split reads as unavailable, as under opencode</td>
+<td><strong>none observed</strong> ― no spawn marker or join key measured. Subagent runs are not ingested; <code>sub_tokens</code>/<code>sub_agent_count</code> stay zero and the split reads as unavailable, as under opencode</td>
 </tr>
 <tr>
 <th scope="row">Tool use</th scope="row">
@@ -251,7 +251,7 @@
 </tr>
 <tr>
 <th scope="row">Tool failure</th scope="row">
-<td>the <code>tool_result</code> paired by <code>tool_use_id</code> carrying <code>is_error == true</code> (1 of 155 sampled blocks — the Anthropic-compatible failure field). The failure rides as a JSON envelope (<code>{&quot;status&quot;:&quot;error&quot;,...,&quot;error&quot;:&quot;...&quot;}</code>) inside a text block, followed by an <code>environment_details</code> block — the envelope is unwrapped per block and the decoration dropped, so the excerpt is the readable message and the classification reads the message, not the envelope&#x27;s own fields</td>
+<td>the <code>tool_result</code> paired by <code>tool_use_id</code> carrying <code>is_error == true</code> (1 of 155 sampled blocks ― the Anthropic-compatible failure field). The failure rides as a JSON envelope (<code>{&quot;status&quot;:&quot;error&quot;,...,&quot;error&quot;:&quot;...&quot;}</code>) inside a text block, followed by an <code>environment_details</code> block ― the envelope is unwrapped per block and the decoration dropped, so the excerpt is the readable message and the classification reads the message, not the envelope&#x27;s own fields</td>
 </tr>
 <tr>
 <th scope="row">User prompt</th scope="row">
@@ -259,32 +259,32 @@
 </tr>
 <tr>
 <th scope="row">Permission denial</th scope="row">
-<td><strong>none observed</strong> — <code>ask=tool</code> rows appear only where approval was requested (12 rows against 49 tool calls in one sampled task; auto-approved calls emit none), so they undercount and are no usage signal. No denial marker in the samples (0 phrasing hits)</td>
+<td><strong>none observed</strong> ― <code>ask=tool</code> rows appear only where approval was requested (12 rows against 49 tool calls in one sampled task; auto-approved calls emit none), so they undercount and are no usage signal. No denial marker in the samples (0 phrasing hits)</td>
 </tr>
 <tr>
 <th scope="row">Retry</th scope="row">
-<td><code>say=api_req_retry_delayed</code> — friction input candidate, not mapped in v1</td>
+<td><code>say=api_req_retry_delayed</code> ― friction input candidate, not mapped in v1</td>
 </tr>
 <tr>
 <th scope="row">Work events</th scope="row">
-<td><code>tool_use</code> inputs, the same way the other adapters report work: <code>execute_command</code>&#x27;s <code>command</code> leading word (<code>bash_cmd</code>); <code>edit_file</code>&#x27;s <code>file_path</code> and <code>apply_diff</code>/<code>search_and_replace</code>/<code>write_to_file</code>&#x27;s <code>path</code> — basename with the full path alongside (<code>file_edit</code>). Reads (<code>read_file</code>, <code>search_files</code>) are not work</td>
+<td><code>tool_use</code> inputs, the same way the other adapters report work: <code>execute_command</code>&#x27;s <code>command</code> leading word (<code>bash_cmd</code>); <code>edit_file</code>&#x27;s <code>file_path</code> and <code>apply_diff</code>/<code>search_and_replace</code>/<code>write_to_file</code>&#x27;s <code>path</code> ― basename with the full path alongside (<code>file_edit</code>). Reads (<code>read_file</code>, <code>search_files</code>) are not work</td>
 </tr>
 </tbody></table></div>
 <p><code>tool_result.tool_use_id</code> joins each failure back to its exact <code>tool_use</code></p>
-<p>block (<code>id</code>), the same join Claude Code uses — the failure inherits the</p>
+<p>block (<code>id</code>), the same join Claude Code uses ― the failure inherits the</p>
 <p>paired tool&#x27;s name and input, and the text is classified with the shared</p>
 <p><code>core::friction</code> vocabulary on the readable message (the envelope and the</p>
 <p><code>environment_details</code> decoration are stripped first: the envelope&#x27;s own</p>
 <p>wording matched the path vocabulary and the decoration&#x27;s file names matched</p>
 <p>timeout). A phrasing outside that vocabulary lands in <code>Other</code> with its tool,</p>
-<p>target, and excerpt intact — never dropped. Teaching the classifier new</p>
+<p>target, and excerpt intact ― never dropped. Teaching the classifier new</p>
 <p>phrasings is a cross-harness change (it re-labels already-ingested sessions,</p>
 <p>so it needs an <code>ANALYZER_VERSION</code> bump); one landed already (&quot;Unknown tool&quot;</p>
 <p>names the missing tool, not a missing path).</p>
 <p>**<code>prompt_size</code> is a documented assumption.** kilocode reports <code>tokensIn</code></p>
 <p>plus <code>cacheReads</code>/<code>cacheWrites</code> but never states whether <code>tokensIn</code> already</p>
 <p>includes cached tokens. The adapter mirrors the Claude Code and opencode sum</p>
-<p>— <code>prompt_size = tokensIn + cacheReads + cacheWrites</code> — so</p>
+<p>― <code>prompt_size = tokensIn + cacheReads + cacheWrites</code> ― so</p>
 <p><code>ctx_growth</code>/<code>ctx_start</code>/<code>ctx_peak</code> keep their meaning. If <code>tokensIn</code></p>
 <p>already includes cache reads this overstates the floor; the <code>overhead</code></p>
 <p>reconciliation (<code>surfaces.md</code>) is the honest check, and this paragraph is</p>
@@ -292,22 +292,22 @@
 <h2>Project root (the cwd field, then a stated heuristic)</h2>
 <p>The format does carry a cwd-style field: every <code>execute_command</code> input carries</p>
 <p><code>cwd</code> (640 of 754 measured rows), and every task that carries one names</p>
-<p>exactly one distinct value — the start working directory. The adapter roots</p>
+<p>exactly one distinct value ― the start working directory. The adapter roots</p>
 <p>the session at the **first absolute <code>cwd</code>**, the same confidence as Claude</p>
 <p>Code&#x27;s first-<code>cwd</code> root. A task with no absolute cwd falls back to the</p>
-<p><strong>common prefix of the leading absolute paths</strong> observed in tool inputs — a</p>
+<p><strong>common prefix of the leading absolute paths</strong> observed in tool inputs ― a</p>
 <p>stated heuristic, since tool paths are overwhelmingly relative (945 relative</p>
 <p>vs 38 absolute measured, and the <code>ask=tool</code> payloads&#x27; <code>path</code> is relative too),</p>
-<p>so the fallback is rare. A task with neither yields an unrooted session —</p>
-<p><code>root</code> stays empty, as a Claude Code transcript with no <code>cwd</code> does — rather</p>
+<p>so the fallback is rare. A task with neither yields an unrooted session ―</p>
+<p><code>root</code> stays empty, as a Claude Code transcript with no <code>cwd</code> does ― rather</p>
 <p>than a guess.</p>
 <h2>What is deliberately not mapped (v1)</h2>
 <ul>
-<li><code>cost</code> (per request) — billing-adjacent and provider-specific; counts are</li>
+<li><code>cost</code> (per request) ― billing-adjacent and provider-specific; counts are</li>
 </ul>
 <p>usage signals for ranking, not a ledger (<code>architecture.md</code>).</p>
 <ul>
-<li><code>apiProtocol</code> / <code>inferenceProvider</code> — protocol metadata, not usage.</li>
+<li><code>apiProtocol</code> / <code>inferenceProvider</code> ― protocol metadata, not usage.</li>
 <li><code>task_metadata.json</code> (<code>files_in_context[]</code>) ― read since PBI 23 as</li>
 </ul>
 <p><code>file_read</code> events stamped with the task&#x27;s start (the metadata carries no</p>
@@ -317,27 +317,27 @@
 <p>stringified into fake paths. The metadata moves the task fingerprint, so a</p>
 <p>later metadata edit re-ingests its task once.</p>
 <ul>
-<li><code>checkpoints/</code> and the task⇔session <code>session.json</code> mapping — unread.</li>
-<li><code>ui_messages.json</code> kinds other than <code>api_req_started</code> — display or</li>
+<li><code>checkpoints/</code> and the task⇔session <code>session.json</code> mapping ― unread.</li>
+<li><code>ui_messages.json</code> kinds other than <code>api_req_started</code> ― display or</li>
 </ul>
 <p>interaction furniture (<code>ask=tool</code> is the approval point; the signals</p>
 <p>table explains why it is not a usage signal).</p>
 <ul>
-<li>Compaction — no marker observed in either file; the context metric is</li>
+<li>Compaction ― no marker observed in either file; the context metric is</li>
 </ul>
 <p>compaction-safe without it (<code>events.md</code>).</p>
 <ul>
-<li>Slash-command invocations typed by the human — no structural wrapper in</li>
+<li>Slash-command invocations typed by the human ― no structural wrapper in</li>
 </ul>
 <p>either file, and substring-matching prompts would misread prose discussing</p>
 <p>commands. Config surfaces (<code>~/.config/kilo/</code>, commands, skills, MCP,</p>
-<p>custom modes) — the catalog half is a separate spec and a separate change.</p>
+<p>custom modes) ― the catalog half is a separate spec and a separate change.</p>
 <h2>Forward compatibility</h2>
 <p>Read only the fields above; ignore unknown <code>say</code>/<code>ask</code> kinds, unknown block</p>
 <p>types, and missing optional keys. A new kilocode tool appears as a generic</p>
 <p><code>ToolUse</code> (still counted in usage), never as a break. A usage payload that</p>
 <p>is missing, unparseable, or marked <code>usageMissing=true</code> yields a zero-token</p>
-<p>request record — a missing measurement is recorded as zero, never</p>
+<p>request record ― a missing measurement is recorded as zero, never</p>
 <p>fabricated, and replace semantics make the in-flight case idempotent on</p>
 <p>re-ingest.</p>
 <p><strong>The full 92-task survey corrected the earlier sample.</strong> The small survey</p>
@@ -346,7 +346,7 @@
 <p>(640 rows, one distinct value per task) and <code>edit_file</code>/<code>search_and_replace</code></p>
 <p>as the real edit names. Fixing the mapping moved 86 of 92 sessions out of</p>
 <p>unrooted and lifted <code>file_edit</code> events from 115 to 570, so it bumped</p>
-<p><code>KILOCODE_ANALYZER_VERSION</code> to <code>2</code> — the survey is the version bump&#x27;s reason.</p>
+<p><code>KILOCODE_ANALYZER_VERSION</code> to <code>2</code> ― the survey is the version bump&#x27;s reason.</p>
 <h2>Golden regression policy</h2>
 <p><code>tests/e2e_golden_harness.rs</code> pins this harness&#x27;s analyze output</p>
 <p>(<code>tests/golden/kilocode.txt</code>): the same synthetic fixture must always</p>
@@ -355,7 +355,7 @@
 <p>blindly regenerated.</p>
     <nav aria-label="Spec pages">
       <ul class="prev-next">
-      <li><a rel="prev" href="./session-format-opencode.html">← Session Format Specification — opencode</a></li>
+      <li><a rel="prev" href="./session-format-opencode.html">← Session Format Specification ― opencode</a></li>
       <li><a href="../specs.html">Specs index</a></li>
       <li><a rel="next" href="./config-format.html">Config Format Specification →</a></li>
       </ul>
@@ -366,7 +366,7 @@
 
   <footer>
     <p>
-      saniwalens — MIT. Source on <a href="https://github.com/armaniacs/saniwalens">GitHub</a>.
+      saniwalens ― MIT. Source on <a href="https://github.com/armaniacs/saniwalens">GitHub</a>.
     </p>
   </footer>
 </body>
