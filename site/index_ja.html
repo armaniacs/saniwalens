@@ -12,6 +12,8 @@
         localStorage.getItem("color-scheme") ?? "light dark";
     } catch (e) {}
   </script>
+  <link rel="icon" type="image/svg+xml" href="./assets/logo.svg">
+  <meta name="theme-color" content="#1a1a24">
   <link rel="stylesheet" href="./styles.css">
   <script defer src="./app.js"></script>
 </head>
@@ -61,6 +63,9 @@
 
   <main id="main">
     <h1>coding-agent の利用を見るレンズ</h1>
+    <figure class="hero">
+      <img class="hero-logo" src="./assets/logo.svg" alt="SANIWA LENS のロゴ" width="800" height="600" fetchpriority="high" decoding="async">
+    </figure>
     <p class="lead">
       <code>saniwalens</code> は agent との対話履歴（transcript）と現在の設定を読み、
       ローカルの SQLite データベース（ストア）に展開します。<strong>時間・トークン・手間がどこで無駄になり、

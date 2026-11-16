@@ -84,6 +84,18 @@ h2 {
   text-wrap: balance;
 }
 
+.hero {
+  margin-inline: 0;
+}
+
+.hero-logo {
+  inline-size: min(100%, 30rem);
+  block-size: auto;
+  border-radius: 1rem;
+  border: 1px solid var(--line);
+  background: #1a1a24;
+}
+
 .lead {
   font-size: clamp(1.05rem, 1rem + 0.4vw, 1.25rem);
   color: var(--ink);

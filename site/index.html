@@ -12,6 +12,8 @@
         localStorage.getItem("color-scheme") ?? "light dark";
     } catch (e) {}
   </script>
+  <link rel="icon" type="image/svg+xml" href="./assets/logo.svg">
+  <meta name="theme-color" content="#1a1a24">
   <link rel="stylesheet" href="./styles.css">
   <script defer src="./app.js"></script>
 </head>
@@ -61,6 +63,9 @@
 
   <main id="main">
     <h1>A lens onto your coding-agent usage</h1>
+    <figure class="hero">
+      <img class="hero-logo" src="./assets/logo.svg" alt="SANIWA LENS logo" width="800" height="600" fetchpriority="high" decoding="async">
+    </figure>
     <p class="lead">
       <code>saniwalens</code> reads your agent session transcripts and live
       configuration, extracts them into a local SQLite store, and shows

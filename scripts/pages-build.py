@@ -80,6 +80,8 @@ def page_shell(
         localStorage.getItem("color-scheme") ?? "light dark";
     }} catch (e) {{}}
   </script>
+  <link rel="icon" type="image/svg+xml" href="{base}/assets/logo.svg">
+  <meta name="theme-color" content="#1a1a24">
   <link rel="stylesheet" href="{base}/styles.css">
   <script defer src="{base}/app.js"></script>
 </head>
