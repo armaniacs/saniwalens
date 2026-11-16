@@ -80,7 +80,7 @@ def page_shell(
         localStorage.getItem("color-scheme") ?? "light dark";
     }} catch (e) {{}}
   </script>
-  <link rel="icon" type="image/svg+xml" href="{base}/assets/logo.svg">
+  <link rel="icon" type="image/svg+xml" href="{base}/assets/favicon.svg">
   <meta name="theme-color" content="#1a1a24">
   <link rel="stylesheet" href="{base}/styles.css">
   <script defer src="{base}/app.js"></script>
@@ -90,7 +90,7 @@ def page_shell(
 
   <header class="site-header">
     <div class="header-inner">
-      <a class="site-logo" href="{base}/index.html" aria-label="saniwalens home">saniwalens</a>
+      <a class="site-logo" href="{base}/index.html" aria-label="saniwalens home"><img src="{base}/assets/favicon.svg" alt="" aria-hidden="true" width="28" height="28">saniwalens</a>
 
       <nav class="site-nav" aria-label="Primary">
         <button

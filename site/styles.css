@@ -150,6 +150,14 @@ a:hover {
   color: var(--ink);
   text-decoration: none;
   margin-inline-end: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.site-logo img {
+  inline-size: 28px;
+  block-size: 28px;
 }
 
 .site-nav {
