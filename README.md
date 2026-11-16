@@ -2,153 +2,188 @@
 
 **English** | [日本語](./README.ja.md)
 
-A lens onto your coding-agent usage. `saniwalens` reads your agent session
-transcripts and
-live configuration, extracts them into a local SQLite store, and shows **where
-time, tokens, and effort are being wasted ― and how to fix it**: unused or heavy
-config, recurring tool failures, where the work gets stuck, and the cost picture
-behind it all.
+A lens onto your coding-agent usage. `saniwalens` reads your agent's session
+transcripts and live configuration, loads them into a local SQLite store, and
+shows **where time, tokens, and effort are wasted ― and how to fix it**: unused
+or heavy config, recurring tool failures, places where work gets stuck, and the
+cost picture behind them.
 
-The design intent lives in [`docs/specs/`](docs/specs/); this README is how to
-run it.
+The design intent lives in [`docs/specs/`](docs/specs/); this README covers how
+to run it.
 
-## Install / build
-
-With Homebrew (macOS and Linux, Intel and arm):
+## Install
 
 ```sh
-brew install armaniacs/saniwalens/saniwalens
+brew install armaniacs/saniwalens/saniwalens   # macOS / Linux
+cargo install saniwalens                       # from crates.io; needs a C compiler for bundled SQLite
+nix run github:armaniacs/saniwalens -- doctor  # try it without installing
+nix profile install github:armaniacs/saniwalens  # put it on PATH (append /vX.Y.Z to pin a release)
 ```
 
-With Cargo, from [crates.io](https://crates.io/crates/saniwalens) (builds from
-source; bundled SQLite needs a C compiler):
-
-```sh
-cargo install saniwalens
-```
-
-With Nix (no toolchain to set up):
-
-```sh
-nix run github:armaniacs/saniwalens -- doctor   # run without installing
-nix profile install github:armaniacs/saniwalens  # install `saniwalens` onto PATH
-nix profile install github:armaniacs/saniwalens/vX.Y.Z  # a specific release
-```
-
-From source ― dev tools are pinned by the Nix flake, tasks run via `just`
-(or plain `make`, which needs nothing but Cargo):
-
-```sh
-nix develop          # enter the dev shell (pinned rust, just, sqlite, …)
-just                 # list tasks
-just check           # rustfmt --check + clippy (the CI gate)
-just test            # cargo test
-just build           # release binary at target/release/saniwalens
-```
-
-```sh
-make                 # list targets (same tasks, no nix/just needed)
-make check           # rustfmt --check + clippy (the CI gate)
-make test            # cargo test
-make build           # release binary at target/release/saniwalens
-make install         # install it to ~/.local/bin (override with PREFIX=/usr/local)
-```
-
-Plain Cargo also works (`cargo build --release`) if you have a recent stable
-Rust; the flake just pins it. CI runs `nix develop -c just check` / `just test`.
-
-Publishing a GitHub Release for a `vX.Y.Z` tag builds binaries for Linux, macOS,
-and Windows (x86_64 and arm64 each), attaches them to that release with
-`.sha256` files, points the
-[`armaniacs/homebrew-saniwalens`](https://github.com/armaniacs/homebrew-saniwalens)
-tap at the new archives, and publishes the crate to crates.io. The release is
-published before its assets are built, so the notes are visible for a few
-minutes with nothing attached yet.
-
-The tag is the only place a version is written down: the release workflow
-rewrites `version` in `Cargo.toml` from it before building and publishing, so
-the committed `0.0.0` is a placeholder and cutting a release never means
-bumping a file first. The flake stamps it too, without being told the tag:
-`VERSION` is marked `export-subst`, so the archive GitHub serves for the tag
-carries the tag in it (see
-[nix-github-release](https://github.com/lambdalisue/nix-github-release)).
-
-The tap covers Linux and macOS only; on Windows, take the `-pc-windows-msvc`
-archive for your arch from the release, or build from source. `CLAUDE_CONFIG_DIR`
-names the config tree directly when it is set to a non-empty path, as it does
-for Claude Code itself. Otherwise ― including when the variable is set but
-empty ― `~/.claude` is located through `HOME`, falling back to `USERPROFILE`
-where Windows leaves `HOME` unset.
+On Windows, download the `-pc-windows-msvc` archive for your architecture from
+the GitHub Release, or build from source. For building from source and the dev
+tasks, see [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
 ## Quick start
 
 ```sh
-# 1. Start here ― a one-screen health check, split into what to fix globally
-#    (~/.claude) vs per project. Analyzes automatically on first run.
+# 1. Start here: a one-screen health check, split into global (~/.claude)
+#    and per-project findings. The first run analyzes automatically.
 saniwalens doctor
 
-# 2. Narrow to the layer you're optimizing.
+# 2. Narrow it to the layer you are tuning.
 saniwalens doctor --scope global
 saniwalens doctor --scope project:<slug>
 
-# 3. Act on the findings: hand them to an advisor session seeded with the
-#    full analysis, which investigates each root cause and proposes fixes.
-#    Interactive (`claude`, `kilo --prompt`) by default; headless harnesses
-#    (opencode) print a plan instead ― add `--apply` to save it and open the
-#    harness's own interactive session to apply it item by item.
+# 3. Act on the findings: an advisor session seeded with the full analysis
+#    investigates each root cause and proposes fixes.
 saniwalens optimize --scope global
 ```
 
-Analysis reads your transcripts (`~/.claude/projects`) and live config ―
-`~/.claude/*` plus each analyzed project's own `.claude/` / `CLAUDE.md` ―
-**read-only** and incrementally, writing the store. Nothing is sent anywhere;
-the store is a local file. Every command takes `--db <path>`; it defaults to
-`${XDG_STATE_HOME:-~/.local/state}/saniwalens/saniwalens.db` ― one per-user store,
-because what is analyzed spans every project, not the directory you run from.
-Pass `--db ./saniwalens.db` if you deliberately want a project-local one (and
-`.gitignore` it). Read commands refresh the store automatically before reporting
-(unchanged transcripts are skipped, so this is fast) and print a freshness line
-on stderr; pass `--frozen` to read the store exactly as it is. Running
-`saniwalens analyze` yourself is only needed to refresh without reading.
+On an interactive terminal, plain `saniwalens` (or `saniwalens tui`) asks for
+the same choices step by step; see [Guided entry](#guided-entry).
+
+### What it reads and where it writes
+
+Analysis is **read-only** and incremental. It reads transcripts
+(`~/.claude/projects`) and live config (`~/.claude/*`, plus each project's
+`.claude/` and `CLAUDE.md`), and writes only the store. Nothing leaves your
+machine. If `CLAUDE_CONFIG_DIR` is set to a non-empty path, it replaces
+`~/.claude`, as in Claude Code itself.
+
+The store is a single per-user file, because the analysis spans every project
+rather than the directory you run from. The default is
+`${XDG_STATE_HOME:-~/.local/state}/saniwalens/saniwalens.db`; every command
+accepts `--db <path>` to override it (gitignore it if you keep it in a project).
+
+Read commands refresh the store before reporting, skipping unchanged
+transcripts, and print a freshness line on stderr. Pass `--frozen` to read the
+store as it is. Run `saniwalens analyze` yourself only to refresh without
+reading.
+
+## Commands
+
+### Pipeline
+
+| Command | What it does |
+| --- | --- |
+| `saniwalens doctor` | Health check, split global / per-project. **Start here.** |
+| `saniwalens analyze` | Load transcripts and config into the store (incremental). Read commands run it automatically. |
+| `saniwalens sql '<query>'` | Run any read-only SQL against the store. |
+| `saniwalens optimize` | Hand the findings to an advisor session to act on. |
+| `saniwalens cleanup` | List (`--list`, the default) or prune (`--keep [N]`, default 10) saved `--apply` plans and backups. Needs no store. |
+
+### Guided entry
+
+`saniwalens` with no subcommand on an interactive terminal (or `saniwalens
+tui`) asks, in order:
+
+1. Which harness (`claude`, `opencode`, `kilocode`). `--harness` or `--profile` skips this.
+2. What to look at (`doctor`, `waste`, `failures`).
+3. Which scope.
+
+It prints the equivalent command before running it (for example `saniwalens
+--harness kilocode waste --scope global`) and again afterwards, so you can
+repeat the run without the guide. After the report it offers to run `optimize`
+for the same harness and scope; a failure there does not stop the guide. On a
+headless harness that command carries `--apply`. Finally it offers to save the
+harness to `config.toml` as `default_harness` or as a named profile, and asks
+before writing.
+
+### Scope
+
+`--scope global | project | project:<slug>` narrows `doctor`, `failures`,
+`waste`, `inventory`, and `optimize` to the layer you are tuning. Unused or
+heavy config is routed by where its file is installed. A recurring failure
+belongs to the project that owns a strict majority of it; otherwise it is a
+cross-project habit and counts as global.
+
+### Views
+
+Each view carries logic a raw query cannot (a classification, an algorithm, a
+suggestion). Add `--format markdown` to paste into a PR or note, or `--format
+json` for typed output on every command. With JSON, stdout carries only the
+JSON; freshness messages go to stderr. Terminal output is colored unless
+`NO_COLOR` is set or the output is piped.
+
+```sh
+saniwalens waste                 # ranked optimization opportunities, with a suggested action
+saniwalens inventory             # every installed surface (with scope) × its actual usage
+saniwalens overhead              # always-on context per session, reconciled with your config
+saniwalens usage                 # per-skill usage, most-invoked first
+saniwalens usage --by month      # per time bucket (JST: year|month|week|day|hour)
+saniwalens failures              # recurring tool failures by category, with fixes
+saniwalens prompts               # how you steer sessions (steer/correct/question/instruct)
+saniwalens stuck                 # files the agent kept re-editing in rapid bursts
+```
+
+### `sql`: query the store directly
+
+For anything the views don't cover, pass a query as an argument or on stdin.
+The database is opened read-only, so a query cannot change the store.
+
+```sh
+saniwalens sql "SELECT category, tool, COUNT(*) n FROM tool_errors GROUP BY 1,2 ORDER BY n DESC"
+echo "SELECT excerpt FROM tool_errors WHERE category='path-not-found'" | saniwalens sql
+saniwalens sql "SELECT sql FROM sqlite_master"   # discover the schema
+```
+
+The `tool_errors` view exposes `category`, `excerpt`, `tool`, and `project`.
+
+### `optimize`
+
+`optimize` launches the harness's own advisor, briefed with the analysis. The
+briefing goes through a private temp file, never the command line.
+
+- **Interactive harnesses** (`claude`; `kilo --prompt` under `--harness
+  kilocode`): the session applies edits once you agree.
+- **Headless harnesses** (opencode): the run prints a plan and changes nothing;
+  its output begins with a line saying so. Add `--apply` to save the plan under
+  `$XDG_STATE_HOME/saniwalens/plans/` and open the harness's interactive
+  session on it. Each item shows its planned diff and asks `y` (apply), `n`
+  (skip), or `q` (quit). Every target file is backed up first under
+  `.../backups/`, and the session ends with a summary of applied versus
+  proposal-only items.
+
+Prune saved plans and backups with `saniwalens cleanup --keep [N]`. A bare
+`saniwalens cleanup` only lists them.
 
 ## Supported harnesses
 
-`saniwalens` analyzes one agent harness per run, selected with `--harness`.
-`0.5.4` supports these three. The default stays `claude`, so every existing
-invocation keeps working byte-identically.
+One run analyzes one harness, chosen with `--harness`. The default is `claude`,
+so existing invocations are unchanged.
 
 | `--harness` | Agent | Transcripts | Config catalog | Store | `optimize` launch |
 | --- | --- | --- | --- | --- | --- |
-| `claude` (default) | Claude Code | `~/.claude/projects` | skills, rules, agents, MCP servers, `CLAUDE.md` | `saniwalens.db` | interactive `claude` session |
-| `opencode` | opencode | opencode database (`~/.local/share/opencode/opencode.db`) | commands, agents, `AGENTS.md` | `saniwalens-opencode.db` | headless `opencode run` advisor |
-| `kilocode` | Kilo Code | editor `globalStorage` task files (Code / Cursor / VSCodium) | commands, agents, skills, `AGENTS.md`, `.kilorules`, `kilo.json` `instructions[]` | `saniwalens-kilocode.db` | interactive `kilo --prompt` session |
+| `claude` (default) | Claude Code | `~/.claude/projects` | skills, rules, agents, MCP servers, `CLAUDE.md` | `saniwalens.db` | interactive `claude` |
+| `opencode` | opencode | opencode database (`~/.local/share/opencode/opencode.db`) | commands, agents, `AGENTS.md` | `saniwalens-opencode.db` | headless `opencode run` |
+| `kilocode` | Kilo Code | editor `globalStorage` task files (Code / Cursor / VSCodium) | commands, agents, skills, `AGENTS.md`, `.kilorules`, `kilo.json` `instructions[]` | `saniwalens-kilocode.db` | interactive `kilo --prompt` |
 
 ```sh
-saniwalens analyze --harness kilocode      # reads the editor's globalStorage task files
+saniwalens analyze --harness kilocode
 saniwalens doctor --harness kilocode
-saniwalens optimize --harness kilocode     # opens an interactive `kilo --prompt` session
+saniwalens optimize --harness kilocode
 ```
 
-Each harness keeps its own store (see the table) and reads its own config ―
-`~/.claude/`, `~/.config/opencode/`, `~/.config/kilo/` plus each analyzed
-project's own files ― so findings stay per harness, never mixed. There is
-deliberately no `auto`: with several harnesses installed, guessing would
-misattribute rows silently. [`docs/specs/harness.md`](docs/specs/harness.md)
-holds the per-harness contract, including what each harness cannot report yet
-(for example no subagent split under opencode/kilocode, no `prompts` view
-under opencode).
+Each harness has its own store and reads its own config (`~/.claude/`,
+`~/.config/opencode/`, `~/.config/kilo/`, plus each project's files), so
+findings never mix. There is deliberately no `auto`: with several harnesses
+installed, guessing would misattribute rows silently.
+[`docs/specs/harness.md`](docs/specs/harness.md) holds the per-harness contract,
+including what each harness cannot report yet (for example, no subagent split
+under opencode or kilocode, and no `prompts` view under opencode).
 
-Not supported in `0.5.4`: DSH (DeepSeek harness app) and any other harness.
-DSH support is the next candidate; see [`CONTRIBUTING.md`](CONTRIBUTING.md)
-for what a new-harness contribution needs (an OpenAI-compatible endpoint
-alone is not enough ― the transcript and config formats must be observable
-and OSS-reproducible). Security reports go through
-[`SECURITY.md`](SECURITY.md) (private advisories, never public issues).
+DSH (the DeepSeek harness app) and other harnesses are not supported; DSH is the
+next candidate. [`CONTRIBUTING.md`](CONTRIBUTING.md) lists what a new harness
+needs: an OpenAI-compatible endpoint alone is not enough, and the transcript and
+config formats must be observable and reproducible with open source. Report
+security issues through [`SECURITY.md`](SECURITY.md) (private advisories, never
+public issues).
 
 ## Config file
 
-Defaults live in `~/.config/saniwalens/config.toml` (optional ― without it
-everything behaves as before):
+`~/.config/saniwalens/config.toml` is optional; without it everything behaves
+as above.
 
 ```toml
 default_harness = "kilocode"
@@ -159,140 +194,40 @@ harness = "claude"
 db = "work.db"   # relative to the config file's directory
 ```
 
-`saniwalens --profile work doctor` runs under that profile; explicit flags
-always win over the file. `language` follows the same flag-beats-file order
-(`--language`, then the file's top-level `language`, then English) and only
-`optimize` renders it into a prompt today. See [`docs/specs/cli.md`](docs/specs/cli.md) for
-the resolution order.
-
-## Commands
-
-### Pipeline
-
-| Command | What it does |
-| --- | --- |
-| `saniwalens doctor` | The health check, split global / per-project ― **start here**. |
-| `saniwalens analyze` | Extract transcripts + config into the store (incremental). Reads run it automatically. |
-| `saniwalens sql '<query>'` | Run an arbitrary read-only SQL query against the store (see below). |
-| `saniwalens optimize` | Hand the findings to an advisor session to act on (`--apply` on headless harnesses saves the plan and opens an interactive session to apply it). |
-| `saniwalens cleanup` | List (`--list`, the default) or prune (`--keep [N]`, keeps 10) saved `--apply` plans and backups. Needs no store. |
-
-### Guided entry
-
-Running `saniwalens` with no subcommand on an interactive terminal (or
-`saniwalens tui`) walks the typical patterns step by step instead of taking
-flags: it asks which agent harness you use ― `claude`, `opencode`, or
-`kilocode`, defaulting to the resolved value (`--harness` / `--profile` skips
-the question) ― then what to look at (`doctor` / `waste` / `failures`) and
-which scope, and runs the equivalent report command. The printed command line
-is the reproducible artifact: the guide echoes it before running (e.g.
-`saniwalens --harness kilocode waste --scope global`) and echoes the executed
-command again afterwards; on a headless harness the executed line carries
-`--apply` (e.g. `saniwalens optimize --scope global --apply`), matching the
-inline next step the guide offers. After each report the guide offers to run
-that same harness-and-scope `optimize` right there ― answer `y` and it runs
-inline (the resolved `--language`, flag or file default, rides along), and a failure there never stops
-the guide. Then it asks whether to save the harness you used to `config.toml`:
-skip, set it as `default_harness`, or store it under a named
-`[profiles.<name>]` profile you can call with `--profile <name>` ― confirming
-before it writes.
-
-`--scope global | project | project:<slug>` (on `doctor`, `failures`,
-`waste`, `inventory`, `optimize`) restricts a report to the config layer being
-optimized: an unused/heavy config finding routes by where that file is
-installed, and a recurring failure belongs to the project that owns a strict
-majority of it ― otherwise it is a cross-project habit and shows up as global.
-
-### Views
-
-Each is a curated lens that carries logic a raw query cannot (a classification,
-an algorithm, a suggestion). Add `--format markdown` to paste into a PR or
-note, or `--format json` (every command, `doctor` and `analyze` included) for
-typed machine-readable output ― stdout carries nothing but the JSON, since all
-freshness chatter goes to stderr. Human output is colorized on a terminal;
-`NO_COLOR` or piping turns it off.
-
-```sh
-saniwalens waste                 # ranked optimization opportunities, with a suggested action
-saniwalens waste --scope global  # …only what a global-config cleanup should touch
-saniwalens inventory               # every installed surface (with its scope) × its actual usage
-saniwalens overhead               # always-on context per session, reconciled vs your config
-saniwalens usage                  # per-skill usage, most-invoked first
-saniwalens usage --by month       # usage per time bucket (JST: year|month|week|day|hour)
-saniwalens failures               # recurring tool failures by category, ranked, with fixes
-saniwalens failures --scope global          # failures no project owns (a cross-project habit)
-saniwalens failures --scope project:<slug>  # one project's failures (fix lands in its config)
-saniwalens prompts                # how you steer the session (steer/correct/question/instruct)
-saniwalens stuck                 # files Claude got stuck re-editing in rapid bursts
-```
-
-### `sql` ― query the store directly
-
-Anything the curated views don't cover is a SQL query ― the store is the whole
-point. The query is an argument, or read from **stdin**:
-
-```sh
-# Which tool produces each failure category?
-saniwalens sql "SELECT category, tool, COUNT(*) n FROM tool_errors GROUP BY 1,2 ORDER BY n DESC"
-
-# The actual failing paths behind path-not-found (stdin form):
-echo "SELECT excerpt FROM tool_errors WHERE category='path-not-found'" | saniwalens sql
-
-# Discover the schema:
-saniwalens sql "SELECT sql FROM sqlite_master"
-```
-
-The `tool_errors` view names the failure columns (`category`, `excerpt`,
-`tool`, `project`); the db is opened read-only, so a query can never mutate the
-derived store.
+`saniwalens --profile work doctor` runs under that profile. Explicit flags
+always beat the file. `language` resolves as `--language`, then the file's
+top-level `language`, then English. Only the `optimize` prompt uses it today;
+report tables stay English. The full resolution order is in
+[`docs/specs/cli.md`](docs/specs/cli.md).
 
 ## What it covers
 
-- **Every configuration surface** ― skills, rules, agents, MCP servers,
-  `CLAUDE.md` / `AGENTS.md` ― catalogued with its startup and on-demand token costs and load
-  mode, joined
-  against actual usage to flag unused (delete), always-on heavy (slim), and
-  costly+rare (trim).
-- **Where the work stumbles** ― recurring tool failures by category and
-  originating tool (`failures`), files the agent got stuck re-editing (`stuck`),
-  each with concrete examples and the project it concentrates in.
-- **Where tokens go** ― main-thread skill output vs. subagent cost, the subagent
-  half split per agent type (which agents actually spent it, nested spawns
-  included), and the always-on context floor reconciled against your readable
-  config (the residual is system + tools + MCP you cannot trim from files).
-- **How you prompt** ― the steer / correct / question / instruct mix.
+- **Every configuration surface** (skills, rules, agents, MCP servers,
+  `CLAUDE.md` / `AGENTS.md`), catalogued with startup and on-demand token cost
+  and load mode, then joined against actual usage to flag unused (delete),
+  always-on heavy (slim), and costly but rare (trim).
+- **Where work stumbles**: recurring tool failures by category and originating
+  tool (`failures`), and files the agent kept re-editing (`stuck`), each with
+  examples and the project it concentrates in.
+- **Where tokens go**: main-thread skill output versus subagent cost, with the
+  subagent share split per agent type (nested spawns included), and the
+  always-on context floor reconciled against your readable config. The residual
+  is system prompt, tools, and MCP, which you cannot trim from files.
+- **How you prompt**: the mix of steer, correct, question, and instruct.
 
 ## Notes
 
-- Counts are usage signals for ranking, **not a billing ledger**; static cost is
+- Counts are usage signals for ranking, **not a billing ledger**. Static cost is
   a token estimate, not a measured runtime figure.
-- The store outlives your transcripts. Claude Code prunes those on its own
-  retention schedule, and saniwalens keeps the rows it already extracted ― so the db
-  holds history that `~/.claude/projects` no longer can, and deleting it is a
-  real loss, not a cache flush. That is why it lives under
-  `${XDG_STATE_HOME:-~/.local/state}/saniwalens/` rather than a cache directory a
-  cleaner may empty. Upgrading saniwalens across a schema change migrates the file
-  in place; you never need to delete it.
-- The store grows with every analyze, and the windowed views read all of it.
-  The index that keeps those reads fast is created by the store itself on the
-  next read-write open; `--frozen` / `sql` (read-only) never create it. Watch
-  the size with `saniwalens sql "SELECT COUNT(*) FROM events"`.
-- `optimize` launches the harness's own advisor: an interactive session
-  (`claude` by default, `kilo --prompt` under `--harness kilocode`), which
-  applies edits on agreement, or a headless run (opencode), which streams
-  only the plan and changes nothing ― its output opens with a proposal-only
-  line saying so. The briefing is written to a private temp file, never
-  passed on the command line. With `--apply` (headless only) the plan text is
-  extracted, saved under `$XDG_STATE_HOME/saniwalens/plans/`, and the
-  harness's own interactive session opens on it: each item shows its planned
-  diff with a short explanation and asks `y` (apply) / `n` (skip) / `q`
-  (quit), one item at a time; every target file is backed up first under
-  `.../backups/`, and the session closes with an applied vs proposal-only
-  summary. Prune saved plans and backups with `saniwalens cleanup --keep
-  [N]` (a bare `--keep` keeps 10 per area); a bare `saniwalens cleanup` (or
-  `--list`) only lists them.
-- `--language en|ja` switches the advisor's output language (the `optimize`
-  prompt); the report tables stay English either way.
-- Deliberately flat (see [`docs/specs/`](docs/specs/)): meta-skill (`loop`)
-  nesting is not inferred ― transcripts carry no signal that distinguishes
-  nesting from sequencing, so each invocation stays its own span.
+- **Do not delete the store.** It outlives your transcripts: Claude Code prunes
+  those on its own schedule, while saniwalens keeps the rows it already
+  extracted. That is why it lives under `${XDG_STATE_HOME:-~/.local/state}/`
+  and not in a cache directory a cleaner may empty. Upgrades migrate the file in
+  place.
+- The store grows with every analyze, and the windowed views read all of it. The
+  index that keeps reads fast is created on the next read-write open;
+  `--frozen` and `sql` (read-only) never create it. Check the size with
+  `saniwalens sql "SELECT COUNT(*) FROM events"`.
+- Deliberately flat (see [`docs/specs/`](docs/specs/)): nesting of meta-skills
+  such as `loop` is not inferred. Transcripts carry no signal separating nesting
+  from sequencing, so each invocation stays its own span.
