@@ -65,7 +65,7 @@
     <h1>CLI Specification</h1>
 <p>The CLI is the user&#x27;s surface onto the stages (<code>architecture.md</code>): <code>analyze</code></p>
 <p>populates the store, the <strong>views</strong> and <code>sql</code> read it, and <code>optimize</code> hands the</p>
-<p>findings to an interactive <code>claude</code> session. This spec defines the command</p>
+<p>findings to the harness&#x27;s advisor session. This spec defines the command</p>
 <p>contract and the reporting model; exact flag spellings live with the</p>
 <p>implementation and stay in sync via <code>.claude/rules/spec-sync.md</code>.</p>
 <h2><code>analyze</code> ― populate the store</h2>
@@ -74,45 +74,41 @@ saniwalens analyze [--projects &lt;dir&gt;] [--config &lt;dir&gt;] [--db &lt;pat
 
 
 </code></pre>
-<p>Reads both Claude Code inputs ― session transcripts (default</p>
+<p>Reads both Claude Code inputs, session transcripts (default</p>
 <p><code>~/.claude/projects/</code>) and live config (default <code>~/.claude/</code> plus the relevant</p>
-<p>project <code>.claude/</code>) ― and writes the SQLite store (<code>storage.md</code>). That</p>
-<p><code>~/.claude</code> root is <code>$CLAUDE_CONFIG_DIR</code> whenever that variable names a</p>
-<p>non-empty path ― an empty value carries no location and is treated as unset ―</p>
-<p>so saniwalens follows a config tree the user has relocated instead of reporting on</p>
-<p>an empty default. Incremental and idempotent: unchanged transcripts are skipped,</p>
-<p>changed ones replaced, the surface catalog rebuilt from current config</p>
-<p>(<code>storage.md</code>). The verb is <code>analyze</code>, not <code>build</code> ― it analyzes raw input into</p>
-<p>facts.</p>
+<p>project <code>.claude/</code>), and writes the SQLite store (<code>storage.md</code>). That</p>
+<p><code>~/.claude</code> root is <code>$CLAUDE_CONFIG_DIR</code> whenever the variable names a non-empty</p>
+<p>path (an empty value carries no location and is treated as unset), so</p>
+<p>saniwalens follows a relocated config tree instead of reporting on an empty</p>
+<p>default. Incremental and idempotent: unchanged transcripts are skipped, changed</p>
+<p>ones replaced, the surface catalog rebuilt from current config. The verb is</p>
+<p><code>analyze</code>, not <code>build</code>: it analyzes raw input into facts.</p>
 <p><code>analyze</code> reads everything <strong>read-only</strong> and never copies input into the repo or</p>
 <p>the store beyond the derived facts (<code>.claude/rules/session-data-privacy.md</code>).</p>
 <h3><code>--db</code> ― one store per user, not per directory</h3>
-<p>Shared by every command. The input is not scoped to the current directory ―</p>
-<p><code>analyze</code> walks *every* project&#x27;s transcripts under <code>~/.claude/projects</code> ― so a</p>
-<p>cwd-relative default would contradict the data it holds: it would build a</p>
-<p>separate copy of the same cross-project store per directory saniwalens is invoked</p>
-<p>from, and leave a database file inside unrelated Git working trees. The default</p>
-<p>is therefore user-level, <code>${XDG_STATE_HOME:-~/.local/state}/saniwalens/saniwalens.db</code></p>
-<p>(<code>Session::open</code> in <code>session.rs</code>, which owns resolution, the legacy-store move,</p>
-<p>and the guarded open as one seam), with the directory created on demand by</p>
-<p><code>Store::open</code> ― owner-only, like the store itself (<code>storage.md</code>). A non-absolute</p>
-<p><code>XDG_STATE_HOME</code> is invalid per the XDG spec and ignored ― honoring one would</p>
-<p>reintroduce exactly the cwd-relative store this default exists to avoid.</p>
-<p>State and not cache (<code>$XDG_CACHE_HOME</code>) because the store is not regenerable.</p>
-<p>It is built incrementally from the transcripts, but Claude Code prunes those on</p>
-<p>its own retention schedule, and the rows already extracted are then the only</p>
-<p>surviving record of those sessions ― nothing on disk can rebuild them</p>
-<p>(<code>storage.md</code>). A cache directory is by definition somewhere a cleaner may empty</p>
-<p>without asking, which is the one thing this file cannot survive; that the store</p>
-<p>migrates in place rather than being discarded on a schema change is the same</p>
-<p>premise applied to upgrades. A project-local store stays available by asking for</p>
-<p>it ― <code>--db ./saniwalens.db</code>.</p>
+<p>Shared by every command. <code>analyze</code> walks *every* project&#x27;s transcripts under</p>
+<p><code>~/.claude/projects</code>, so a cwd-relative default would contradict the data it</p>
+<p>holds: it would build a separate copy of the same cross-project store per</p>
+<p>directory and leave database files inside unrelated Git working trees. The</p>
+<p>default is therefore user-level,</p>
+<p><code>${XDG_STATE_HOME:-~/.local/state}/saniwalens/saniwalens.db</code>. <code>Session::open</code> in</p>
+<p><code>session.rs</code> owns resolution, the legacy-store move, and the guarded open as</p>
+<p>one seam; <code>Store::open</code> creates the directory on demand, owner-only like the</p>
+<p>store itself (<code>storage.md</code>). A non-absolute <code>XDG_STATE_HOME</code> is invalid per the</p>
+<p>XDG spec and ignored, since honoring it would reintroduce the cwd-relative</p>
+<p>store.</p>
+<p>It is state, not cache (<code>$XDG_CACHE_HOME</code>), because the store is not</p>
+<p>regenerable: Claude Code prunes transcripts on its own schedule, after which the</p>
+<p>extracted rows are the only surviving record of those sessions (<code>storage.md</code>).</p>
+<p>A cleaner may empty a cache without asking, which this file cannot survive; for</p>
+<p>the same reason the store migrates in place on a schema change instead of being</p>
+<p>discarded. A project-local store is available on request: <code>--db ./saniwalens.db</code>.</p>
 <h3><code>config.toml</code> ― defaults and named profiles</h3>
-<p>The tool&#x27;s own config file lives at</p>
+<p>The tool&#x27;s own config lives at</p>
 <p><code>${XDG_CONFIG_HOME:-~/.config}/saniwalens/config.toml</code> (<code>config_file_path</code> in</p>
-<p><code>session.rs</code>; a relative <code>XDG_CONFIG_HOME</code> is invalid and ignored, like its</p>
-<p><code>XDG_STATE_HOME</code> sibling above). The file is optional ― without it every</p>
-<p>invocation behaves exactly as before.</p>
+<p><code>session.rs</code>; a relative <code>XDG_CONFIG_HOME</code> is invalid and ignored, like</p>
+<p><code>XDG_STATE_HOME</code> above). It is optional: without it every invocation behaves</p>
+<p>exactly as before.</p>
 <pre><code class="language-toml">
 default_harness = &quot;kilocode&quot;   # claude | opencode | kilocode
 
@@ -133,42 +129,47 @@ db = &quot;work.db&quot;                 # relative to the config file&#x27;s di
 
 
 </code></pre>
-<p>It holds two kinds of defaults plus named profiles <code>--profile</code> selects.</p>
-<p>Resolution order, strongest first: explicit flags, the selected profile, the</p>
-<p>file&#x27;s top-level defaults, then the builtins (<code>claude</code>, the per-harness store</p>
-<p>path). <code>language</code> follows the same strongest-first shape minus the profile</p>
-<p>layer: <code>--language</code>, then the file&#x27;s top-level <code>language</code>, then the locale</p>
-<p>fallback, then English. The locale fallback reads <code>LC_ALL</code> over</p>
-<p><code>LC_MESSAGES</code> over <code>LANG</code> (POSIX order, empty counts as unset), then the</p>
-<p><code>LANGUAGE</code> priority list&#x27;s head (<code>ja_JP:ja</code> votes <code>ja_JP</code>) ― Japanese only</p>
-<p>when the voting value&#x27;s leading subtag is <code>ja</code> (<code>ja</code>, <code>ja_JP</code>,</p>
-<p><code>ja_JP.UTF-8</code>); a bare-<code>C</code> / <code>POSIX</code> winner suppresses <code>LANGUAGE</code> entirely</p>
-<p>(gettext&#x27;s C priority ― <code>LANG=C.UTF-8</code> is not bare, so it still defers to</p>
-<p><code>LANGUAGE</code>); <code>C</code>, an empty value, and anything else keep the English</p>
-<p>default, byte-identical to before.</p>
-<p>Profiles never carry it, so selecting a profile never blocks the file default.</p>
-<p>Flag *values* (<code>--scope</code>, <code>--format</code>) are parsed before the session is</p>
-<p>built, so an invalid flag fails on its own ― no store open, no freshness line</p>
-<p>ahead of the error. The report views resolve those flags through the</p>
-<p>windowed dispatch in <code>cli/window.rs</code>: <code>WindowedDispatch::open</code> for the four</p>
-<p>views without <code>--scope</code> (format, then period, then <code>Session::open_read</code>),</p>
-<p><code>open_scoped</code> for the three with it (<code>inventory</code>, <code>waste</code>, <code>failures</code>: scope,</p>
-<p>then format, then period, then the store), <code>open_scoped_table_json</code> for</p>
-<p><code>doctor</code> (the same scope-first order, with the <code>table | json</code> vocabulary of the</p>
-<p>section below), and <code>open_pair</code> for trend (format, then pair, then the store).</p>
-<p>The narrowing is carried by what each entry returns ― <code>open</code> gives a</p>
-<p><code>WindowedRead</code> (session, format, window), so the views that never filter have</p>
-<p>no filter to ignore, and only the scoped entries (<code>open_scoped</code> /</p>
-<p><code>open_scoped_table_json</code>) return a <code>ScopedRead</code> (that read plus the filter</p>
-<p><code>--scope</code> selected); <code>optimize</code> is the exception that resolves the store path</p>
-<p>first, exactly as the pre-<code>Session</code> dispatch did. A relative <code>db</code> joins the directory holding <code>config.toml</code> ― never the</p>
-<p>current working directory ― while an explicit <code>--db</code> is taken as is, even</p>
-<p>when relative; <code>~</code> is not expanded. Unknown keys are ignored so a newer file</p>
-<p>never breaks an older binary. A missing file is silence, not an error; anything</p>
-<p>else wrong with the file (unparsable TOML, unknown harness, missing profile,</p>
-<p>unknown language) fails the invocation with the file named, and an unknown</p>
-<p><code>--profile</code> lists the available ones while an unknown <code>language</code> lists the</p>
-<p>valid values (<code>en | ja</code>).</p>
+<p>It holds top-level defaults plus named profiles that <code>--profile</code> selects.</p>
+<ul>
+<li><strong>Resolution order</strong>, strongest first: explicit flags, the selected profile,</li>
+</ul>
+<p>the file&#x27;s top-level defaults, the builtins (<code>claude</code>, the per-harness store</p>
+<p>path).</p>
+<ul>
+<li>**<code>language</code>** follows the same order without the profile layer (profiles</li>
+</ul>
+<p>never carry it, so selecting one never blocks the file default):</p>
+<p><code>--language</code>, the file&#x27;s <code>language</code>, the locale fallback, English. The locale</p>
+<p>fallback reads <code>LC_ALL</code>, then <code>LC_MESSAGES</code>, then <code>LANG</code> (POSIX order; empty</p>
+<p>counts as unset), then the head of the <code>LANGUAGE</code> list (<code>ja_JP:ja</code> votes</p>
+<p><code>ja_JP</code>). It yields Japanese only when the winning value&#x27;s leading subtag is</p>
+<p><code>ja</code> (<code>ja</code>, <code>ja_JP</code>, <code>ja_JP.UTF-8</code>). A bare <code>C</code> or <code>POSIX</code> winner suppresses</p>
+<p><code>LANGUAGE</code> entirely (gettext&#x27;s C priority; <code>C.UTF-8</code> is not bare). Anything</p>
+<p>else, including empty, keeps English, byte-identical to before.</p>
+<ul>
+<li><strong>Paths.</strong> A relative <code>db</code> joins the directory holding <code>config.toml</code>, never</li>
+</ul>
+<p>the working directory. An explicit <code>--db</code> is taken as is, even when relative;</p>
+<p><code>~</code> is not expanded.</p>
+<ul>
+<li><strong>Errors.</strong> Unknown keys are ignored so a newer file never breaks an older</li>
+</ul>
+<p>binary. A missing file is silence. Anything else wrong (unparsable TOML,</p>
+<p>unknown harness, missing profile, unknown language) fails the invocation with</p>
+<p>the file named; an unknown <code>--profile</code> lists the available ones and an</p>
+<p>unknown <code>language</code> lists <code>en | ja</code>.</p>
+<ul>
+<li><strong>Flags before store.</strong> Flag values (<code>--scope</code>, <code>--format</code>) are parsed before</li>
+</ul>
+<p>the session is built, so an invalid flag fails on its own, with no store</p>
+<p>opened and no freshness line ahead of the error. The windowed dispatch in</p>
+<p><code>cli/window.rs</code> fixes the order per view family: format, period, then store</p>
+<p>for views without <code>--scope</code>; scope first for <code>inventory</code>, <code>waste</code>,</p>
+<p><code>failures</code>, and <code>doctor</code> (whose <code>--format</code> is <code>table | json</code>, see Output</p>
+<p>formats); format, pair, then store for <code>trend</code>. Views that never filter get a</p>
+<p>read with no filter to ignore; only the scoped entries return the filter</p>
+<p><code>--scope</code> selected. <code>optimize</code> is the exception: it resolves the store path</p>
+<p>first.</p>
 <h2>Views ― read the store</h2>
 <pre><code>
 saniwalens &lt;view&gt; [--scope global|project[:&lt;slug&gt;]] [--by &lt;bucket&gt;] [--frozen]
@@ -228,7 +229,7 @@ saniwalens &lt;view&gt; [--scope global|project[:&lt;slug&gt;]] [--by &lt;bucket
 </tr>
 <tr>
 <th scope="row"><code>usage</code></th scope="row">
-<td>Skill event rollups: per skill, or per time bucket (<code>--by</code>) ― frequency, tokens, <code>ctx_growth</code>, duration. Leads with a token-destination line (main-thread skill output vs subagent total) so the reader sees where tokens actually go before the table, then splits the subagent half <strong>per agent type</strong> (runs and output tokens, costliest first) ― the aggregate is usually the larger number and the split is the part that can be acted on. JSON carries the split&#x27;s coverage as <code>agent_split</code> in every state. In text, a partial split prints its covered and uncovered figures between the total and the table, an unavailable split (no rows at all) is warned on stderr, and rows that cover the total need no note (see *Reporting honesty*). A section with no rows is omitted rather than rendered as bare headers.</td>
+<td>Skill event rollups: per skill, or per time bucket (<code>--by</code>): frequency, tokens, <code>ctx_growth</code>, duration. Leads with a token-destination line (main-thread skill output vs subagent total), then splits the subagent half <strong>per agent type</strong> (runs and output tokens, costliest first), because the aggregate is usually the larger number and the split is the actionable part. Split coverage is reported per *Reporting honesty*. A section with no rows is omitted rather than rendered as bare headers.</td>
 </tr>
 <tr>
 <th scope="row"><code>models</code></th scope="row">
@@ -236,7 +237,7 @@ saniwalens &lt;view&gt; [--scope global|project[:&lt;slug&gt;]] [--by &lt;bucket
 </tr>
 <tr>
 <th scope="row"><code>trend</code></th scope="row">
-<td>How usage moved: each kind of event (count / output tokens / duration), each skill (invocations, largest movement first), each used surface (<code>kind</code>/<code>id</code>, largest movement first), and the session / subagent totals ― this window against the equal-length window right before it (default 7d vs the 7d before; <code>--last</code> or <code>--since</code> [+ <code>--until</code>] fixes the current one, the pair resolved by the Period section&#x27;s rules). A kind renders the metrics it carries: point kinds render the count alone, because ingest writes their output tokens and duration as constant zeros (<code>events.md</code>: a span is currently <code>skill_invocation</code> only) ― their rows for those metrics are omitted rather than rendered as <code>0.0</code> / <code>n/a</code>, and <code>--format json</code> keeps every kind&#x27;s three metrics (the machine contract; only the table omits what cannot apply). Every rendered row carries both windows&#x27; values, the delta, and the direction; a comparison is <code>n/a</code> / <code>&quot;unavailable&quot;</code> with no delta claimed only when *that row&#x27;s* previous side holds no baseline, never a drop to zero, and the n/a reason text rides only with a report that holds that comparison (see *Reporting honesty*). Both windows&#x27; ranges ― the current one and the equal-length one <strong>derived</strong> one second before it ― are disclosed like every view&#x27;s window is, and a pair whose either window leaves the calendar the Period section names is refused as a period error rather than disclosed with an empty bound; <code>--format json</code> carries them as <code>window.current</code> / <code>window.previous</code>. A section with no rows (e.g. no skill usage in either window) is omitted rather than rendered as bare headers.</td>
+<td>How usage moved: each event kind (count / output tokens / duration), each skill (invocations, largest movement first), each used surface (<code>kind</code>/<code>id</code>, largest movement first), and the session / subagent totals, for this window against the equal-length window right before it (default 7d vs the 7d before; <code>--last</code> or <code>--since</code> [+ <code>--until</code>] fixes the current one, see Period). Every row carries both windows&#x27; values, the delta, and the direction; unavailable comparisons and the metrics a kind does not carry follow *Reporting honesty*. Both windows&#x27; ranges are disclosed (<code>window.current</code> / <code>window.previous</code> in JSON). A section with no rows is omitted rather than rendered as bare headers.</td>
 </tr>
 <tr>
 <th scope="row"><code>waste</code></th scope="row">
@@ -265,240 +266,180 @@ saniwalens &lt;view&gt; [--scope global|project[:&lt;slug&gt;]] [--by &lt;bucket
 <td>friction` (default tokens) orders largest first with the session id breaking ties, so the order never churns.</td>
 </tr>
 </tbody></table></div>
-<p>Trend&#x27;s per-metric reason. A comparison is <code>n/a</code> / <code>&quot;unavailable&quot;</code> only when that</p>
-<p>row&#x27;s previous side holds no baseline ― its kind, its skill, or a session on the</p>
-<p>totals axis absent from the previous window ― and never because the baseline</p>
-<p>measured zero: a row whose aggregate exists in the previous window compares at</p>
-<p>its measured value, zero included (a 0-token span is a measurement, and so is a</p>
-<p>session that ran no subagent). Every metric&#x27;s JSON object carries <code>reason</code></p>
-<p>beside its direction: <code>null</code> when the comparison was judged,</p>
-<p><code>&quot;no_baseline&quot;</code> when the previous side is absent, and <code>&quot;not_applicable&quot;</code></p>
-<p>when the kind does not carry the metric (see *Reporting honesty* and the</p>
-<p>machine contract below).</p>
 <h3>Output formats ― human vs machine</h3>
-<p>Every command has both a human form and a machine form, strictly separated:</p>
+<p>Every command has a human form and a machine form, strictly separated.</p>
 <ul>
-<li><strong>Human</strong> (default <code>table</code>, plus <code>--format markdown</code> for pasting into</li>
+<li><strong>Human</strong> (default <code>table</code>; <code>--format markdown</code> for pasting into notes or PRs;</li>
 </ul>
-<p>notes/PRs; <code>doctor</code> and <code>analyze</code> have their own text layouts instead of</p>
-<p>markdown). The output must explain itself: every table opens with a dimmed</p>
-<p><strong>framing block</strong> saying what the view shows and how to read it (table</p>
-<p>format only ― markdown stays a bare table), headers are words rather than</p>
-<p>abbreviations, and interpretation notes are dimmed footnotes. ANSI styling ―</p>
-<p>headings, dimmed context, highlighted counts and staleness warnings ― turns</p>
-<p>on only when stdout (stderr for the freshness line) is a terminal,</p>
-<p><code>NO_COLOR</code> is unset, and <code>TERM</code> is not <code>dumb</code>; pipes and captures always get</p>
-<p>plain bytes. Styling is applied after column padding so it never skews table</p>
-<p>alignment.</p>
+<p><code>doctor</code> and <code>analyze</code> have their own text layouts). Output must explain</p>
+<p>itself: every table opens with a dimmed framing block saying what the view</p>
+<p>shows and how to read it (table only; markdown stays a bare table), headers</p>
+<p>are words rather than abbreviations, and interpretation notes are dimmed</p>
+<p>footnotes. ANSI styling turns on only when stdout (stderr for the freshness</p>
+<p>line) is a terminal, <code>NO_COLOR</code> is unset, and <code>TERM</code> is not <code>dumb</code>; pipes and</p>
+<p>captures get plain bytes. Styling is applied after column padding so</p>
+<p>alignment is never skewed.</p>
 <ul>
-<li><strong>Machine</strong> (<code>--format json</code>, on every command): a typed JSON document alone</li>
+<li><strong>Machine</strong> (<code>--format json</code>, every command): a typed JSON document alone on</li>
 </ul>
-<p>on stdout ― SQLite integers/reals/NULLs stay JSON numbers/null</p>
-<p>(<code>Store::query_json</code>), <code>doctor</code> emits the routed findings structure</p>
-<p>(<code>core::optimize::Findings</code>, <code>projects</code> filtered by <code>--scope</code>), and each view</p>
-<p>emits its rows as named objects. <code>trend</code>&#x27;s rows and its JSON are two forms</p>
-<p>of one typed payload (<code>trend_payload</code> in <code>cli/views/trend.rs</code>): both derive from</p>
-<p>it, so a metric&#x27;s delta, direction, and reason are judged once ― float</p>
-<p>metrics at the display&#x27;s 0.1 precision, so a drift smaller than the shown</p>
-<p>0.1 (an ms-derived duration&#x27;s addition error) reads as <code>same</code> in both</p>
-<p>forms; a golden test (<code>tests/trend_json_golden.rs</code>) pins the emitted JSON.</p>
-<p>Every trend metric carries <code>reason</code> beside its direction: <code>null</code> when the</p>
-<p>comparison was judged, <code>&quot;no_baseline&quot;</code> when that row&#x27;s previous side holds</p>
-<p>no aggregate, and <code>&quot;not_applicable&quot;</code> when the kind does not carry the</p>
-<p>metric. The values are the payload&#x27;s <code>UnavailableReason</code> enum serialized</p>
-<p>(machine-readable only, never prose), and <code>direction == &quot;unavailable&quot;</code></p>
-<p>exactly when <code>reason</code> is not null, so a consumer distinguishes &quot;nothing to</p>
-<p>compare against&quot; from &quot;this metric does not apply&quot; without inferring it</p>
-<p>from the numbers. All</p>
-<p>freshness/refresh chatter goes to</p>
-<p><strong>stderr</strong> (see above), so <code>saniwalens &lt;cmd&gt; --format json | jq</code> needs no</p>
-<p>filtering. Human-only footnotes (row counts, heuristic caveats) are either</p>
-<p>folded into the JSON (<code>total</code>, …) or dropped, never mixed into it.</p>
-<p><code>doctor</code>&#x27;s human form is its own text layout rather than a table pasted as</p>
-<p>markdown, so its <code>--format</code> vocabulary is <code>table | json</code> and nothing else:</p>
-<p><code>markdown</code> (and the <code>md</code> shorthand that resolves to markdown in the other</p>
-<p>views) is refused at the flag stage ― `unknown --format &#x27;markdown&#x27;</p>
-<p>(table|json)` ― before the refresh, the freshness line, or the store&#x27;s</p>
-<p>creation, as the flags-before-store contract above requires. The other</p>
-<p>windowed views (<code>trend</code> included) take all three values.</p>
-<p>Slices not covered here ― the Bash command mix, the most-edited files, an error</p>
-<p>category broken down any way ― are a <code>sql</code> one-liner; those once had thin</p>
-<p><code>commands</code>/<code>hotspots</code> views, dropped once <code>sql</code> existed.</p>
+<p>stdout. SQLite integers, reals, and NULLs stay JSON numbers and null</p>
+<p>(<code>Store::query_json</code>); <code>doctor</code> emits the routed findings</p>
+<p>(<code>core::optimize::Findings</code>, <code>projects</code> filtered by <code>--scope</code>); each view</p>
+<p>emits its rows as named objects. All freshness and refresh chatter goes to</p>
+<p>stderr, so <code>saniwalens &lt;cmd&gt; --format json | jq</code> needs no filtering.</p>
+<p>Human-only footnotes are folded into the JSON (<code>total</code>, …) or dropped, never</p>
+<p>mixed in.</p>
+<ul>
+<li>**<code>trend</code>** rows and JSON are two renderings of one typed payload</li>
+</ul>
+<p>(<code>trend_payload</code> in <code>cli/views/trend.rs</code>), so a metric&#x27;s delta, direction, and</p>
+<p>reason are judged once. Float metrics compare at the display&#x27;s 0.1 precision,</p>
+<p>so drift below it reads as <code>same</code> in both forms. <code>tests/trend_json_golden.rs</code></p>
+<p>pins the JSON. Each metric carries <code>reason</code> (see *Reporting honesty*), the</p>
+<p>serialized <code>UnavailableReason</code> enum, and <code>direction == &quot;unavailable&quot;</code> exactly</p>
+<p>when <code>reason</code> is not null.</p>
+<p><code>doctor</code>&#x27;s <code>--format</code> vocabulary is <code>table | json</code> only: <code>markdown</code> (and the</p>
+<p><code>md</code> shorthand the other views accept) is refused at the flag stage</p>
+<p>(<code>unknown --format &#x27;markdown&#x27; (table|json)</code>) before the refresh, the freshness</p>
+<p>line, or the store&#x27;s creation. The other windowed views, <code>trend</code> included, take</p>
+<p>all three.</p>
+<p>Slices not covered here (the Bash command mix, the most-edited files, any</p>
+<p>error-category breakdown) are a <code>sql</code> one-liner; the thin <code>commands</code> /</p>
+<p><code>hotspots</code> views were dropped once <code>sql</code> existed.</p>
 <h3>Guided entry ― pick instead of typing</h3>
-<p>Running <code>saniwalens</code> with no subcommand on an interactive terminal, or with</p>
-<p>the explicit <code>tui</code> subcommand, opens the guided entry instead of a report:</p>
-<p>it asks which agent harness is in use, what to look at, and which scope, then</p>
-<p>runs the equivalent report command. The implementation lives in</p>
-<p><code>cli/views/guide.rs</code>; this section states the contract, not the code.</p>
-<p>Entry conditions: no subcommand *and* stdin and stdout both TTYs, or the</p>
-<p>explicit <code>tui</code> subcommand. A <code>--harness</code> (or <code>--profile</code>) flag given with</p>
-<p>either entry is a preset: step 1 is skipped and the named value is used. A</p>
-<p><code>--language</code> flag given with either entry is also a preset and rides the</p>
-<p>entry into the inline next step below, but it selects no harness, so step 1</p>
-<p>is still asked. Any other token ― a real subcommand, <code>--help</code>, <code>--version</code> ― belongs to clap,</p>
-<p>and the guide never intercepts it.</p>
-<p>The four steps, each with a default (empty input keeps it,</p>
-<p><code>q</code> quits the guide): (1) pick the harness ― <code>claude</code>, <code>opencode</code>, or</p>
-<p><code>kilocode</code>, defaulting to the resolved value; with a <code>--harness</code> (or</p>
-<p><code>--profile</code>) preset this step is skipped and the resolved value is used;</p>
-<p>(2) pick the purpose ― <code>doctor</code> (health check), <code>waste</code> (prune</p>
-<p>candidates), or <code>failures</code> (recurring friction); (3) pick the scope ― all</p>
-<p>history (no <code>--scope</code> flag), <code>global</code>, or <code>project</code>; (4) after the report,</p>
-<p>then the guide offers to run the printed optimize command inline (default</p>
-<p>no), then answer the config save question below. At the inline-run question</p>
-<p><code>q</code> counts as no rather than quitting the guide. The chosen harness is kept</p>
-<p>for the whole invocation: after each report the guide asks whether to look</p>
-<p>at one more (default no) and loops on <code>y</code> back to the purpose, never</p>
-<p>re-asking the harness.</p>
-<p>Output is always the table form: the guide takes no <code>--format</code> and no period</p>
-<p>flags. Before running, it echoes the equivalent command line (e.g.</p>
-<p><code>saniwalens --harness kilocode waste --scope global</code>); after the report it</p>
-<p>echoes the executed command again. The reproducible artifact is that command</p>
-<p>line, not the session ― the report itself is the same table the command</p>
-<p>would print.</p>
-<p>After the report, the guide asks whether to save the used harness to</p>
-<p><code>config.toml</code>: skip, set it as <code>default_harness</code>, or store it under a named</p>
-<p><code>[profiles.&lt;name&gt;]</code> profile. The edit is line-preserving ― only the one line</p>
-<p>(or section) changes, comments and everything else stay untouched ― and the</p>
-<p>guide shows the path plus the changed excerpt and asks for confirmation</p>
-<p>before writing. The write re-reads the file first and aborts with a conflict</p>
-<p>error when it changed since the dialog read it (last-writer-wins would</p>
-<p>silently drop the other edit); the replacement itself is an atomic rename</p>
-<p>through a pid-unique sibling temp file, so a mid-write kill leaves either</p>
-<p>the old or the new config, never a truncation.</p>
-<p>Non-TTY behavior: the explicit <code>tui</code> subcommand without both TTYs is refused</p>
-<p>with an error instead of blocking on unreadable prompts; a bare no-args</p>
-<p>invocation without both TTYs falls through to clap, whose</p>
-<p>missing-subcommand error is what scripts see today. The scripted E2E suite</p>
-<p>(<code>tests/guide_flow.rs</code>) drives the real binary through piped stdio by setting</p>
-<p><code>SANIWALENS_TEST_FORCE_TTY=1</code>, which counts as a terminal for the check above;</p>
-<p>the variable is test-only and unsupported, and must never be set by users.</p>
-<p>v0.5.4 scope is <code>doctor</code> / <code>waste</code> / <code>failures</code> plus the config save above.</p>
-<p><code>optimize</code> itself stays out of the guide, but after each report the guide</p>
-<p>prints a next-step line pointing at it with the matching scope</p>
-<p>(e.g. <code>saniwalens optimize --scope global</code>); the line is harness-aware, so on</p>
-<p>a headless harness it carries <code>--apply</code> (e.g.</p>
-<p><code>saniwalens optimize --scope global --apply</code>), matching the handoff the</p>
-<p>inline run actually performs; the remaining reports, period</p>
-<p>flags, and <code>sql</code> stay out. The inline run branches on the harness&#x27;s run mode:</p>
-<p>a headless harness has no dialog partner in the seeded session, so the guide</p>
-<p>hands off (<code>--apply</code>: the plan is saved and the harness&#x27;s own interactive</p>
-<p>session opens on it); an interactive harness already sits in a dialog, so the</p>
-<p>plain inline optimize applies its own plan. The inline run carries the</p>
-<p>resolved advisor language into the prompt in the same order</p>
-<p>as <code>optimize</code> (<code>--language</code>, then the file&#x27;s top-level <code>language</code>, then the</p>
-<p>locale fallback, then English); with no language set anywhere the prompt</p>
-<p>renders byte-identical to before.</p>
-<p>The candidates and their order are</p>
-<p>declared in</p>
-<p>the design doc&#x27;s post-v0.5.5 expansion note</p>
+<p>Bare <code>saniwalens</code> on an interactive terminal, or the explicit <code>tui</code></p>
+<p>subcommand, opens the guided entry instead of a report. It asks which harness,</p>
+<p>what to look at, and which scope, then runs the equivalent report command.</p>
+<p>Implementation: <code>cli/views/guide.rs</code>; this section states the contract.</p>
+<p><strong>Entry.</strong> No subcommand with stdin and stdout both TTYs, or explicit <code>tui</code>.</p>
+<p><code>--harness</code> or <code>--profile</code> is a preset that skips step 1. <code>--language</code> is also</p>
+<p>a preset and rides into the inline next step, but selects no harness, so step 1</p>
+<p>is still asked. Any other token (a real subcommand, <code>--help</code>, <code>--version</code>)</p>
+<p>belongs to clap; the guide never intercepts it.</p>
+<p><strong>Steps.</strong> Each has a default (empty input keeps it; <code>q</code> quits):</p>
+<ol>
+<li>Harness: <code>claude</code>, <code>opencode</code>, or <code>kilocode</code>, defaulting to the resolved value.</li>
+<li>Purpose: <code>doctor</code>, <code>waste</code>, or <code>failures</code>.</li>
+<li>Scope: all history (no <code>--scope</code>), <code>global</code>, or <code>project</code>.</li>
+<li>After the report: offer to run the printed <code>optimize</code> command inline</li>
+</ol>
+<p>(default no; <code>q</code> counts as no), then the config save question below.</p>
+<p>The harness is kept for the whole invocation: after each report the guide asks</p>
+<p>whether to look at one more (default no) and loops back to the purpose.</p>
+<p>Output is always the table form; the guide takes no <code>--format</code> or period flags.</p>
+<p>It echoes the equivalent command line before running (e.g. `saniwalens</p>
+<p>--harness kilocode waste --scope global`) and again after the report. The</p>
+<p>reproducible artifact is that command line, not the session.</p>
+<p><strong>Next step.</strong> <code>optimize</code> is not a menu item, but after each report the guide</p>
+<p>prints a next-step line with the matching scope (`saniwalens optimize --scope</p>
+<p>global`). The line is harness-aware: on a headless harness it carries</p>
+<p><code>--apply</code>. The inline run branches on run mode. A headless harness has no</p>
+<p>dialog partner in the seeded session, so the guide hands off (<code>--apply</code>: the</p>
+<p>plan is saved and the harness&#x27;s own interactive session opens on it); an</p>
+<p>interactive harness already sits in a dialog, so plain <code>optimize</code> applies its</p>
+<p>own plan. The inline run carries the resolved advisor language in the same</p>
+<p>order as <code>optimize</code>; with no language set anywhere the prompt is byte-identical</p>
+<p>to before. The other reports, period flags, and <code>sql</code> stay out of the guide;</p>
+<p>candidates for expansion and their order are in the design doc&#x27;s note</p>
 <p>(<code>docs/exploration/2026-11-06-guided-tui-design.md</code>).</p>
+<p><strong>Config save.</strong> After the report the guide asks whether to save the used</p>
+<p>harness to <code>config.toml</code>: skip, set it as <code>default_harness</code>, or store it under a</p>
+<p>named <code>[profiles.&lt;name&gt;]</code> profile. The edit is line-preserving (only that line</p>
+<p>or section changes; comments and the rest stay untouched), and the guide shows</p>
+<p>the path and changed excerpt and asks for confirmation before writing. The write</p>
+<p>re-reads the file first and aborts with a conflict error if it changed since the</p>
+<p>dialog read it (last-writer-wins would silently drop the other edit). The</p>
+<p>replacement is an atomic rename through a pid-unique sibling temp file, so a</p>
+<p>mid-write kill leaves the old or the new config, never a truncation.</p>
+<p><strong>Non-TTY.</strong> Explicit <code>tui</code> without both TTYs is refused with an error instead</p>
+<p>of blocking on unreadable prompts. A bare invocation without both TTYs falls</p>
+<p>through to clap, whose missing-subcommand error is what scripts see.</p>
+<p><code>tests/guide_flow.rs</code> drives the real binary through piped stdio with</p>
+<p><code>SANIWALENS_TEST_FORCE_TTY=1</code>, which counts as a terminal for the check above;</p>
+<p>the variable is test-only, unsupported, and must never be set by users.</p>
 <h3>Period ― narrow a report to a window of the history</h3>
-<p>The windowed report views above take <code>--since</code> / <code>--until</code> / <code>--last</code> so &quot;what did</p>
-<p>the agent cost last week&quot; is a view flag, not a <code>sql</code> query. The other commands</p>
-<p>(<code>analyze</code>, <code>sql</code>, <code>optimize</code>) take none ― they are whole-history by contract.</p>
-<p>Which commands are windowed is derived from the subcommand tree (a command</p>
-<p>carrying <code>--last</code>), never a hand-maintained list: every subcommand</p>
-<p>must resolve to windowed or whole-history, and <code>tests/cli_help_golden.rs</code> pins</p>
-<p>that partition beside the <code>--help</code> captures.</p>
-<p><code>trend</code> resolves the same flags as a <strong>pair</strong> ― the current window plus the</p>
-<p>equal-length window immediately before it (the previous ends one second before</p>
-<p>the current starts, so no event is counted in both). <code>--since</code> alone runs the</p>
-<p>current window to now ― a bounded window, unlike the single-window views&#x27; open</p>
-<p>end ― and <code>--until</code> alone is an error: with no current start, the window to</p>
-<p>compare against is undefined.</p>
+<p>The windowed report views take <code>--since</code> / <code>--until</code> / <code>--last</code>, so &quot;what did</p>
+<p>the agent cost last week&quot; is a flag, not a <code>sql</code> query. <code>analyze</code>, <code>sql</code>, and</p>
+<p><code>optimize</code> take none; they are whole-history by contract. Which commands are</p>
+<p>windowed is derived from the subcommand tree (a command carrying <code>--last</code>),</p>
+<p>never a hand-maintained list; <code>tests/cli_help_golden.rs</code> pins that partition</p>
+<p>beside the <code>--help</code> captures.</p>
+<p><code>trend</code> resolves the same flags as a <strong>pair</strong>: the current window plus the</p>
+<p>equal-length window right before it (the previous ends one second before the</p>
+<p>current starts, so no event is counted twice). <code>--since</code> alone runs to now, a</p>
+<p>bounded window unlike the single-window views&#x27; open end; <code>--until</code> alone is an</p>
+<p>error, since the comparison window is undefined without a current start.</p>
 <ul>
-<li><code>--since DATE</code> / <code>--until DATE</code>: a named-day window over the history, each</li>
+<li>**<code>--since DATE</code> / <code>--until DATE</code>**: a named-day window. Each date is a whole</li>
 </ul>
-<p>date a whole day (<code>YYYY-MM-DD</code>, read in the presentation zone ― <strong>JST</strong>, the</p>
-<p>same zone the bucketing table uses; the comparison is against the UTC epoch</p>
-<p>the store keeps). <code>--until</code> is <strong>inclusive</strong>: the whole named day counts.</p>
-<p>The resolved instants carry the same calendar bound the rolling span has,</p>
-<p>checked at the same resolve entry: the day end adds its +86,399 after the</p>
-<p>zone conversion, so a west offset (the <code>--tz</code> zone Time bucketing declares,</p>
-<p>not wired into the period path) can resolve <code>NaiveDate::MAX</code>&#x27;s last second</p>
-<p>past the calendar&#x27;s ceiling, and a date whose resolved midnight or last</p>
-<p>second leaves the calendar is refused with the empty-window error naming</p>
-<p>its flag. Under <strong>JST</strong> the named-day path stays inside the calendar on its</p>
-<p>own ― <code>NaiveDate::MIN</code>&#x27;s midnight sits below the floor, where the zone</p>
-<p>conversion refuses it as a local time ― which is why the bound is</p>
-<p>established at the entry instead of trusted to the zone&#x27;s sign.</p>
+<p>day (<code>YYYY-MM-DD</code>) in the presentation zone, <strong>JST</strong> (the bucketing zone);</p>
+<p>comparison is against the UTC epoch the store keeps. <code>--until</code> is</p>
+<p><strong>inclusive</strong>.</p>
 <ul>
-<li><code>--last SPAN</code>: a rolling window ending now ― <code>&lt;N&gt;d</code>, <code>&lt;N&gt;h</code>, <code>&lt;N&gt;w</code>.</li>
+<li>**<code>--last SPAN</code>**: a rolling window ending now (<code>&lt;N&gt;d</code>, <code>&lt;N&gt;h</code>, <code>&lt;N&gt;w</code>).</li>
 </ul>
-<p>Exclusive with the explicit dates (clap conflict), so &quot;last 7 days&quot; can never</p>
-<p>be silently reinterpreted by a stray <code>--since</code>. The conflict is declared once</p>
-<p>on the shared period-flags group the single-window views flatten</p>
-<p>(<code>cli/window.rs</code>); trend&#x27;s pair keeps its own declaration, so its</p>
-<p>pair-specific help wording survives (the help capture pins hold every view&#x27;s</p>
-<p>help byte-identical). The span&#x27;s resolved window</p>
-<p>must stay inside the calendar chrono can express (<code>NaiveDate</code>&#x27;s range,</p>
-<p>roughly ±262,000 years, <code>NaiveDateTime::MIN</code>/<code>MAX</code>&#x27;s timestamps): a span</p>
-<p>whose resolved window leaves it (e.g. <code>--last 100000000d</code>) has no date to</p>
-<p>name, so it is refused at the resolve entry with the same invalid-span error</p>
-<p>as an unparseable one. <code>trend</code>&#x27;s pair resolves through the same entry, so a</p>
-<p>current window outside the calendar is refused there too ― and so is the</p>
-<p><strong>derived previous window</strong>, the equal-length window the pair builds one</p>
-<p>second before the current one: <code>--last</code> reaches back twice, so a span whose</p>
-<p>current window still resolves can start the derived previous below the</p>
-<p>calendar (e.g. <code>--last 50000000d</code>), refused with the same invalid-span</p>
-<p>error. The date-derived pair has the same bound: a <code>--since</code> whose</p>
-<p>equal-length derived previous leaves the calendar (e.g.</p>
-<p><code>--since=-200000-01-01</code>) is refused with the empty-window error naming</p>
-<p><code>--since</code> ― the input is the date, so the invalid-<code>--last</code> wording would</p>
-<p>blame the wrong flag.</p>
+<p>Exclusive with the explicit dates (clap conflict), so &quot;last 7 days&quot; is never</p>
+<p>silently reinterpreted by a stray <code>--since</code>. The conflict is declared once on</p>
+<p>the shared period-flags group (<code>cli/window.rs</code>); trend&#x27;s pair keeps its own</p>
+<p>declaration so its pair-specific help survives.</p>
 <ul>
-<li>Errors are parse-time, before any report renders: an unparseable date fails</li>
+<li><strong>Calendar bound.</strong> Every resolved instant must stay inside the calendar</li>
 </ul>
-<p>on stderr with a non-zero exit and an empty stdout; <code>--since</code> after <code>--until</code></p>
-<p>is an empty-window error rather than an empty-looking report. A <code>--last</code></p>
-<p>whose resolved window leaves the calendar is that same invalid-span error,</p>
-<p>and a named day whose resolved midnight or last second leaves it is the</p>
-<p>empty-window error naming its flag ― non-zero, empty stdout, before any</p>
-<p>report renders or store work runs.</p>
+<p>chrono can express (<code>NaiveDate</code>, roughly ±262,000 years), checked once at the</p>
+<p>resolve entry rather than trusted to the zone&#x27;s sign. A <code>--last</code> span that</p>
+<p>leaves it (e.g. <code>--last 100000000d</code>) gets the invalid-span error. A named day</p>
+<p>whose resolved midnight or last second leaves it gets the empty-window error</p>
+<p>naming its flag (the day end adds 86,399 s after the zone conversion, so a</p>
+<p>west offset can overshoot the ceiling). In <code>trend</code> the bound also covers the</p>
+<p><strong>derived previous window</strong>: <code>--last</code> reaches back twice, so a span whose</p>
+<p>current window resolves can still push the previous one out (e.g.</p>
+<p><code>--last 50000000d</code>, invalid-span), and a <code>--since</code> whose derived previous</p>
+<p>leaves the calendar gets the empty-window error naming <code>--since</code>, because the</p>
+<p>input is the date and the <code>--last</code> wording would blame the wrong flag.</p>
 <ul>
-<li>The window is <strong>disclosed, never silent</strong>: a dimmed <code>report window:</code> line</li>
+<li><strong>Errors are parse-time</strong>, before any report renders or store work runs:</li>
 </ul>
-<p>rides with the freshness line on stderr (every format), the framing block</p>
-<p>carries it as its last line (table only ― markdown stays a bare table),</p>
-<p><code>doctor</code> prints it in-band under its heading, and <code>--format json</code> gains a</p>
-<p><code>window</code> object (<code>since</code> / <code>until</code> as RFC 3339 with their offset). Every</p>
-<p>accepted window renders a bound that names its instant, never an empty</p>
-<p>string: an in-calendar instant renders in any valid zone, so the bounds</p>
-<p>renderer has no empty-string fallback to absorb an out-of-calendar bound</p>
-<p>with. Two limits belong to the presentation, not to the window. At the</p>
-<p>calendar&#x27;s own ends the rendered wall clock sits at most one zone width (less</p>
-<p>than a day) outside the calendar while the instant it names stays exact and</p>
-<p>in-calendar, and the spelled-out <strong>local date</strong> is at most one day outside ―</p>
-<p>the ceiling rendered in JST is <code>+262143-01-01T08:59:59+09:00</code>, a date</p>
-<p><code>NaiveDate</code> cannot name. Only a clock within a day of ±262,000 years reaches</p>
-<p>either, so a real run cannot. And RFC 3339 names years 0000..=9999 only, so a</p>
-<p>render at the calendar&#x27;s edge years has the RFC 3339 shape but does not parse</p>
-<p>back as RFC 3339. The tests pin both ends byte for byte</p>
-<p>(<code>the_presentation_spill_at_a_calendar_end_is_pinned_byte_for_byte</code> in</p>
-<p><code>src/core/period.rs</code>).</p>
-<p>Without the flags every output is byte-identical to the pre-period behavior.</p>
+<p>non-zero exit, empty stdout. An unparseable date fails; <code>--since</code> after</p>
+<p><code>--until</code> is an empty-window error rather than an empty-looking report.</p>
+<p>Refusing is deliberate: an unresolvable window would otherwise disclose an</p>
+<p>empty <code>since</code> and a store bound (<code>started_at &gt;= &#x27;&#x27;</code>) that passes every</p>
+<p>session, a successful-looking report that measures nothing.</p>
 <ul>
-<li>The catalog half of <code>inventory</code> is current config, so it is not windowed by</li>
+<li><strong>The window is disclosed, never silent.</strong> A dimmed <code>report window:</code> line</li>
 </ul>
-<p>time ― its <strong>usage half</strong> is. An unused row under a window says</p>
-<p><code>UNUSED (window)</code> / <code>&quot;unused-in-window&quot;</code>, never plain &quot;unused&quot;.</p>
+<p>rides with the freshness line on stderr (every format); the framing block</p>
+<p>carries it as its last line (table only); <code>doctor</code> prints it in-band under its</p>
+<p>heading; <code>--format json</code> gains a <code>window</code> object (<code>since</code> / <code>until</code> as</p>
+<p>RFC 3339 with offset; trend&#x27;s <code>window.current</code> / <code>window.previous</code>). Bounds</p>
+<p>never render as an empty string. Two presentation limits are unreachable in a</p>
+<p>real run: at the calendar&#x27;s ends the rendered wall clock can sit up to one</p>
+<p>zone width outside it (the ceiling in JST renders as</p>
+<p><code>+262143-01-01T08:59:59+09:00</code>) while the instant stays exact, and RFC 3339</p>
+<p>names years 0000..=9999 only, so edge-year renders do not parse back. A test</p>
+<p>in <code>src/core/period.rs</code> pins both byte for byte.</p>
 <ul>
-<li>Sessions the writer could not stamp (no observable start, empty</li>
+<li>Without the flags, output is byte-identical to the behavior before periods</li>
 </ul>
-<p><code>started_at</code>) are <strong>excluded</strong> from a windowed <code>session_stats</code> /</p>
-<p><code>subagent_totals</code> figure (<code>store.rs</code>&#x27;s <code>&lt;&gt; &#x27;&#x27;</code> guard) rather than guessed</p>
-<p>into it; without the flags they still count.</p>
+<p>existed.</p>
 <ul>
-<li>The windowed readers that scan <code>events</code> read the store through</li>
+<li><strong>Inventory.</strong> The catalog half is current config and is not windowed; its</li>
 </ul>
-<p><code>started_epoch</code>, and the store grows with every analyze. The store declares</p>
-<p>the index that keeps those reads fast (<code>storage.md</code>) and creates it on the</p>
-<p>next read-write open; <code>--frozen</code> / <code>sql</code> (read-only) never create it, so a</p>
-<p>store not opened read-write since it was declared keeps scanning. The</p>
-<p>sessions-axis figures read <code>sessions.started_at</code> instead ― a small table no</p>
-<p>index needs to serve. Watch the size with</p>
-<p><code>saniwalens sql &quot;SELECT COUNT(*) FROM events&quot;</code>.</p>
+<p><strong>usage half</strong> is. An unused row under a window says <code>UNUSED (window)</code> /</p>
+<p><code>&quot;unused-in-window&quot;</code>.</p>
+<ul>
+<li><strong>Unstamped sessions.</strong> Sessions the writer could not stamp (no observable</li>
+</ul>
+<p>start, empty <code>started_at</code>) are excluded from windowed <code>session_stats</code> /</p>
+<p><code>subagent_totals</code> (<code>store.rs</code>&#x27;s <code>&lt;&gt; &#x27;&#x27;</code> guard) rather than guessed into them;</p>
+<p>without the flags they still count.</p>
+<ul>
+<li><strong>Index.</strong> Windowed readers that scan <code>events</code> go through <code>started_epoch</code>.</li>
+</ul>
+<p>The store declares the index that keeps this fast (<code>storage.md</code>) and creates</p>
+<p>it on the next read-write open; <code>--frozen</code> and <code>sql</code> (read-only) never create</p>
+<p>it, so a store not opened read-write since keeps scanning. Sessions-axis</p>
+<p>figures read <code>sessions.started_at</code>, a small table needing no index. Check the</p>
+<p>size with <code>saniwalens sql &quot;SELECT COUNT(*) FROM events&quot;</code>.</p>
 <h2>Time bucketing</h2>
 <p><code>--by</code> groups by <code>year | month | week | day | hour</code>. Because the store keeps UTC</p>
 <p>(<code>storage.md</code>), bucketing converts to <code>--tz</code> first (<strong>default JST</strong>) so day/hour</p>
@@ -521,12 +462,13 @@ saniwalens &lt;view&gt; [--scope global|project[:&lt;slug&gt;]] [--by &lt;bucket
 <p>silent spike. Duration-weighted distribution is a later option; v1 assigns to the</p>
 <p>start bucket and is honest about the limitation.</p>
 <h2>Reporting honesty</h2>
-<p>The report never hides an approximation; it labels it (these mirror the metric</p>
-<p>caveats in <code>events.md</code> / <code>surfaces.md</code>):</p>
+<p>The report never hides an approximation; it labels it (mirroring the caveats in</p>
+<p><code>events.md</code> / <code>surfaces.md</code>).</p>
+<p><strong>Estimates and unknowns</strong></p>
 <ul>
-<li><code>sub_tokens_estimated</code> rows are marked so estimated subagent cost is not read</li>
+<li><code>sub_tokens_estimated</code> rows are marked, so estimated subagent cost is not</li>
 </ul>
-<p>as exact.</p>
+<p>read as exact.</p>
 <ul>
 <li>Trailing spans (closed only by session end) are marked; their duration is a</li>
 </ul>
@@ -534,103 +476,77 @@ saniwalens &lt;view&gt; [--scope global|project[:&lt;slug&gt;]] [--by &lt;bucket
 <ul>
 <li>Surfaces with unknown <code>static_tokens</code> (e.g. <code>mcp_tool</code> without an available</li>
 </ul>
-<p>schema) are marked unknown, never reported as zero cost.</p>
+<p>schema) are marked unknown, never zero.</p>
 <ul>
-<li>A surface&#x27;s startup cost and its on-demand body cost are shown as two figures,</li>
+<li>A surface&#x27;s startup cost and on-demand body cost are two figures, never one</li>
 </ul>
-<p>never one (<code>surfaces.md</code>): a skill&#x27;s body is what invoking it costs, so</p>
-<p>printing it alone under a &quot;what to trim&quot; heading reads as a startup saving the</p>
-<p>deletion never delivers.</p>
+<p>(<code>surfaces.md</code>): printing a skill&#x27;s body cost alone under &quot;what to trim&quot;</p>
+<p>reads as a startup saving the deletion never delivers.</p>
 <ul>
-<li>&quot;Unused&quot; always carries the window it was evaluated over, so it is not mistaken</li>
+<li>&quot;Unused&quot; always carries its window, so it is not mistaken for &quot;never</li>
 </ul>
-<p>for &quot;never installed&quot;: without the period flags the window is all history, and</p>
-<p>under <code>--since</code> / <code>--until</code> / <code>--last</code> the row itself says <code>UNUSED (window)</code></p>
-<p>(inventory; the other views&#x27; empty states read &quot;in the evaluation window&quot;).</p>
+<p>installed&quot;: all history without period flags, <code>UNUSED (window)</code> under them</p>
+<p>(inventory; other views&#x27; empty states read &quot;in the evaluation window&quot;).</p>
 <ul>
-<li>A window the input makes unresolvable is an <strong>error</strong>, never a silent</li>
+<li>A window the input makes unresolvable is an <strong>error</strong>, never a silent report</li>
 </ul>
-<p>report: a <code>--last</code> whose resolved window ― or, in <code>trend</code>, the equal-length</p>
-<p>window <strong>derived</strong> one second before the current one ― leaves the calendar</p>
-<p>names dates that do not exist, and fails with the invalid-span error; a</p>
-<p><code>--since</code> whose derived previous leaves it fails with the empty-window</p>
-<p>error naming <code>--since</code>; and a named day whose resolved midnight or last</p>
-<p>second leaves it fails with the empty-window error naming its own flag.</p>
-<p>The alternative would be a disclosure line with an empty <code>since</code> and a</p>
-<p>store bound (<code>started_at &gt;= &#x27;&#x27;</code>) that silently passes every session ― a</p>
-<p>successful-looking report that measures nothing. The bounds renderer keeps</p>
-<p>no empty-string fallback to absorb an unrenderable instant with: an</p>
-<p>accepted window&#x27;s instants are in-calendar by the resolve entry&#x27;s check, so</p>
-<p>a bound always renders, the disclosure line and the JSON <code>window</code> cannot</p>
-<p>carry an empty string, and the one-zone-width presentation spill at the</p>
-<p>calendar&#x27;s own ends (qualified in the Period section) is pinned by a test</p>
-<p>instead of being passed over as if it named a valid date.</p>
+<p>(see Period).</p>
+<p><strong>Subagent split</strong> (per-agent rows against the subagent total printed above them)</p>
 <ul>
-<li>A subagent run whose agent type was never recorded is shown as <code>(unknown)</code>,</li>
+<li>A run whose agent type was never recorded shows as <code>(unknown)</code>, never merged</li>
 </ul>
-<p>never merged into a named type and never dropped ― the per-agent rows must</p>
-<p>keep summing to the subagent total the same report prints above them, for</p>
-<p>every run that could be extracted (the two cases below cover the runs that</p>
-<p>could not).</p>
+<p>into a named type and never dropped, so the rows keep summing to the total</p>
+<p>for every extractable run.</p>
 <ul>
-<li>When they *cannot* sum to it ― a store predating the per-agent split, read</li>
+<li>They *cannot* sum to it when a store predating the per-agent split is read</li>
 </ul>
-<p>with <code>--frozen</code> so the refresh that would fill it never ran ― the report says</p>
-<p>so on stderr instead of letting an absent breakdown pass for a zero one</p>
-<p>(<code>storage.md</code>&#x27;s report-the-gap contract). It rides with the freshness line</p>
-<p>rather than in the table, so piped stdout and <code>--format json</code> stay clean.</p>
-<p>Under a drawn window an empty split is usually the two time axes at work ―</p>
-<p>the total reads the session&#x27;s stamped start, the rows read each run&#x27;s own</p>
-<p>epoch ― so the message names the window instead of pointing at a refresh</p>
-<p>that cannot fill a straddle; the refresh hint stays without the flags.</p>
+<p>with <code>--frozen</code>. The report says so on stderr instead of letting an absent</p>
+<p>breakdown pass for a zero one (<code>storage.md</code>&#x27;s report-the-gap contract). The</p>
+<p>message rides with the freshness line, so piped stdout and JSON stay clean.</p>
+<p>Under a drawn window an empty split is usually the two time axes at work (the</p>
+<p>total reads the session&#x27;s stamped start, the rows each run&#x27;s own epoch), so</p>
+<p>the message names the window instead of pointing at a refresh that cannot</p>
+<p>fill a straddle.</p>
 <ul>
-<li>When they sum to only *part* of it ― sessions analyzed before runs were</li>
+<li>They sum to only *part* of it when sessions analyzed before run extraction</li>
 </ul>
-<p>extracted keep their totals (<code>storage.md</code>: the store outlives its inputs), but</p>
-<p>once Claude Code has pruned their transcripts no refresh can ever produce their</p>
-<p>rows ― the rows are labeled a <strong>partial split</strong> in-band, beside the numbers</p>
-<p>they qualify, because this is a property of the data and not a staleness a</p>
-<p>refresh could cure: <code>usage</code> prints the covered and uncovered figures between</p>
-<p>the total and the table, <code>doctor</code> states the gap before naming any agent, the</p>
-<p>briefing does the same under its subagent line, and JSON carries the</p>
-<p>reconciliation as <code>agent_split</code> (<code>core::subagent::SplitCoverage</code>). Under a</p>
-<p>drawn window the same gap is the straddle, so the in-band labels say the</p>
-<p>uncovered tokens fall outside the report window instead of the</p>
-<p>pruned-transcript reason; without the flags the wording is unchanged.</p>
-<p><code>doctor</code> introduces its top rows as &quot;most of&quot; the subagent output only when</p>
-<p>they exceed half of the total ― a long tail, or a partial split, gets a</p>
-<p>wording that claims no more than the rows show.</p>
+<p>keep their totals (<code>storage.md</code>: the store outlives its inputs) but pruned</p>
+<p>transcripts can never yield their rows. This is a property of the data, not a</p>
+<p>staleness a refresh could cure, so the rows are labeled a <strong>partial split</strong></p>
+<p>in-band: <code>usage</code> prints covered and uncovered figures between total and</p>
+<p>table, <code>doctor</code> states the gap before naming any agent, the briefing does the</p>
+<p>same under its subagent line, and JSON carries <code>agent_split</code></p>
+<p>(<code>core::subagent::SplitCoverage</code>). Under a window the gap is the straddle, so</p>
+<p>labels say the uncovered tokens fall outside the window. <code>doctor</code> calls its</p>
+<p>top rows &quot;most of&quot; the subagent output only when they exceed half the total.</p>
+<p>**<code>trend</code> comparisons**</p>
 <ul>
-<li>An <code>n/a</code> in <code>trend</code> states its real reason, and the reason is a fact about</li>
+<li>A comparison is <code>n/a</code> / <code>&quot;unavailable&quot;</code> only when *that row&#x27;s* previous side</li>
 </ul>
-<p>that row: its previous side holds no baseline ― no event of that kind, no</p>
-<p>invocation of that skill, or no session on the totals axis. It never means</p>
-<p>the baseline measured zero, and never a drop to zero. The table&#x27;s reason</p>
-<p>text names that row scope (&quot;that row&#x27;s previous side&quot;) because one sentence</p>
-<p>covers the kind, skill, and totals sections, and it is printed only when a</p>
-<p>report actually holds such a comparison; the footnote about an empty</p>
-<p>previous window is printed when that window holds no event of any kind. A</p>
-<p>session alone does not suppress it: the note speaks about events, and the</p>
-<p>totals rows may still compare while the kind rows are n/a. A metric a kind does not carry renders no row at all ― the table</p>
-<p>omits it, so the unavailable label is never attached to a metric the table</p>
-<p>does not show. <code>--format json</code> keeps every kind&#x27;s three metrics for its</p>
-<p>consumers, holding the same shape with a null delta and</p>
-<p><code>&quot;reason&quot;: &quot;not_applicable&quot;</code> where the kind carries nothing,</p>
-<p><code>&quot;reason&quot;: &quot;no_baseline&quot;</code> where the previous side is absent, and</p>
-<p><code>reason: null</code> where the comparison was judged. A baseline that measured</p>
-<p>zero still compares: a 0-token span is a measurement, a session that ran no</p>
-<p>subagent measured 0 runs, and a baseline that only rounds to the displayed</p>
-<p>zero compares too. Count axes keep their baseline tied to the aggregate</p>
-<p>row&#x27;s presence, deliberately: a window with no event of a kind stays</p>
-<p><code>no_baseline</code> rather than reading a 0 -&gt; N change as a measured move. A</p>
-<p>byte-identity criterion stated for this view by an earlier refactor is</p>
-<p>withdrawn, and two deliberate output changes replace it: a report holding a</p>
-<p>measured-zero baseline now compares its cells instead of printing <code>n/a</code>, and</p>
-<p>a report that holds any n/a comparison prints a one-line reason sentence</p>
-<p>whose wording names the row scope (<code>that row&#x27;s previous side</code>) so it covers</p>
-<p>the kind, skill, and totals sections. Pinning output that the spec forbids</p>
-<p>is what the criterion did; the invariants above, each pinned by a test, are</p>
-<p>what stands in its place.</p>
+<p>holds no baseline: no event of that kind, no invocation of that skill, or no</p>
+<p>session on the totals axis. It never means the baseline measured zero. A</p>
+<p>0-token span is a measurement, so is a session that ran no subagent, and a</p>
+<p>baseline that merely rounds to the displayed zero still compares.</p>
+<ul>
+<li>Count axes tie their baseline to the aggregate row&#x27;s presence on purpose: a</li>
+</ul>
+<p>window with no event of a kind stays <code>no_baseline</code> rather than reading</p>
+<p>0 → N as a measured move.</p>
+<ul>
+<li>A kind renders only the metrics it carries (point kinds: the count alone,</li>
+</ul>
+<p>since ingest writes their tokens and duration as constant zeros;</p>
+<p><code>events.md</code>). The table omits the rest, so the unavailable label never</p>
+<p>attaches to a metric it does not show. JSON keeps all three metrics per kind</p>
+<p>with a null delta and a <code>reason</code>: <code>null</code> (judged), <code>&quot;no_baseline&quot;</code> (previous</p>
+<p>side absent), or <code>&quot;not_applicable&quot;</code> (the kind does not carry the metric).</p>
+<ul>
+<li>The reason sentence names the row scope (&quot;that row&#x27;s previous side&quot;) so one</li>
+</ul>
+<p>sentence covers the kind, skill, and totals sections, and prints only when a</p>
+<p>report holds such a comparison. The empty-previous-window footnote prints when</p>
+<p>that window holds no event of any kind; a session alone does not suppress it,</p>
+<p>since totals rows may compare while kind rows are <code>n/a</code>.</p>
 <p>Meta-skills are not nested (<code>events.md</code>): a driver and the skills it ran are</p>
 <p>each their own span, so a child&#x27;s cost lands on the child and no figure is</p>
 <p>silently double-counted.</p>
@@ -645,19 +561,16 @@ saniwalens sql [&lt;query&gt;] [--format table|markdown|json] [--limit &lt;N&gt;
 
 
 </code></pre>
-<p><code>sql</code> is the one read that never auto-refreshes ― it opens the store strictly</p>
-<p>read-only, so an ad-hoc query is reproducible and can never mutate anything.</p>
-<p>It prints the freshness header (store age) on stderr instead, so a stale read</p>
-<p>is at least visible.</p>
-<p>The store&#x27;s own query surface: run an arbitrary read query and print the result.</p>
-<p>The query is the argument, or ― when omitted ― read from <strong>stdin</strong>, so both</p>
-<p><code>saniwalens sql &quot;SELECT …&quot;</code> and <code>echo &quot;SELECT …&quot; | saniwalens sql</code> work (stdin</p>
-<p>sidesteps shell quoting for complex queries). This exists because the tool is a</p>
-<p>*session-analysis* tool: anyone wanting a slice the fixed views do not cover ―</p>
-<p>notably the <code>optimize</code> session chasing a root cause ― should query the analyzed</p>
-<p>store, not re-parse the raw transcripts. The store is opened <strong>read-only</strong> so an</p>
-<p>ad-hoc query can never mutate the derived data, and an absent db is an error</p>
-<p>(run <code>analyze</code> first), not a silently-created empty one.</p>
+<p><code>sql</code> is the one read that never auto-refreshes: it opens the store strictly</p>
+<p>read-only, so an ad-hoc query is reproducible and can never mutate anything,</p>
+<p>and an absent db is an error (run <code>analyze</code> first) rather than a silently</p>
+<p>created empty one. It prints the freshness header (store age) on stderr so a</p>
+<p>stale read is at least visible.</p>
+<p>The query is the argument or, when omitted, <strong>stdin</strong></p>
+<p>(<code>echo &quot;SELECT …&quot; | saniwalens sql</code>; stdin sidesteps shell quoting). It exists</p>
+<p>because this is a *session-analysis* tool: anyone wanting a slice the fixed</p>
+<p>views do not cover, notably the <code>optimize</code> session chasing a root cause, should</p>
+<p>query the analyzed store, not re-parse raw transcripts.</p>
 <p>A <code>tool_errors</code> view (<code>storage.md</code>) names the friction columns that are</p>
 <p>otherwise overloaded onto generic event columns (<code>category</code>, <code>excerpt</code>, <code>tool</code>,</p>
 <p><code>target</code>, <code>project</code>), so a friction query reads cleanly without knowing the</p>
@@ -683,210 +596,204 @@ saniwalens optimize [--projects &lt;dir&gt;] [--db &lt;path&gt;] [--scope global
 
 
 </code></pre>
-<p>The AI-proposal consumer (<code>architecture.md</code>): rather than emit static</p>
-<p>&quot;recommendations&quot; the tool cannot safely act on, <code>optimize</code> analyzes (unless</p>
-<p><code>--frozen</code>, the same flag the views use), composes the findings with a prescribed advisor prompt, and</p>
-<p>launches the harness&#x27;s agent seeded with it ― <code>claude</code> for an interactive</p>
-<p>session that applies edits on agreement, <code>opencode run --format json</code> for a</p>
-<p>headless run that streams only the agent&#x27;s text while the raw tool output</p>
-<p>logs to a private file (<code>--verbose</code> restores the raw stream) and prints the</p>
-<p>plan without editing. The headless output opens with a proposal-only status line stating no files were changed, so a truncated read still shows it. The private log lives for the whole run; a failure</p>
-<p>keeps it and is named in the error, so a failed advisor still leaves its full</p>
-<p>output reachable, while a success removes it (the raw stream may echo</p>
-<p>secrets) unless <code>SANIWALENS_KEEP_RUN_LOG=1</code> keeps it for post-mortem</p>
-<p>inspection; the run&#x27;s child and heartbeat thread are torn down on every exit</p>
-<p>path, not only on</p>
-<p>success (<code>cli/headless.rs</code>). <code>--timeout &lt;DURATION&gt;</code> (e.g. <code>30s</code>, <code>2m</code>, <code>500ms</code>)</p>
-<p>bounds a headless run; when it expires the child is killed and reaped and the</p>
-<p>error names the raw log. It is off by default, so a legitimately long run is not</p>
-<p>cut short. The prompt makes</p>
-<p>the session <strong>investigate autonomously to a conclusion</strong>: it pins down each root</p>
-<p>cause and proposes a concrete fix, rather than handing the analysis back with a</p>
-<p>&quot;which area do you want to start with?&quot;. It prioritises work friction over config</p>
-<p>size, verifies before recommending removal (an &quot;unused&quot; skill may be invoked by</p>
-<p>subagents) by inspecting rather than asking, and ― in interactive runs ― pauses for exactly one thing ―</p>
-<p>approval of the concrete fix-plan before any file is edited. This &quot;drive to a</p>
-<p>plan, gate only on applying it&quot; shape is the design; if it changes, update</p>
-<p><code>instructions</code> in <code>core::optimize</code> and this paragraph together.</p>
-<p><code>instructions</code> renders from the harness copy (<code>HarnessCopy</code>), not a constant,</p>
-<p>so the advisor identity, config locations, and raw-input pointers name the</p>
-<p>harness whose rows the briefing renders.</p>
-<p><code>--language en|ja</code> (and the <code>language</code> config key, the same flag-beats-file</p>
-<p>order with the locale fallback beneath them)</p>
-<p>switches the advisor&#x27;s output language. The instruction is one sentence from a</p>
-<p>single source (<code>AdvisorLanguage::instruction_sentence</code> in <code>core::optimize</code>,</p>
-<p>carried on the same <code>HarnessCopy</code>): the briefing instructions, the headless</p>
-<p>instructions, the apply instructions, and the launch pointer all route through</p>
-<p><code>instructions_for</code>, so every advisor-facing prompt carries it. The unset</p>
-<p>default is English and carries no sentence, so unset output is byte-identical</p>
-<p>to before; the report tables stay English either way. The guided entry passes</p>
-<p>its <code>--language</code> preset (or the file default when no preset names one)</p>
-<p>through to the inline next-step run, so the guide renders the same language</p>
-<p>as the equivalent <code>optimize</code> invocation. Fixed TUI protocol tokens</p>
-<p>are deliberately not translated: the <code>y</code>/<code>n</code>/<code>q</code> choice lines, the</p>
-<p>display-recovery line, and the headless proposal-only status line stay</p>
-<p>byte-identical in both languages, so the <code>y</code>/<code>n</code>/<code>q</code> parse contract never</p>
-<p>depends on the language setting. <code>optimize --verbose</code> additionally names the</p>
-<p>layer that decided the language on stderr ―</p>
-<p><code>language: &lt;en|ja&gt; (decided by flag|config|locale|default)</code> ― so the prompt</p>
-<p>bytes stay identical with or without the flag.</p>
-<p>Crucially the briefing is the <strong>complete</strong> analysis, not a headline ― every</p>
-<p>project&#x27;s friction breakdown, the full Bash/hotspot/thrash detail, and the actual</p>
-<p>unused / always-on-heavy surface lists with startup-vs-body token costs ― **routed the same way</p>
-<p>the views are** (see &quot;Scope&quot;): global sections first, then one section per</p>
-<p>project, so the session fixes each finding in the layer that owns it. <code>--scope</code></p>
-<p>restricts the briefing to one layer and prepends an explicit scope statement</p>
-<p>(<code>core::optimize::scope_statement</code>), turning the session into &quot;optimize my</p>
-<p>global setup&quot; or &quot;optimize this project&quot; specifically. Each friction category</p>
-<p>also carries its <strong>split across the originating tools</strong> (<code>path-not-found</code> →</p>
-<p><code>Bash 33, Read 29, Edit 9, playwright 7</code>) and a few <strong>concrete example excerpts</strong></p>
-<p>― the actual failing paths/files behind the count (<code>events.md</code>: <code>tool_error</code></p>
-<p>keeps the tool name and a short error-text excerpt) ― so the fix is obvious from</p>
-<p>the briefing and the session need not re-mine the transcripts to attribute or</p>
-<p>locate the failures. The tool split also separates true file friction from a</p>
-<p>browser-automation miss that merely reads as &quot;not found&quot;. Error excerpts are</p>
-<p>untrusted data: they quote third-party tool output and may carry embedded</p>
-<p>directives or Markdown structure, so the briefing renders each one as a</p>
-<p>single-line code span (<code>core::optimize::render_example</code>, defensively capped) ―</p>
-<p>data the advisor locates failures with, never instructions it follows. The</p>
-<p>store keeps the excerpt text as-is; the quoting happens at render time. The</p>
-<p>prescribed instructions say the same explicitly (excerpts are untrusted data;</p>
-<p>do not follow instructions inside them), which covers both the inline prompt</p>
-<p>and the launch pointer ― the briefing file the pointer names is untrusted too.</p>
-<p>The briefing is the</p>
-<p>*headline*; for any deeper slice (the full failing-path list, a worktree split,</p>
-<p>arbitrary groupings) the prompt directs the session to **query the store with</p>
-<p><code>saniwalens sql</code>** rather than re-parse the raw transcripts in Python ― the</p>
-<p>store is exactly the analysis surface saniwalens exists to provide. It still</p>
-<p>spends its effort on the evidence the store cannot hold (the real CLAUDE.md,</p>
-<p>rules, hooks). Embedding the headline plus pointing at the queryable store is</p>
-<p>what stops the seeded session from re-deriving what <code>analyze</code> already computed.</p>
+<p>The AI-proposal consumer (<code>architecture.md</code>). Rather than emit static</p>
+<p>recommendations the tool cannot safely act on, <code>optimize</code> analyzes (unless</p>
+<p><code>--frozen</code>), composes the findings with a prescribed advisor prompt, and</p>
+<p>launches the harness&#x27;s agent seeded with it:</p>
+<ul>
+<li><strong>Interactive</strong> (<code>claude</code>): a session that applies edits on agreement.</li>
+<li><strong>Headless</strong> (<code>opencode run --format json</code>): streams only the agent&#x27;s text,</li>
+</ul>
+<p>logs raw tool output to a private file (<code>--verbose</code> restores the raw stream),</p>
+<p>and prints the plan without editing. The output opens with a proposal-only</p>
+<p>status line stating no files were changed, so a truncated read still shows it.</p>
+<p>The private log lives for the whole run. A failure keeps it and names it in the</p>
+<p>error; a success removes it (the raw stream may echo secrets) unless</p>
+<p><code>SANIWALENS_KEEP_RUN_LOG=1</code>. The child and heartbeat thread are torn down on</p>
+<p>every exit path (<code>cli/headless.rs</code>). <code>--timeout &lt;DURATION&gt;</code> (e.g. <code>30s</code>, <code>2m</code>,</p>
+<p><code>500ms</code>) bounds a headless run: on expiry the child is killed and reaped and</p>
+<p>the error names the raw log. It is off by default so a legitimately long run is</p>
+<p>not cut short.</p>
+<p><strong>Prompt shape.</strong> The session <strong>investigates autonomously to a conclusion</strong>: it</p>
+<p>pins down each root cause and proposes a concrete fix instead of handing the</p>
+<p>analysis back with &quot;which area do you want to start with?&quot;. It prioritises work</p>
+<p>friction over config size, verifies before recommending removal (an &quot;unused&quot;</p>
+<p>skill may be invoked by subagents) by inspecting rather than asking, and,</p>
+<p>interactively, pauses for exactly one thing: approval of the concrete fix-plan</p>
+<p>before any file is edited. This &quot;drive to a plan, gate only on applying it&quot;</p>
+<p>shape is the design; if it changes, update <code>instructions</code> in <code>core::optimize</code></p>
+<p>and this paragraph together. <code>instructions</code> renders from the harness copy</p>
+<p>(<code>HarnessCopy</code>), not a constant, so the advisor identity, config locations, and</p>
+<p>raw-input pointers name the harness whose rows the briefing renders.</p>
+<p><strong>Language.</strong> <code>--language en|ja</code> (and the <code>language</code> config key, with the</p>
+<p>locale fallback beneath) switches the advisor&#x27;s output language. The</p>
+<p>instruction is one sentence from a single source</p>
+<p>(<code>AdvisorLanguage::instruction_sentence</code> in <code>core::optimize</code>, carried on</p>
+<p><code>HarnessCopy</code>); the briefing, headless, and apply instructions and the launch</p>
+<p>pointer all route through <code>instructions_for</code>, so every advisor-facing prompt</p>
+<p>carries it. Unset means English with no sentence, byte-identical to before;</p>
+<p>report tables stay English either way. The guided entry passes its <code>--language</code></p>
+<p>preset (or the file default) to the inline run. Fixed protocol tokens are never</p>
+<p>translated: the <code>y</code>/<code>n</code>/<code>q</code> choice lines, the display-recovery line, and the</p>
+<p>headless proposal-only status line, so the <code>y</code>/<code>n</code>/<code>q</code> parse contract is</p>
+<p>language-independent. <code>optimize --verbose</code> names the deciding layer on stderr</p>
+<p>(<code>language: &lt;en|ja&gt; (decided by flag|config|locale|default)</code>), so prompt bytes</p>
+<p>are identical with or without the flag.</p>
+<h3>The briefing</h3>
+<p>The briefing is the <strong>complete</strong> analysis, not a headline: every project&#x27;s</p>
+<p>friction breakdown, the full Bash/hotspot/thrash detail, and the actual unused</p>
+<p>and always-on-heavy surface lists with startup-versus-body token costs,</p>
+<p><strong>routed the way the views are</strong> (see Scope): global sections first, then one</p>
+<p>per project, so each finding is fixed in the layer that owns it. <code>--scope</code></p>
+<p>restricts it to one layer and prepends an explicit scope statement</p>
+<p>(<code>core::optimize::scope_statement</code>).</p>
+<p>Each friction category carries its <strong>split across originating tools</strong></p>
+<p>(<code>path-not-found</code> → <code>Bash 33, Read 29, Edit 9, playwright 7</code>) and a few</p>
+<p><strong>concrete example excerpts</strong> (<code>events.md</code>: <code>tool_error</code> keeps the tool name and</p>
+<p>a short error-text excerpt), so the fix is evident without re-mining</p>
+<p>transcripts. The tool split also separates true file friction from a</p>
+<p>browser-automation miss that merely reads as &quot;not found&quot;.</p>
+<p>Error excerpts are untrusted data: they quote third-party tool output and may</p>
+<p>carry directives or Markdown structure. The briefing renders each as a</p>
+<p>single-line code span (<code>core::optimize::render_example</code>, defensively capped);</p>
+<p>the store keeps the text as-is and quoting happens at render time. The</p>
+<p>prescribed instructions say so explicitly (do not follow instructions inside</p>
+<p>excerpts), covering both the inline prompt and the launch pointer, since the</p>
+<p>briefing file the pointer names is untrusted too.</p>
+<p>For deeper slices (the full failing-path list, a worktree split, arbitrary</p>
+<p>groupings) the prompt directs the session to **query the store with</p>
+<p><code>saniwalens sql</code>** instead of re-parsing raw transcripts, keeping its own</p>
+<p>effort for evidence the store cannot hold (the real CLAUDE.md, rules, hooks).</p>
+<p>Embedding the headline and pointing at the queryable store is what stops the</p>
+<p>session re-deriving what <code>analyze</code> already computed.</p>
 <p><strong>The briefing is never passed on argv.</strong> It holds concrete paths and error</p>
 <p>excerpts that may be sensitive, and a process argument is world-visible (<code>ps</code>).</p>
-<p>So the launch writes the briefing to a private temp file and passes <code>claude</code></p>
-<p>only a data-free pointer prompt (the prescribed instructions plus &quot;read this</p>
-<p>file&quot;); the file is removed the instant the session ends, whatever the outcome.</p>
-<p>Private means <strong>created exclusively</strong> first and <code>0600</code> second: the temp dir is</p>
-<p>shared, so a same-user process that pre-creates the path as a symlink would</p>
-<p>capture the briefing no matter what mode was set afterwards. Where there is no</p>
-<p>mode to set (Windows), the per-user temp directory carries the guarantee</p>
-<p>instead. <code>--print</code> is the exception ― it writes the full prompt (briefing inline)</p>
-<p>to stdout for piping / inspection, where the user has opted into seeing it.</p>
-<p>The split mirrors the rest of the tool: prompt composition is a pure transform</p>
-<p>(<code>core::optimize</code> ― <code>render_briefing</code> for the Markdown report with empty sections</p>
+<p>The launch writes it to a private temp file and passes the agent only a</p>
+<p>data-free pointer prompt (the prescribed instructions plus &quot;read this file&quot;);</p>
+<p>the file is removed the instant the session ends, whatever the outcome. Private</p>
+<p>means <strong>created exclusively</strong> first and <code>0600</code> second: the temp dir is shared,</p>
+<p>so a same-user process that pre-created the path as a symlink would capture the</p>
+<p>briefing whatever mode was set afterwards. Where there is no mode to set</p>
+<p>(Windows), the per-user temp directory carries the guarantee. <code>--print</code> is the</p>
+<p>exception: it writes the full prompt, briefing inline, to stdout, where the</p>
+<p>user has opted into seeing it.</p>
+<p><strong>Pure core, thin shell.</strong> Prompt composition is a pure transform in</p>
+<p><code>core::optimize</code> (<code>render_briefing</code> for the Markdown report with empty sections</p>
 <p>omitted and long lists capped, <code>instructions</code> for the role, <code>launch_prompt</code> for</p>
-<p>the argv pointer), and only the temp-file write and process launch are I/O.</p>
-<p>The findings themselves split the same way: the shell fetches the store&#x27;s rows</p>
-<p>(<code>findings_input</code> in <code>cli/mod.rs</code>) and hands them to the pure assembly in</p>
-<p><code>core::findings</code> ― the joins, the named caps (<code>TOP_COMMANDS_LIMIT</code>,</p>
-<p><code>EXAMPLES_PER_CATEGORY</code>, <code>THRASH_LINES_PER_PROJECT</code>, …), the scope routing, and</p>
-<p>the ordering ― so the briefing&#x27;s wiring is unit-tested over small inputs and</p>
-<p>only the queries and the print are I/O. The briefing&#x27;s store reads are bounded</p>
-<p>at fetch time, not only at render time: <code>findings_input</code> uses the <code>*_briefing</code></p>
-<p>readers (a trailing <code>LIMIT</code> over the same <code>WHERE</code>/<code>ORDER BY</code>, so a bounded result</p>
-<p>is the head prefix of the unbounded one) with the fetch caps owned by</p>
+<p>the argv pointer); only the temp-file write and process launch are I/O.</p>
+<p>Findings split the same way: the shell fetches rows (<code>findings_input</code> in</p>
+<p><code>cli/mod.rs</code>) and hands them to the pure assembly in <code>core::findings</code> (joins,</p>
+<p>named caps such as <code>TOP_COMMANDS_LIMIT</code> and <code>EXAMPLES_PER_CATEGORY</code>, scope</p>
+<p>routing, ordering), so the wiring is unit-tested over small inputs.</p>
+<p>Reads are bounded at fetch time, not only at render time: <code>findings_input</code> uses</p>
+<p>the <code>*_briefing</code> readers (a trailing <code>LIMIT</code> over the same <code>WHERE</code>/<code>ORDER BY</code>,</p>
+<p>so a bounded result is the head prefix of the unbounded one) with caps owned by</p>
 <p><code>core::findings</code> (<code>BRIEFING_GROUPS_LIMIT</code>, <code>BRIEFING_EVENTS_LIMIT</code>), skill</p>
-<p>invocation output is summed in SQL (<code>skill_out_tokens_sum</code>), and the rendered</p>
-<p>briefing is cut at <code>BRIEFING_MAX_BYTES</code> with a truncation marker naming the</p>
-<p>store query to run instead ― so a multi-year store yields a bounded briefing,</p>
-<p>never silent partial data.</p>
-<p>The send is one seam: <code>deliver</code> runs a <code>DeliveryPlan</code> whose mode</p>
+<p>output is summed in SQL (<code>skill_out_tokens_sum</code>), and the rendered briefing is</p>
+<p>cut at <code>BRIEFING_MAX_BYTES</code> with a marker naming the store query to run</p>
+<p>instead. A multi-year store thus yields a bounded briefing, never silent</p>
+<p>partial data.</p>
+<p><strong>One delivery seam.</strong> <code>deliver</code> runs a <code>DeliveryPlan</code> whose mode</p>
 <p>(<code>DeliveryMode::Print | Interactive | Headless</code>, chosen by <code>--print</code> over the</p>
-<p>harness&#x27;s launch shape) picks the payload ― <code>Print</code> writes the prompt to</p>
-<p>stdout, launch modes write the briefing to the private pointer file, hand the</p>
-<p>spawn to the <code>AdvisorLaunch</code> adapter, and remove the file the moment the run</p>
-<p>ends. Production wires <code>ProcessAdvisor</code> (inherited stdio, or <code>run_headless</code>&#x27;s</p>
-<p>logged pipe unless <code>--verbose</code>); the delivery tests wire a recording double</p>
-<p>and assert the argv instead of spawning. <code>Harness::copy</code> assembles the harness</p>
-<p>data those prompts render from, so the shell never spells <code>HarnessCopy</code> field</p>
-<p>by field. The launch shape the mode defers to is per-harness **data on the</p>
-<p>seam** too (<code>Harness::launch_command</code> in <code>adapter::harness</code>, beside the</p>
-<p>harness&#x27;s other arms), so a new harness&#x27;s delivery lands there and this</p>
-<p>section&#x27;s wiring stays put. The headless run&#x27;s raw lines render through</p>
-<p>per-harness data as well: the plan carries the renderer the harness seam</p>
-<p>chose (<code>Harness::run_line_renderer</code>), and the logged pipe applies it line by</p>
-<p>line, so the loop never names a harness and a new harness&#x27;s stream needs no</p>
-<p>shell edit. <code>deliver</code> returns <code>Result&lt;()&gt;</code>, not a typed outcome: its only caller</p>
-<p>(<code>optimize</code>) needs success/failure, and a non-zero exit is already turned into</p>
-<p>an error naming the raw log; a <code>DeliveryOutcome</code> is deferred until a consumer</p>
-<p>needs the status or the log. PBI 57 records this decision.</p>
-<p><code>--apply</code> hands a headless run&#x27;s plan to the harness&#x27;s own interactive</p>
-<p>session in one command (headless harnesses only): the advisor runs headless</p>
-<p>as usual, but its raw log is kept, the agent-text lines (<code>Text</code> only, never</p>
-<p>the JSON event lines) are extracted into the plan, and the plan is saved as</p>
+<p>harness&#x27;s launch shape) picks the payload: <code>Print</code> writes the prompt to stdout;</p>
+<p>launch modes write the briefing to the private pointer file, hand the spawn to</p>
+<p>the <code>AdvisorLaunch</code> adapter, and remove the file when the run ends. Production</p>
+<p>wires <code>ProcessAdvisor</code> (inherited stdio, or <code>run_headless</code>&#x27;s logged pipe unless</p>
+<p><code>--verbose</code>); delivery tests wire a recording double and assert argv instead of</p>
+<p>spawning.</p>
+<p>Per-harness differences are data on the harness seam, so a new harness&#x27;s</p>
+<p>delivery lands there and this wiring stays put: <code>Harness::copy</code> assembles the</p>
+<p>prompt data, <code>Harness::launch_command</code> (in <code>adapter::harness</code>) gives the launch</p>
+<p>shape, and <code>Harness::run_line_renderer</code> gives the headless line renderer the</p>
+<p>logged pipe applies line by line. <code>deliver</code> returns <code>Result&lt;()&gt;</code>, not a typed</p>
+<p>outcome: its only caller needs success or failure, and a non-zero exit already</p>
+<p>becomes an error naming the raw log. A <code>DeliveryOutcome</code> is deferred until a</p>
+<p>consumer needs the status or log.</p>
+<h3><code>--apply</code> ― hand a plan to an interactive session</h3>
+<p><code>--apply</code> (headless harnesses only) hands a headless run&#x27;s plan to the</p>
+<p>harness&#x27;s own interactive session in one command. The advisor runs headless as</p>
+<p>usual, but its raw log is kept and the agent-text lines (<code>Text</code> only, never the</p>
+<p>JSON event lines) are extracted into the plan, saved as</p>
 <p><code>$XDG_STATE_HOME/saniwalens/plans/plan-&lt;time&gt;-&lt;pid&gt;-&lt;seq&gt;.md</code> with private</p>
-<p>(<code>0600</code>, exclusive creation, like the briefing temp files) permissions. The</p>
-<p>path is printed, with a note that pruning saved plans is a separate</p>
-<p>command&#x27;s job: a handoff run always leaves its plan file behind and always</p>
-<p>shows its path, while a normal <code>optimize</code> leaves nothing. The harness&#x27;s own</p>
-<p>TUI then opens on an apply-ordering prompt (<code>core::optimize::apply_prompt</code>)</p>
-<p>naming the plan file and the store, so the dialog digs out each step&#x27;s</p>
-<p>evidence with <code>saniwalens sql</code> instead of re-parsing raw input:</p>
-<p><code>opencode --prompt</code> for opencode (the expected shape: flag acceptance</p>
-<p>verified, with its TUI prompt injection still awaiting one confirmation on a</p>
-<p>real TTY), <code>kilo --prompt</code> and</p>
-<p>bare <code>claude</code> as before (<code>Harness::interactive_launch_command</code> in</p>
-<p><code>adapter::harness</code>). <code>--apply</code> refuses <code>--print</code> (printing ends the run</p>
-<p>instead of handing it off), <code>--verbose</code> (the handoff reads the logged stream</p>
-<p>that verbose mode does not keep), and interactive harnesses (their session</p>
-<p>already applies its own plan); the flag checks run before any store work.</p>
-<p>When the dialog launch fails, the error names the kept plan file; when the</p>
-<p>headless run yields no readable text, nothing is saved and the error says</p>
-<p>so, and the raw log is removed either way once its text is read (it may echo</p>
-<p>secrets). The dialog prompt carries the apply safety contract - per-item backup,</p>
-<p>planned diff, explanation, choice, apply-on-y, result summary (<code>core::optimize::apply_prompt</code>).</p>
-<p>The session walks the plan one item at a time and never moves to the next item</p>
-<p>without an explicit choice on the current one: the former single approval gate</p>
-<p>is now per-item approval, with no whole-plan batch approval. Before</p>
-<p>touching an item the session copies every target file&#x27;s pre-edit bytes into</p>
+<p>permissions (<code>0600</code>, exclusive creation, like the briefing temp files). The</p>
+<p>path is always printed, with a note that pruning is a separate command&#x27;s job: a</p>
+<p>handoff run always leaves its plan behind, a normal <code>optimize</code> leaves nothing.</p>
+<p>The harness&#x27;s TUI then opens on an apply-ordering prompt</p>
+<p>(<code>core::optimize::apply_prompt</code>) naming the plan file and the store, so the</p>
+<p>dialog digs out each step&#x27;s evidence with <code>saniwalens sql</code> instead of</p>
+<p>re-parsing raw input. The launch is <code>opencode --prompt</code> for opencode (flag</p>
+<p>acceptance verified; TUI prompt injection still awaiting one confirmation on a</p>
+<p>real TTY), and <code>kilo --prompt</code> or bare <code>claude</code> as before</p>
+<p>(<code>Harness::interactive_launch_command</code> in <code>adapter::harness</code>).</p>
+<p><strong>Refusals.</strong> <code>--apply</code> refuses <code>--print</code> (printing ends the run instead of</p>
+<p>handing it off), <code>--verbose</code> (the handoff reads the logged stream verbose mode</p>
+<p>does not keep), and interactive harnesses (their session already applies its</p>
+<p>own plan). These checks run before any store work. If the dialog launch fails,</p>
+<p>the error names the kept plan file. If the headless run yields no readable</p>
+<p>text, nothing is saved and the error says so. The raw log is removed either way</p>
+<p>once its text is read (it may echo secrets).</p>
+<p><strong>Apply safety contract</strong> (<code>core::optimize::apply_prompt</code>). The session walks</p>
+<p>the plan one item at a time and never moves on without an explicit choice on</p>
+<p>the current one: approval is per item, with no whole-plan batch approval. For</p>
+<p>each item it:</p>
+<ol>
+<li>Copies every target file&#x27;s pre-edit bytes into</li>
+</ol>
 <p><code>$XDG_STATE_HOME/saniwalens/backups/&lt;timestamp&gt;/</code> (dir 0700, files 0600;</p>
-<p>backups are kept like plans and their path is always reported), covering</p>
-<p>git-tracked and untracked files alike, and additionally records</p>
-<p><code>git status --short</code> for tracked ones. It then shows the item&#x27;s planned diff</p>
-<p>(<code>diff -u</code> old-to-new; the file stays unchanged until the choice), explains</p>
-<p>the item briefly (why, what it fixes, its risk), and asks the item&#x27;s choice on</p>
-<p>three short fixed lines of at most 24 characters each (<code>y</code>: Apply this item /</p>
-<p><code>n</code>: Skip to next / <code>q</code>: Quit applying) with no file names, line numbers, or</p>
-<p>gist in them: the file, line numbers, and gist stay in the diff and</p>
-<p>explanation above, never in the choice lines. <code>y</code> applies it, <code>n</code> skips to the</p>
-<p>next item, <code>q</code> aborts the whole session. If the choice display looks wrapped</p>
-<p>or broken, one line tells the user to resize the terminal and ask for the same</p>
-<p>item again.</p>
-<p>Only <code>y</code> edits the file. On refusal nothing changes - files stay</p>
-<p>byte-identical, backups are kept, and the session says so with the backup path.</p>
-<p>A blanket instruction such as &quot;do the rest&quot; never counts as a choice: unchosen</p>
-<p>items stay unapplied, and the session restates that each item needs its own</p>
-<p><code>y</code>/<code>n</code>/<code>q</code>. On <code>q</code> the session lists every unprocessed item and declares the</p>
-<p>rest unapplied.</p>
-<p>The session closes with a result summary in up to two sections (<code>## Applied changes</code>, omitted when nothing was applied, and <code>## Proposal only (not applied)</code>), where items skipped via <code>n</code>, aborted via <code>q</code>, never reached, or refusing the actual config are listed with why, so</p>
-<p>applied stays distinguishable from proposal-only without re-reading the plan.</p>
-<p>Saved plans and their backups accumulate without bound, so `saniwalens</p>
-<p>cleanup` lists and prunes them (the implementation lives in</p>
-<p><code>cli/cleanup.rs</code>, beside the handoff seam in <code>cli/handoff.rs</code>). A bare run</p>
-<p>(or <code>--list</code>) prints every plan file and backup generation with its size</p>
-<p>(a generation dir lists its recursive total over the files under it;</p>
-<p>links never resolve, so a link counts as a link) and modification time;</p>
-<p>entries that cannot be read are skipped without failing the listing and</p>
-<p>their count goes to stderr as a warning, so stdout and JSON stay</p>
-<p>byte-identical;</p>
-<p><code>cleanup --keep N</code> (a bare <code>--keep</code> keeps 10) deletes all but the newest N</p>
-<p>generations in each area, snapshotting every area and printing the count</p>
-<p>and total size before deleting anything, then reporting every removed path</p>
-<p>through the shared table renderer, so the sweep shows its evidence before</p>
-<p>it deletes and the deletion stays inside the generation rule. Only</p>
-<p><code>$XDG_STATE_HOME/saniwalens/plans/</code> and <code>.../backups/</code> are ever touched:</p>
-<p>every victim is resolved (symlinks followed) and checked against those</p>
-<p>roots right before the delete, so an entry pointing outside is reported</p>
-<p>skipped and never followed out; a dangling link counts by its own parent</p>
-<p>dir and its link is removed; and a victim that vanished between the</p>
-<p>listing and the delete is ignored, not an error and not reported skipped.</p>
-<p>The command needs no store and opens none, so it works on a fresh machine;</p>
-<p>its <code>--format</code> is the shared <code>table | markdown | json</code> vocabulary, with</p>
-<p>the machine contract (<code>removed_total</code>, per-area <code>removed</code> / <code>kept</code> /</p>
-<p><code>skipped</code>) on <code>--format json</code>. The default keep of 10 generations per area</p>
-<p>is a starting proposal (a handoff run is manual and infrequent, so 10</p>
-<p>covers weeks of iterations while bounding the secret-bearing files);</p>
-<p>tightening it is a review call.</p>
+<p>kept like plans, path always reported), for git-tracked and untracked files</p>
+<p>alike, and records <code>git status --short</code> for tracked ones.</p>
+<ol>
+<li>Shows the planned diff (<code>diff -u</code> old to new; the file stays unchanged until</li>
+</ol>
+<p>the choice).</p>
+<ol>
+<li>Explains the item briefly: why, what it fixes, its risk.</li>
+<li>Asks for the choice on three fixed lines of at most 24 characters each:</li>
+</ol>
+<p><code>y</code>: Apply this item / <code>n</code>: Skip to next / <code>q</code>: Quit applying. File names,</p>
+<p>line numbers, and gist stay in the diff and explanation, never in the</p>
+<p>choice lines. If the display looks wrapped or broken, one line tells the</p>
+<p>user to resize the terminal and ask for the same item again.</p>
+<p>Only <code>y</code> edits the file. On refusal, files stay byte-identical, backups are</p>
+<p>kept, and the session says so with the backup path. <code>n</code> skips to the next item;</p>
+<p><code>q</code> aborts and lists every unprocessed item as unapplied. A blanket instruction</p>
+<p>such as &quot;do the rest&quot; never counts as a choice: each item still needs its own</p>
+<p><code>y</code>/<code>n</code>/<code>q</code>.</p>
+<p>The session closes with a result summary of up to two sections,</p>
+<p><code>## Applied changes</code> (omitted when nothing was applied) and</p>
+<p><code>## Proposal only (not applied)</code>. Items skipped via <code>n</code>, aborted via <code>q</code>, never</p>
+<p>reached, or refusing the actual config are listed with why, so applied stays</p>
+<p>distinguishable from proposal-only without re-reading the plan.</p>
+<h3><code>cleanup</code> ― list and prune saved plans and backups</h3>
+<p>Saved plans and backups accumulate without bound, so <code>saniwalens cleanup</code> lists</p>
+<p>and prunes them (<code>cli/cleanup.rs</code>, beside the handoff seam in <code>cli/handoff.rs</code>).</p>
+<p>It needs no store and opens none, so it works on a fresh machine. <code>--format</code> is</p>
+<p>the shared <code>table | markdown | json</code>; the JSON machine contract is</p>
+<p><code>removed_total</code> plus per-area <code>removed</code> / <code>kept</code> / <code>skipped</code>.</p>
+<ul>
+<li><strong>List</strong> (bare run, or <code>--list</code>): every plan file and backup generation with</li>
+</ul>
+<p>its size (a generation dir lists its recursive total; links never resolve, so</p>
+<p>a link counts as a link) and modification time. Unreadable entries are</p>
+<p>skipped and their count goes to stderr as a warning, so stdout and JSON stay</p>
+<p>byte-identical.</p>
+<ul>
+<li><strong>Prune</strong> (<code>--keep N</code>; a bare <code>--keep</code> keeps 10): deletes all but the newest N</li>
+</ul>
+<p>generations in each area. It snapshots every area and prints the count and</p>
+<p>total size before deleting anything, then reports every removed path through</p>
+<p>the shared table renderer, so the sweep shows its evidence before it deletes.</p>
+<ul>
+<li><strong>Containment.</strong> Only <code>$XDG_STATE_HOME/saniwalens/plans/</code> and <code>.../backups/</code></li>
+</ul>
+<p>are ever touched. Every victim is resolved (symlinks followed) and checked</p>
+<p>against those roots right before deletion, so an entry pointing outside is</p>
+<p>reported skipped and never followed out. A dangling link counts by its own</p>
+<p>parent dir and its link is removed. A victim that vanished between listing</p>
+<p>and deletion is ignored: neither an error nor reported skipped.</p>
+<p>The default of 10 generations per area is a starting proposal: a handoff run is</p>
+<p>manual and infrequent, so 10 covers weeks of iterations while bounding the</p>
+<p>secret-bearing files. Tightening it is a review call.</p>
     <nav aria-label="Spec pages">
       <ul class="prev-next">
       <li><a rel="prev" href="./architecture.html">← Architecture Specification</a></li>

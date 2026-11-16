@@ -97,6 +97,11 @@
 <td><code>&lt;project&gt;/.opencode/agent/*.md</code></td>
 </tr>
 <tr>
+<th scope="row"><code>skill</code></th scope="row">
+<td><code>~/.config/opencode/skills/</code> and the compatible homes (see Skills)</td>
+<td><code>&lt;project&gt;/.opencode/skills/</code> and the compatible homes</td>
+</tr>
+<tr>
 <th scope="row"><code>claude_md</code></th scope="row">
 <td>― (unverified; not scanned)</td>
 <td><code>&lt;project&gt;/AGENTS.md</code> (+ its <code>@import</code>s)</td>
@@ -110,7 +115,7 @@
 <p>each root that still exists on disk. A deleted root contributes no project</p>
 <p>surfaces.</p>
 <h2>Static cost and load mode</h2>
-<p>Both surface kinds load like Claude Code skills: only the frontmatter</p>
+<p>Commands and agents load like Claude Code skills: only the frontmatter</p>
 <p><code>description</code> is startup-listed, the body waits for invocation. So each</p>
 <p>surface records the whole file as <code>static_tokens</code> (its invocation cost) and</p>
 <p>the description alone as <code>startup_tokens</code>, under</p>
@@ -153,19 +158,17 @@
 <li>A surface existing at both scopes under one <code>(kind, id)</code> resolves per</li>
 </ul>
 <p>project (project shadows global), exactly as for Claude Code.</p>
-<h2>Deliberately out of v1</h2>
-<ul>
-<li><strong>Skills ― catalogued from the six documented sites</strong> (<code>docs/skills/</code>):</li>
-</ul>
-<p>opencode-native (<code>.opencode/skills/</code>, <code>~/.config/opencode/skills/</code>) first,</p>
-<p>then the compatible homes opencode also loads (<code>.claude/skills/</code>,</p>
-<p><code>.agents/skills/</code>, and their global forms). Sites may reach one shared</p>
-<p>directory through symlinks (<code>.opencode/skills -&gt; ../.agents/skills</code> is the</p>
-<p>observed shape), so surfaces dedup by <strong>canonical path</strong> ― one row per</p>
-<p>actual definition, no matter how many sites reach it. Deduping by name</p>
-<p>instead would mark the shared definition unused at one scope (a wedge the</p>
-<p>catalog manufactured); deduping by path keeps one honest row joined by</p>
-<p>every <code>tool=skill</code> event.</p>
+<h2>Skills</h2>
+<p>Skills are catalogued from the six documented sites (<code>docs/skills/</code>):</p>
+<p>opencode-native (<code>.opencode/skills/</code>, <code>~/.config/opencode/skills/</code>) first, then</p>
+<p>the compatible homes opencode also loads (<code>.claude/skills/</code>, <code>.agents/skills/</code>,</p>
+<p>and their global forms). Sites may reach one shared directory through symlinks</p>
+<p>(<code>.opencode/skills -&gt; ../.agents/skills</code> is the observed shape), so surfaces</p>
+<p>dedup by <strong>canonical path</strong>: one row per actual definition, no matter how many</p>
+<p>sites reach it. Deduping by name would mark the shared definition unused at one</p>
+<p>scope (a wedge the catalog manufactured); deduping by path keeps one honest row</p>
+<p>joined by every <code>tool=skill</code> event.</p>
+<h2>Not catalogued</h2>
 <ul>
 <li><strong>MCP servers.</strong> No MCP definition was present (<code>opencode.json</code> carries no</li>
 </ul>

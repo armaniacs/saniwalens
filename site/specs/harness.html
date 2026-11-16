@@ -237,78 +237,87 @@ saniwalens [--harness claude|opencode|kilocode] &lt;command&gt;
 <p>half is a separate spec and change. <code>inventory</code> says so instead of showing</p>
 <p>a table that looks like an empty config, and <code>meta.config_dir</code> is recorded</p>
 <p>empty (nothing scanned, distinguishable from unknown).</p>
-<h2><code>optimize</code> under opencode</h2>
-<p>The briefing composes from the store either way, so <code>--print</code> works under</p>
-<p>every harness. Launching runs the harness&#x27;s own agent on a data-free pointer</p>
-<p>prompt (the briefing travels via a private temp file, as for Claude Code):</p>
-<p><code>claude &lt;prompt&gt;</code> opens interactively, while `opencode run --format json</p>
-<p>--title &#x27;saniwalens optimize&#x27; &lt;prompt&gt;` runs the advisor headless ― no user is</p>
-<p>present for the approval gate, so the headless instructions</p>
-<p>(<code>run_instructions</code>) make the printed plan the final output and forbid</p>
-<p>edits.</p>
-<p>The headless terminal stays quiet: saniwalens reads the JSON event stream line</p>
-<p>by line and surfaces only what the agent says ― text parts (narration, then</p>
-<p>the plan) on stdout, one-line tool markers on stderr ― while every raw line</p>
-<p>and the child&#x27;s stderr go to a private (<code>0600</code>) log file whose path is</p>
-<p>printed up front. A successful run removes the log (the raw stream may echo</p>
-<p>secrets); <code>SANIWALENS_KEEP_RUN_LOG=1</code> keeps it for post-mortem inspection.</p>
-<p>Rendering is lenient (the upstream event shapes are</p>
-<p>unversioned): a line with no recognizable text stays in the log, and a run</p>
-<p>that renders nothing readable says so instead of leaving silence. Every exit</p>
-<p>from the run ― success, a failed read, a failed spawn, or a failed wait ―</p>
-<p>stops the beat and reaps the child; a failure keeps the log and is reported</p>
-<p>with the raw log&#x27;s</p>
-<p>path so the full output is still reachable (<code>cli/headless.rs</code>).</p>
-<p><code>--timeout &lt;DURATION&gt;</code> bounds the wait; on expiry the child is killed and reaped</p>
-<p>and the error names the raw log. A grandchild that outlives the direct child can</p>
-<p>keep the pipe open: the reader is detached on timeout so the command still</p>
-<p>returns promptly, and the residual process is a known limitation.</p>
-<p><code>--verbose</code> inherits stdio for the raw streaming instead.</p>
-<p>Under kilocode the briefing composes from the store either way, so <code>--print</code></p>
-<p>works. Launching opens an <strong>interactive kilo session</strong> on the pointer prompt ―</p>
-<p><code>kilo --prompt &lt;prompt&gt;</code>, the experience the claude launch gives: the user is</p>
-<p>present to approve the briefing read (kilo gates every tool call where</p>
-<p>opencode does not, so a headless run would need <code>--auto</code> instead), steer the</p>
-<p>investigation, and apply the fixes themselves. A bare <code>kilo &lt;text&gt;</code> positional</p>
-<p>is treated as a file to open (measured), not a prompt ― <code>--prompt</code> is the</p>
-<p>TUI&#x27;s message surface.</p>
-<p>The launch shape itself is per-harness <strong>data on the seam</strong>:</p>
-<p><code>Harness::launch_command</code> (<code>adapter::harness</code>) returns the binary, the</p>
-<p>leading argv, and the run mode beside the harness&#x27;s other facts</p>
-<p>(<code>input_unit</code>, <code>db_file_name</code>), so a new harness lands as one arm there and</p>
-<p>the shell&#x27;s launch side (<code>cli/mod.rs</code>) neither matches nor changes ― the same</p>
-<p>contract the analyze seam keeps (<code>Harness::analyze</code>).</p>
-<p>The headless raw stream renders through per-harness data on the seam too:</p>
-<p><code>Harness::run_line_renderer</code> (<code>adapter::harness</code>) returns the adapter fn that</p>
-<p>turns one raw line into a <code>RunEvent</code> beside the launch shape, and the</p>
-<p>delivery plan carries it to <code>run_headless</code>, so the <code>cli/headless.rs</code> logged loop</p>
-<p>receives the seam&#x27;s choice instead of naming a module. Rendering stays lenient</p>
-<p>either way (the upstream event shapes are unversioned). Claude&#x27;s launch opens</p>
-<p>interactively, so it has no headless renderer; kilo is an OpenCode fork and</p>
-<p>shares the event stream, so a headless kilo run is the same arm ― still gated</p>
-<p>on <code>--auto</code> by the launch shape above. The quiet-stretch logic the loop leans</p>
-<p>on lives in one place too (<code>heartbeat</code>, <code>cli/heartbeat.rs</code>), so the due</p>
-<p>decision is a pure function and the beat model in its tests drives the same</p>
-<p>decision as the spawn. What the seam&#x27;s test pins is the sample sequence and</p>
-<p>the stop, not the spacing: a beat carries the count it reads when it fires (0</p>
-<p>before any event streams, then the count at that moment), and after <code>stop</code></p>
-<p>flips the thread exits and the receiver disconnects. The wall-clock spacing</p>
-<p>between emitted beats is not observed by a test (the pure decision&#x27;s spacing</p>
-<p>is pinned by <code>cli::heartbeat</code> unit tests). At most one beat is sent between</p>
-<p>the flag being set and the second stop check observing it: a structural</p>
-<p>invariant of the loop&#x27;s two checks, not an observed quantity ― a beat queued</p>
-<p>before the stop is indistinguishable from one sent after it.</p>
-<p><code>CADENCE</code> (30s) is the minimum scheduled spacing between beats and <code>POLL</code> (500ms) is how</p>
-<p>often the thread wakes to re-check <code>stop</code> and to see whether the next beat is</p>
-<p>due. A beat fires when the observed elapsed time reaches its deadline, and the</p>
-<p>following deadline is then counted one cadence from that observation, not from</p>
-<p>the old deadline: the slots a stall swallowed (a process freeze, a blocked</p>
-<p>stderr) are dropped rather than replayed, so the resume shows one beat and the</p>
-<p>next one waits a full cadence instead of a back-to-back burst. The phase is not</p>
-<p>anchored to the start, and because the loop only looks after each poll, a</p>
-<p>cadence shorter than the poll is degenerate and beats on the poll, not on the</p>
-<p>cadence. <code>Beat</code> rejects a zero cadence or a zero poll at construction, so the</p>
-<p>test seam cannot silently turn into a tight loop or a per-poll beat.</p>
+<h2><code>optimize</code> per harness</h2>
+<p>The briefing composes from the store under every harness, so <code>--print</code> works</p>
+<p>everywhere. Launching runs the harness&#x27;s own agent on a data-free pointer prompt</p>
+<p>(the briefing travels via a private temp file; <code>cli.md</code>):</p>
+<div class="table-scroll" role="region" tabindex="0">
+<table><thead><tr>
+<th scope="col">Harness</th>
+<th scope="col">Launch</th>
+<th scope="col">Mode</th>
+</tr></thead><tbody>
+<tr>
+<th scope="row"><code>claude</code></th scope="row">
+<td><code>claude &lt;prompt&gt;</code></td>
+<td>interactive</td>
+</tr>
+<tr>
+<th scope="row"><code>opencode</code></th scope="row">
+<td><code>opencode run --format json --title &#x27;saniwalens optimize&#x27; &lt;prompt&gt;</code></td>
+<td>headless</td>
+</tr>
+<tr>
+<th scope="row"><code>kilocode</code></th scope="row">
+<td><code>kilo --prompt &lt;prompt&gt;</code></td>
+<td>interactive</td>
+</tr>
+</tbody></table></div>
+<ul>
+<li><strong>opencode (headless).</strong> No user is present for the approval gate, so the</li>
+</ul>
+<p>headless instructions (<code>run_instructions</code>) make the printed plan the final</p>
+<p>output and forbid edits. The terminal stays quiet: saniwalens reads the JSON</p>
+<p>event stream line by line and surfaces only what the agent says (text parts on</p>
+<p>stdout, one-line tool markers on stderr), while every raw line and the child&#x27;s</p>
+<p>stderr go to a private (<code>0600</code>) log. The log&#x27;s lifecycle, <code>--timeout</code>, and</p>
+<p><code>--verbose</code> are as in <code>cli.md</code>. Rendering is lenient because the upstream</p>
+<p>event shapes are unversioned: a line with no recognizable text stays in the</p>
+<p>log, and a run that renders nothing readable says so instead of leaving</p>
+<p>silence. Every exit path stops the heartbeat and reaps the child</p>
+<p>(<code>cli/headless.rs</code>). A grandchild that outlives the direct child can keep the</p>
+<p>pipe open; on timeout the reader is detached so the command still returns</p>
+<p>promptly, and the residual process is a known limitation.</p>
+<ul>
+<li><strong>kilocode (interactive).</strong> The user is present to approve the briefing read</li>
+</ul>
+<p>(kilo gates every tool call where opencode does not, so a headless run would</p>
+<p>need <code>--auto</code>), steer the investigation, and apply the fixes. A bare</p>
+<p><code>kilo &lt;text&gt;</code> positional is treated as a file to open (measured), not a</p>
+<p>prompt; <code>--prompt</code> is the TUI&#x27;s message surface.</p>
+<p><strong>Launch and rendering are seam data.</strong> <code>Harness::launch_command</code></p>
+<p>(<code>adapter::harness</code>) returns the binary, the leading argv, and the run mode</p>
+<p>beside the harness&#x27;s other facts (<code>input_unit</code>, <code>db_file_name</code>).</p>
+<p><code>Harness::run_line_renderer</code> returns the adapter fn that turns one raw line into</p>
+<p>a <code>RunEvent</code>, and the delivery plan carries it to <code>run_headless</code>. A new harness</p>
+<p>lands as one arm each, and neither <code>cli/mod.rs</code> nor the <code>cli/headless.rs</code> loop</p>
+<p>names a harness: the same contract the analyze seam keeps</p>
+<p>(<code>Harness::analyze</code>). Claude&#x27;s launch is interactive, so it has no headless</p>
+<p>renderer; kilo is an OpenCode fork and shares the event stream, so a headless</p>
+<p>kilo run is the same arm, still gated on <code>--auto</code> by its launch shape.</p>
+<p><strong>Heartbeat.</strong> The quiet-stretch logic lives in one place (<code>heartbeat</code>,</p>
+<p><code>cli/heartbeat.rs</code>), so the due decision is a pure function and the tests&#x27;</p>
+<p>beat model drives the same decision as the spawn.</p>
+<ul>
+<li><code>CADENCE</code> (30 s) is the minimum spacing between beats; <code>POLL</code> (500 ms) is how</li>
+</ul>
+<p>often the thread wakes to re-check <code>stop</code> and the deadline.</p>
+<ul>
+<li>A beat fires when elapsed time reaches its deadline, and the next deadline</li>
+</ul>
+<p>counts one cadence from that observation, not from the old deadline. Slots a</p>
+<p>stall swallowed (a process freeze, a blocked stderr) are dropped rather than</p>
+<p>replayed, so the resume shows one beat instead of a burst.</p>
+<ul>
+<li>A beat carries the count it reads when it fires (0 before any event streams).</li>
+</ul>
+<p>After <code>stop</code> flips, the thread exits and the receiver disconnects.</p>
+<ul>
+<li><code>Beat</code> rejects a zero cadence or zero poll at construction, so the test seam</li>
+</ul>
+<p>cannot turn into a tight loop. The tests pin the sample sequence and the stop;</p>
+<p>the pure decision&#x27;s spacing is pinned by <code>cli::heartbeat</code> unit tests, and</p>
+<p>wall-clock spacing between emitted beats is not observed.</p>
 <h2>Report copy names the harness</h2>
 <p>Copy that attributes rows to a harness uses <code>Harness</code> display helpers, so</p>
 <p>opencode output never claims to be Claude Code&#x27;s:</p>
@@ -380,7 +389,7 @@ saniwalens [--harness claude|opencode|kilocode] &lt;command&gt;
 <p>harness passes it unchanged; every other per-harness fact reaches the shell</p>
 <p>as seam data. Nothing in the Claude Code path moves ― that immobility is the</p>
 <p>contract this spec protects.</p>
-<h2>Non-goals in v1 (as of 0.5.2)</h2>
+<h2>Non-goals</h2>
 <p>DSH (DeepSeek harness app) and any fourth harness are not supported: no</p>
 <p><code>Harness</code> variant, no input route, no store name, no format spec. DSH is the</p>
 <p>next candidate, tracked as a contribution, not a committed release item. See</p>

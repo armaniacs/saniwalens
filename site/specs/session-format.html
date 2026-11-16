@@ -130,21 +130,20 @@
 <ul>
 <li><code>message.id</code> ― the API response id. One response is written as **several</li>
 </ul>
-<p>lines, one per content block** (<code>thinking</code>, <code>text</code>, <code>tool_use</code>), and every</p>
-<p>line repeats <code>message.model</code> and carries a <code>message.usage</code>; the id is what</p>
-<p>ties them back to one response. The lines take two shapes: on the main</p>
-<p>thread each line&#x27;s <code>output_tokens</code> is the response&#x27;s final value repeated;</p>
-<p>in a subagent transcript it is a running total that only grows, the last</p>
-<p>line carrying the whole response. The adapter reconciles both at parse time</p>
-<p>by emitting, per line, only the output not yet reported under that id ― the</p>
-<p>whole value on the first line and zero on a repeat, or each step of a</p>
-<p>running total (<code>adapter::transcript::assistant_records</code>). That is the</p>
-<p>per-id maximum, spread over the lines that first observed it, so the core</p>
-<p>can sum records and count each response once (<code>events.md</code>). Keeping the</p>
-<p>*first* line&#x27;s value instead would under-count subagents badly, and</p>
-<p><code>stop_reason</code> is no substitute: every main-thread line carries one, and some</p>
-<p>subagent responses carry it on no line. A line with no id reports its value</p>
-<p>as is.</p>
+<p>lines, one per content block** (<code>thinking</code>, <code>text</code>, <code>tool_use</code>); every line</p>
+<p>repeats <code>message.model</code> and carries a <code>message.usage</code>, and the id ties them</p>
+<p>back to one response. The lines take two shapes: on the main thread each</p>
+<p>line&#x27;s <code>output_tokens</code> is the response&#x27;s final value repeated; in a subagent</p>
+<p>transcript it is a running total that only grows, the last line carrying the</p>
+<p>whole response. The adapter reconciles both at parse time</p>
+<p>(<code>adapter::transcript::assistant_records</code>) by emitting, per line, only the</p>
+<p>output not yet reported under that id: the whole value on the first line and</p>
+<p>zero on a repeat, or each step of a running total. That is the per-id maximum</p>
+<p>spread over the lines that first observed it, so the core can sum records and</p>
+<p>count each response once (<code>events.md</code>). Keeping the *first* line&#x27;s value</p>
+<p>instead would under-count subagents badly, and <code>stop_reason</code> is no substitute:</p>
+<p>every main-thread line carries one, and some subagent responses carry it on no</p>
+<p>line. A line with no id reports its value as is.</p>
 <ul>
 <li><code>message.model</code> ― e.g. <code>claude-opus-4-7</code>. May be the sentinel <code>&lt;synthetic&gt;</code></li>
 </ul>
@@ -236,6 +235,10 @@
 <td><code>toolDenialKind</code> on the entry that carries the denied <code>tool_result</code>, else the denial text inside it (<code>&quot;Permission for this action was denied&quot;</code>). Structural where the marker is present; a low-confidence heuristic where it is not ― see note below</td>
 </tr>
 <tr>
+<th scope="row">Hook firing</th scope="row">
+<td>an <code>attachment</code> record with <code>type: &quot;hook_success&quot;</code>; its <code>hookName</code> (<code>Event:Matcher</code>) joins the catalogued hook. Context and summary attachments are not executions</td>
+</tr>
+<tr>
 <th scope="row">Compaction</th scope="row">
 <td><code>system</code> <code>subtype == compact_boundary</code></td>
 </tr>
@@ -250,9 +253,9 @@
 <p>string appearing anywhere in content. Quoted text (a transcript that discusses</p>
 <p>skills, a prompt containing the literal tags) must not be mis-read as an</p>
 <p>invocation. The adapter matches on record structure and field position.</p>
-<p><strong>Not every surface emits a usage signal.</strong> <code>rule</code>, <code>hook</code>, and <code>claude_md</code> have</p>
-<p>no discrete invocation in the transcript ― they are injected context, not</p>
-<p>events. They appear in the catalog (<code>config-format.md</code>) but acquire no events;</p>
+<p><strong>Not every surface emits a usage signal.</strong> <code>rule</code> and <code>claude_md</code> have no</p>
+<p>discrete invocation in the transcript: they are injected context, not events.</p>
+<p>They appear in the catalog (<code>config-format.md</code>) but acquire no events;</p>
 <p><code>surfaces.md</code> classifies surface kinds as usage-measurable vs catalog-only so the</p>
 <p>join does not mistake &quot;no event possible&quot; for &quot;unused&quot;. The permission-denial</p>
 <p>signal above is the one partly heuristic signal, and is flagged as</p>

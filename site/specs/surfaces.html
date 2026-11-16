@@ -64,7 +64,7 @@
   <main id="main">
     <h1>Surfaces Specification</h1>
 <p>A <strong>surface</strong> is one configurable thing in a Claude Code setup ― a skill, a</p>
-<p>rule, an MCP server, a hook, a permission, an <code>CLAUDE.md</code>, an agent. This spec</p>
+<p>rule, an MCP server, a hook, a permission, a <code>CLAUDE.md</code>, an agent. This spec</p>
 <p>defines the surface catalog and the <strong>catalog × usage join</strong> that is the whole</p>
 <p>point of the tool (<code>architecture.md</code>): relating *what is installed and what it</p>
 <p>costs* (surfaces, from <code>config-format.md</code>) to *what was actually used and at what</p>
@@ -152,12 +152,11 @@
 <td>none (always-on; usage is not the question ― static cost is)</td>
 </tr>
 </tbody></table></div>
-<p>For a <strong>catalog-only</strong> surface, absence of events is *not* evidence of disuse ―</p>
+<p>For a <strong>catalog-only</strong> surface, absence of events is *not* evidence of disuse:</p>
 <p>no event could ever appear. The join still lists it (with zero usage), but the</p>
-<p>wedges below gate on this class so a rule is never flagged &quot;unused →</p>
-<p>delete&quot; merely for emitting nothing. Hooks left that class once firings became</p>
-<p>observable: a hook with firings is used, one without is an unused delete</p>
-<p>candidate like any other measurable surface.</p>
+<p>wedges below gate on this class so a rule is never flagged &quot;unused → delete&quot;</p>
+<p>merely for emitting nothing. A hook with firings is used; one without is an</p>
+<p>unused delete candidate like any other measurable surface.</p>
 <h2>The join</h2>
 <pre><code class="language-mermaid">
 flowchart LR
@@ -261,7 +260,8 @@ flowchart LR
 <p>invoked)`, because the seeded session acts on those figures and a single</p>
 <p>unlabelled number there becomes a fix proposal that frees nothing.</p>
 <p>The &quot;Requires&quot; column makes the coverage explicit: <strong>Unused</strong> and **Costly +</p>
-<p>rare** apply only to usage-measurable kinds ― never to <code>rule</code> / <code>claude_md</code>. A few wedges depend on signals the tool does not yet fully have:</p>
+<p>rare** apply only to usage-measurable kinds, never to <code>rule</code> / <code>claude_md</code>. Two</p>
+<p>wedges depend on signals the tool derives indirectly:</p>
 <ul>
 <li><strong>Never-fires rule</strong> needs evidence a rule&#x27;s <code>paths:</code> glob *could* have fired.</li>
 </ul>
@@ -286,7 +286,7 @@ flowchart LR
 <p>identically, which is the documented recall limit.</p>
 <p><strong>Load mode</strong> is a first-class part of a surface because the same static-token</p>
 <p>figure means something very different for a <code>CLAUDE.md</code> paid every session than</p>
-<p>for a skill body paid only when invoked ― but load mode is an assumption, so the</p>
+<p>for a skill body paid only when invoked. But load mode is an assumption, so the</p>
 <p>always-on wedge is confirmed empirically, not asserted:</p>
 <h3>Always-on reconciliation</h3>
 <p><code>static_tokens</code> is a config-side estimate, never a measured runtime component</p>
@@ -301,13 +301,12 @@ flowchart LR
 <p>weight is unknown (an MCP schema) stay out of the sum rather than entering it as</p>
 <p>zero ― they land in the unattributed residual, where the report already says the</p>
 <p>figure is an upper bound on system + tools + MCP.</p>
-<p>The floor must come from an actual session start (the <code>session_start</code> event ―</p>
-<p><code>events.md</code>), never from a skill span&#x27;s <code>ctx_start</code>. Spans were the original</p>
-<p>source and are a rejected alternative, not a supported one: a span&#x27;s <code>ctx_start</code></p>
-<p>is the prompt size wherever that skill happened to run, which in a long or</p>
-<p>resumed session is far above what the session started with, so a project whose</p>
-<p>only skill invocations came late reported a mid-session size as its startup cost</p>
-<p>― inverting the advice this section exists to give.</p>
+<p>The floor must come from an actual session start (the <code>session_start</code> event,</p>
+<p><code>events.md</code>), never from a skill span&#x27;s <code>ctx_start</code>. A span&#x27;s <code>ctx_start</code> is the</p>
+<p>prompt size wherever that skill happened to run, which in a long or resumed</p>
+<p>session is far above what the session started with; a project whose only skill</p>
+<p>invocations came late would report a mid-session size as its startup cost,</p>
+<p>inverting the advice this section exists to give.</p>
 <p>What still bounds the figure is the observation set, not the source: a start is a</p>
 <p>lower bound only for a *fresh* session, since a resumed one begins with its</p>
 <p>context already restored. The minimum across a project&#x27;s sessions filters those</p>

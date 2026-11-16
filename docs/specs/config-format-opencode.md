@@ -23,6 +23,7 @@ the owning project's directory, since many projects coexist in one store
 | --- | --- | --- |
 | `command` | `~/.config/opencode/command/*.md` | `<project>/.opencode/command/*.md` |
 | `agent` | `~/.config/opencode/agent/*.md` | `<project>/.opencode/agent/*.md` |
+| `skill` | `~/.config/opencode/skills/` and the compatible homes (see Skills) | `<project>/.opencode/skills/` and the compatible homes |
 | `claude_md` | — (unverified; not scanned) | `<project>/AGENTS.md` (+ its `@import`s) |
 
 `~/.config` throughout means `$XDG_CONFIG_HOME` when that variable names an
@@ -36,7 +37,7 @@ surfaces.
 
 ## Static cost and load mode
 
-Both surface kinds load like Claude Code skills: only the frontmatter
+Commands and agents load like Claude Code skills: only the frontmatter
 `description` is startup-listed, the body waits for invocation. So each
 surface records the whole file as `static_tokens` (its invocation cost) and
 the description alone as `startup_tokens`, under
@@ -79,18 +80,20 @@ loads would invent always-on cost.
 - A surface existing at both scopes under one `(kind, id)` resolves per
   project (project shadows global), exactly as for Claude Code.
 
-## Deliberately out of v1
+## Skills
 
-- **Skills — catalogued from the six documented sites** (`docs/skills/`):
-  opencode-native (`.opencode/skills/`, `~/.config/opencode/skills/`) first,
-  then the compatible homes opencode also loads (`.claude/skills/`,
-  `.agents/skills/`, and their global forms). Sites may reach one shared
-  directory through symlinks (`.opencode/skills -> ../.agents/skills` is the
-  observed shape), so surfaces dedup by **canonical path** — one row per
-  actual definition, no matter how many sites reach it. Deduping by name
-  instead would mark the shared definition unused at one scope (a wedge the
-  catalog manufactured); deduping by path keeps one honest row joined by
-  every `tool=skill` event.
+Skills are catalogued from the six documented sites (`docs/skills/`):
+opencode-native (`.opencode/skills/`, `~/.config/opencode/skills/`) first, then
+the compatible homes opencode also loads (`.claude/skills/`, `.agents/skills/`,
+and their global forms). Sites may reach one shared directory through symlinks
+(`.opencode/skills -> ../.agents/skills` is the observed shape), so surfaces
+dedup by **canonical path**: one row per actual definition, no matter how many
+sites reach it. Deduping by name would mark the shared definition unused at one
+scope (a wedge the catalog manufactured); deduping by path keeps one honest row
+joined by every `tool=skill` event.
+
+## Not catalogued
+
 - **MCP servers.** No MCP definition was present (`opencode.json` carries no
   `mcp` key here), and no MCP-namespaced tool appeared in the usage sample,
   so the server↔tool join cannot be pinned down. Skipped until both halves

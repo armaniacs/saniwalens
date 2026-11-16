@@ -140,67 +140,71 @@
 <p>New kinds are added additively as the adapter learns to recognise new signals</p>
 <p>(<code>session-format.md</code>); the schema&#x27;s loose <code>kind</code> / <code>surface_*</code> columns</p>
 <p>(<code>storage.md</code>) absorb them without migration.</p>
-<p>Two kinds carry caveats that downstream reports must honour:</p>
+<p>Some kinds carry caveats that downstream reports must honour:</p>
 <ul>
 <li>**<code>prompt</code>** stores a pointer <code>(source_path, source_line)</code> to the raw record,</li>
 </ul>
-<p>not the prompt text ― the text is recovered on demand by the future</p>
+<p>not the prompt text. The text is recovered on demand by the future</p>
 <p>skill-extraction layer, keeping personal data out of the store (<code>storage.md</code>,</p>
-<p><code>.claude/rules/session-data-privacy.md</code>). This reserves the</p>
-<p>prompt-clustering capability now so it survives transcript rotation.</p>
+<p><code>.claude/rules/session-data-privacy.md</code>) while reserving prompt clustering so</p>
+<p>it survives transcript rotation.</p>
 <ul>
 <li>**<code>permission_prompt</code>** is counted from the denial marker a denying entry</li>
 </ul>
-<p>carries, falling back to denial text where there is none (<code>session-format.md</code>).</p>
-<p>The marked half is as structural as any other kind; the fallback half is not,</p>
-<p>so the friction wedge built on it (<code>surfaces.md</code>) stays labelled</p>
-<p>lower-confidence ― a transcript written before the marker existed is still</p>
-<p>counted by an English phrase alone.</p>
+<p>carries, falling back to denial text where there is none</p>
+<p>(<code>session-format.md</code>). The marked half is as structural as any other kind; the</p>
+<p>fallback half is not (a transcript written before the marker existed is still</p>
+<p>counted by an English phrase alone), so the friction wedge built on it</p>
+<p>(<code>surfaces.md</code>) stays labelled lower-confidence.</p>
 <ul>
-<li>**<code>tool_error</code><strong> keeps a short, bounded </strong>excerpt** of the error text ― unlike</li>
+<li>**<code>tool_error</code><strong> keeps a short, bounded </strong>excerpt** of the error text, unlike</li>
 </ul>
-<p><code>prompt</code>, which stores only a pointer. The asymmetry is deliberate: prompt text</p>
-<p>is large and wholesale-sensitive and is needed in full only by a later layer,</p>
-<p>so a pointer defers the cost; an error excerpt is small and its *value is the</p>
-<p>concrete instance* (the actual failing path), which a report shows directly.</p>
-<p>It lives only in the local store (gitignored, never committed), so the privacy</p>
-<p>rule ― no real data in the repo ― still holds.</p>
+<p><code>prompt</code>. The asymmetry is deliberate: prompt text is large, wholesale-sensitive,</p>
+<p>and needed in full only by a later layer, so a pointer defers the cost; an</p>
+<p>error excerpt is small and its *value is the concrete instance* (the actual</p>
+<p>failing path), which a report shows directly. It lives only in the local</p>
+<p>store, never in the repo, so the privacy rule still holds. Its friction</p>
+<p>category (<code>core::friction</code>) follows two precedence rules:</p>
 <ul>
-<li>A <code>tool_error</code>&#x27;s friction category (<code>core::friction</code>) follows two precedence</li>
+<li>**A concrete cause beats <code>cancelled</code>.** Interruption patterns are checked</li>
 </ul>
-<p>rules. First, **a concrete cause beats <code>cancelled</code>**: the interruption</p>
-<p>patterns are checked only after every specific cause (path-not-found,</p>
-<p>edit-precondition, …), so a real failure with an interruption-like fragment</p>
-<p>appended keeps its cause instead of vanishing into the non-actionable</p>
-<p><code>cancelled</code> bucket. Second, **short interruption fragments require the whole</p>
-<p>message**: <code>tool execution aborted</code> and <code>task cancelled</code> classify as</p>
-<p><code>cancelled</code> only when they are the entire (trimmed, case-insensitive) error</p>
-<p>text ― project content merely mentioning them is not a user stop. Longer,</p>
-<p>tool-specific stop markers (<code>cancelled: parallel tool call</code>, `request</p>
-<p>interrupted by user`, …) still match by containment.</p>
+<p>only after every specific cause (path-not-found, edit-precondition, …), so a</p>
+<p>real failure with an interruption-like fragment appended keeps its cause</p>
+<p>instead of vanishing into the non-actionable <code>cancelled</code> bucket.</p>
 <ul>
-<li>**<code>file_edit</code>** stores the basename *and* the full path because the two answer</li>
+<li><strong>Short interruption fragments require the whole message.</strong></li>
 </ul>
-<p>different questions. A hotspot ranking wants the basename ― it is the name a</p>
-<p>human recognises, and collapsing every <code>route.ts</code> into one row is the point.</p>
-<p>The name is taken on <strong>either separator</strong> (<code>core::path::basename</code>): a</p>
-<p>transcript spells paths the way the machine that wrote it does, and the same</p>
-<p>file arrives both ways within one session. Cutting on <code>/</code> alone left a</p>
-<p>backslash path standing in for the name and let one file compete against</p>
-<p>itself for a hotspot slot, so the list ranked spellings rather than files.</p>
-<p>Thrash detection wants the opposite: an episode claims *one agent kept retrying</p>
-<p>this one file*, so it must distinguish two same-named files, and two sessions</p>
-<p>editing one file in parallel. Keeping only the basename made those</p>
-<p>indistinguishable and let <code>stuck</code> report parallel work as an agent stuck in a</p>
-<p>loop. Detection therefore groups on <code>(session_id, path)</code> ― the session implies</p>
-<p>the project, and the path is unique within it (<code>core::thrash</code>). The deliberate</p>
-<p>cost: thrash continuing across a resume or <code>/clear</code> splits into one episode per</p>
-<p>session. A split under-reports a real burst; a merge invents one that never</p>
-<p>happened, and the merge is what makes the report untrustworthy.</p>
-<p>Surfaces that emit no event at all ― <code>rule</code> and <code>claude_md</code> ― never produce</p>
-<p>rows here. That is expected, not missing data; <code>surfaces.md</code> classifies them as</p>
-<p>catalog-only so their absence of events is never read as disuse. (Hooks used</p>
-<p>to be on this list; firing became observable, so they emit <code>hook_use</code>.)</p>
+<p><code>tool execution aborted</code> and <code>task cancelled</code> classify as <code>cancelled</code> only</p>
+<p>when they are the entire (trimmed, case-insensitive) error text; project</p>
+<p>content merely mentioning them is not a user stop. Longer, tool-specific</p>
+<p>stop markers (<code>cancelled: parallel tool call</code>,</p>
+<p><code>request interrupted by user</code>, …) still match by containment.</p>
+<ul>
+<li>**<code>file_edit</code>** stores the basename *and* the full path because they answer</li>
+</ul>
+<p>different questions.</p>
+<ul>
+<li>A hotspot ranking wants the <strong>basename</strong>, the name a human recognises;</li>
+</ul>
+<p>collapsing every <code>route.ts</code> into one row is the point. It is taken on</p>
+<p><strong>either separator</strong> (<code>core::path::basename</code>): a transcript spells paths the</p>
+<p>way the machine that wrote it does, and the same file arrives both ways</p>
+<p>within one session. Cutting on <code>/</code> alone let a backslash path stand in for</p>
+<p>the name and one file compete against itself for a hotspot slot.</p>
+<ul>
+<li>Thrash detection wants the opposite. An episode claims *one agent kept</li>
+</ul>
+<p>retrying this one file*, so it must distinguish two same-named files and two</p>
+<p>sessions editing one file in parallel; with only the basename, <code>stuck</code></p>
+<p>reported parallel work as an agent stuck in a loop. Detection therefore</p>
+<p>groups on <code>(session_id, path)</code> (the session implies the project;</p>
+<p><code>core::thrash</code>). The deliberate cost: thrash continuing across a resume or</p>
+<p><code>/clear</code> splits into one episode per session. A split under-reports a real</p>
+<p>burst; a merge invents one that never happened, which is what makes the</p>
+<p>report untrustworthy.</p>
+<p>Surfaces that emit no event at all, <code>rule</code> and <code>claude_md</code>, never produce rows</p>
+<p>here. That is expected, not missing data: <code>surfaces.md</code> classifies them as</p>
+<p>catalog-only so their absence of events is never read as disuse.</p>
 <p>A <strong>span</strong> is an event with a duration window ― currently <code>skill_invocation</code>.</p>
 <p>The rest of this spec is mostly about spans, since that is where boundary and</p>
 <p>attribution subtlety lives. Point events carry only an instant and their own</p>
@@ -229,49 +233,44 @@
 <p>wall-clock.</p>
 <p><code>IDLE_GAP</code> is a tuning constant injected into the core (not hard-wired), so</p>
 <p>tests pin it.</p>
-<h2>Meta-skills and nesting ― intentionally flat (spike decision, PBI 22)</h2>
+<h2>Meta-skills and nesting ― intentionally flat</h2>
 <p>Some skills drive other skills (<code>loop</code> repeatedly invokes <code>git-commit</code>,</p>
-<p><code>code-review</code>, …). It is tempting to treat those inner calls as <strong>children</strong> of</p>
-<p>the driver and nest them under a <code>parent_id</code>. We deliberately do <strong>not</strong>, and a</p>
-<p>2026-11 design spike re-confirmed this against real transcripts instead of</p>
-<p>reversing it:</p>
+<p><code>code-review</code>, …). It is tempting to nest those inner calls under the driver</p>
+<p>with a <code>parent_id</code>. We deliberately do not.</p>
 <p>Empirically, a meta-skill&#x27;s &quot;children&quot; are recorded exactly like sequential</p>
 <p>top-level commands: each appears as its own <code>slash</code> invocation with its **own</p>
-<p>distinct <code>promptId</code>** ― not the driver&#x27;s, not a tool-path call, not a sidechain.</p>
-<p>There is no structural marker (<code>source</code>, <code>promptId</code>, nesting depth) that</p>
-<p>distinguishes &quot;a skill <code>loop</code> ran&quot; from &quot;a skill the user ran next&quot;. Inferring</p>
-<p>nesting would require a fragile time-window or a hard-coded list of meta-skills.</p>
-<p>The spike checked every alternative against real transcripts and found each</p>
-<p>one unsound or out of scope:</p>
+<p>distinct <code>promptId</code>**, not the driver&#x27;s, not a tool-path call, not a sidechain.</p>
+<p>No structural marker (<code>source</code>, <code>promptId</code>, nesting depth) distinguishes &quot;a</p>
+<p>skill <code>loop</code> ran&quot; from &quot;a skill the user ran next&quot;. Inferring nesting would need</p>
+<p>a fragile time window or a hard-coded list of meta-skills.</p>
 <p>So the model stays flat: each invocation is its own span, and the boundary rules</p>
-<p>(next human turn / next skill / idle gap) apply uniformly. This is not a loss of</p>
-<p>accuracy ― a child&#x27;s cost is correctly attributed to the child (<code>git-commit</code>&#x27;s</p>
-<p>tokens land on <code>git-commit</code>); the driver&#x27;s own small span reflects that it is an</p>
-<p>orchestrator, not the place the work happened. Reports therefore never</p>
-<p>double-count, and need no parent-inclusive/exclusive distinction.</p>
-<p>The one thing that *is* attributable across the boundary is subagent cost, which</p>
-<p>carries a real join key ― see below.</p>
-<p>Candidates the spike rejected, with reasons:</p>
+<p>(next human turn / next skill / idle gap) apply uniformly. This loses no</p>
+<p>accuracy: a child&#x27;s cost is correctly attributed to the child (<code>git-commit</code>&#x27;s</p>
+<p>tokens land on <code>git-commit</code>), and the driver&#x27;s own small span reflects that it</p>
+<p>is an orchestrator, not the place the work happened. Reports never double-count</p>
+<p>and need no parent-inclusive/exclusive distinction. The one thing attributable</p>
+<p>across the boundary is subagent cost, which carries a real join key (below).</p>
+<p>Alternatives checked against real transcripts and rejected:</p>
 <ul>
 <li><strong>Time-window containment</strong> (&quot;B&#x27;s span inside A&#x27;s span ⇒ nested&quot;): sequential</li>
 </ul>
-<p>siblings nest temporally too ― an agent running skill A over 1-10s and skill</p>
-<p>B over 3-5s looks identical with or without nesting. Attributing on this</p>
+<p>siblings nest temporally too. An agent running skill A over 1-10s and skill B</p>
+<p>over 3-5s looks identical with or without nesting, so attributing on this</p>
 <p>would corrupt the cost join the tool exists to keep honest.</p>
 <ul>
-<li><strong>Turn-boundary rule</strong> (no human turn between ⇒ nested): absence of a human</li>
+<li><strong>Turn-boundary rule</strong> (no human turn between ⇒ nested): the absence of a</li>
 </ul>
-<p>turn proves nothing; consecutive invocations in one assistant stretch are as</p>
-<p>often sequential follow-ups as nested calls.</p>
+<p>human turn proves nothing; consecutive invocations in one assistant stretch</p>
+<p>are as often sequential follow-ups as nested calls.</p>
 <ul>
 <li>**<code>parentUuid</code> tree branches**: branches in real transcripts are attachment</li>
 </ul>
-<p>records (hook results, file snapshots) riding alongside the next message ―</p>
-<p>parallel metadata, not nested execution. The main line stays a chain.</p>
+<p>records (hook results, file snapshots) riding alongside the next message,</p>
+<p>which is parallel metadata, not nested execution. The main line stays a chain.</p>
 <ul>
 <li><strong>Hard-coded meta-skill names</strong>: breaks on the first rename and can never</li>
 </ul>
-<p>cover user-defined loops; the PBI itself flags this as irrecoverable.</p>
+<p>cover user-defined loops.</p>
 <h2>Metrics</h2>
 <p>Each metric is computed from the records strictly within the event/span.</p>
 <div class="table-scroll" role="region" tabindex="0">
@@ -317,21 +316,19 @@
 </tr>
 </tbody></table></div>
 <h3>One message, several records</h3>
-<p>An <code>assistant</code> record is one transcript line, and one API response is written</p>
-<p>as several lines whose usage objects repeat or accumulate the same output</p>
-<p>(<code>session-format.md</code>). Summed naively, a response is charged once per line ―</p>
-<p>and the factor varies by skill (how often the model thinks before it acts), so</p>
-<p>the error reorders skill rankings rather than merely inflating every figure.</p>
-<p>The core does not see this. The adapter reconciles the lines of a response as</p>
-<p>it parses, so each record&#x27;s <code>out_tokens</code> is only the output that record is the</p>
-<p>first to report; the core sums records exactly as the definition above says</p>
-<p>and every response lands once. This keeps the layout knowledge where the</p>
-<p>format-isolation rule wants it, and it also settles the boundary case: when a</p>
-<p>span closes between two lines of one response (the response thought inside</p>
-<p>one skill and then invoked the next), the output is charged to the span that</p>
-<p>saw it first, never to both. Every line still yields a record, so</p>
-<p><code>ctx_growth</code>, <code>ctx_start</code>, <code>ctx_peak</code> and <code>duration_sec</code> see the same</p>
-<p>timestamps and prompt sizes they always did.</p>
+<p>One API response is written as several transcript lines whose usage objects</p>
+<p>repeat or accumulate the same output (<code>session-format.md</code>). Summed naively, a</p>
+<p>response is charged once per line, and the factor varies by skill (how often the</p>
+<p>model thinks before it acts), so the error reorders skill rankings rather than</p>
+<p>merely inflating every figure.</p>
+<p>The core does not see this. The adapter reconciles the lines of a response as it</p>
+<p>parses, so each record&#x27;s <code>out_tokens</code> is only the output that record is the</p>
+<p>first to report, and the core&#x27;s plain sum lands every response once. This keeps</p>
+<p>layout knowledge where the format-isolation rule wants it, and it settles the</p>
+<p>boundary case: when a span closes between two lines of one response, the output</p>
+<p>is charged to the span that saw it first, never to both. Every line still yields</p>
+<p>a record, so <code>ctx_growth</code>, <code>ctx_start</code>, <code>ctx_peak</code>, and <code>duration_sec</code> see every</p>
+<p>line&#x27;s timestamp and prompt size.</p>
 <h3>Why <code>ctx_growth</code>, not max-minus-start</h3>
 <p>The intuitive &quot;context consumed&quot; is <code>ctx_peak − ctx_start</code>, but prompt size is</p>
 <p>not monotonic: when a session compacts (observed ~1,000,000 → ~49,000 within one</p>

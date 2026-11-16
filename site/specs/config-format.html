@@ -74,23 +74,23 @@
 <p>Observed against a real <code>~/.claude/</code> tree on 2026-06-14, Claude Code <code>2.1.x</code>.</p>
 </blockquote>
 <h2>Where config lives</h2>
-<p>Config exists at two scopes; project overrides/extends global. The adapter scans</p>
-<p>both and records the scope on each surface ― <code>Scope::Project</code> carries the</p>
+<p>Config exists at two scopes; project overrides or extends global. The adapter</p>
+<p>scans both and records the scope on each surface: <code>Scope::Project</code> carries the</p>
 <p>owning project&#x27;s normalized slug, since many projects coexist in one catalog</p>
-<p>(<code>storage.md</code>). Which project roots get scanned is driven by the *sessions*:</p>
-<p><code>analyze</code> collects the distinct real session roots (<code>session-format.md</code>, the</p>
-<p>records&#x27; <code>cwd</code>, worktree folded onto the parent checkout) and hands them to the</p>
-<p>one traversal, <code>catalog_surfaces(harness, roots)</code> (<code>adapter::harness</code>), which</p>
-<p>builds each scope, owns the symlink-dedup set, and skips a root that was deleted</p>
-<p>since its sessions ran. What a harness scans is its <strong>site rows</strong> ― a path plus</p>
-<p>a loader (<code>Site</code>, listed per harness as <code>global_sites</code> / <code>project_sites</code>) ― so a</p>
-<p>new surface kind is a row and a loader, never an edit to that traversal;</p>
-<p><code>read_project_surfaces</code> in <code>adapter/config.rs</code> remains the direct single-root</p>
-<p>entry point the tests drive.</p>
+<p>(<code>storage.md</code>).</p>
+<p>Which project roots get scanned is driven by the *sessions*. <code>analyze</code> collects</p>
+<p>the distinct real session roots (<code>session-format.md</code>: the records&#x27; <code>cwd</code>,</p>
+<p>worktree folded onto the parent checkout) and hands them to the one traversal,</p>
+<p><code>catalog_surfaces(harness, roots)</code> (<code>adapter::harness</code>), which builds each</p>
+<p>scope, owns the symlink-dedup set, and skips a root deleted since its sessions</p>
+<p>ran. What a harness scans is its <strong>site rows</strong> (<code>Site</code>: a path plus a loader,</p>
+<p>listed per harness as <code>global_sites</code> / <code>project_sites</code>), so a new surface kind is</p>
+<p>a row and a loader, never an edit to that traversal. <code>read_project_surfaces</code> in</p>
+<p><code>adapter/config.rs</code> remains the direct single-root entry point the tests drive.</p>
 <p><code>~/.claude</code> throughout this document means <code>$CLAUDE_CONFIG_DIR</code> when that</p>
 <p>variable names a non-empty path, because Claude Code relocates the whole tree</p>
-<p>under it (<code>claude_config_dir</code> in <code>adapter/config.rs</code>); an empty value is</p>
-<p>treated as unset.</p>
+<p>under it (<code>claude_config_dir</code> in <code>adapter/config.rs</code>); an empty value is treated</p>
+<p>as unset.</p>
 <div class="table-scroll" role="region" tabindex="0">
 <table><thead><tr>
 <th scope="col">Surface kind</th>
@@ -133,37 +133,44 @@
 <td>―</td>
 </tr>
 </tbody></table></div>
-<p><code>CLAUDE.md</code> and <code>AGENTS.md</code> are two names for the same always-on context, and a</p>
-<p>repo serving both agent conventions typically ships <code>AGENTS.md</code> as a symlink to</p>
-<p><code>CLAUDE.md</code>. Claude Code injects that content once, so the adapter weighs the</p>
-<p>file once: <code>read_claude_md_surfaces</code> resolves each candidate and keeps the first</p>
+<p><code>CLAUDE.md</code> and <code>AGENTS.md</code> are two names for the same always-on context. A repo</p>
+<p>serving both agent conventions typically ships <code>AGENTS.md</code> as a symlink to</p>
+<p><code>CLAUDE.md</code>, and Claude Code injects that content once, so the adapter weighs it</p>
+<p>once: <code>read_claude_md_surfaces</code> resolves each candidate and keeps the first</p>
 <p>surface per resolved file, which reports the pair under <code>CLAUDE.md</code>. The</p>
-<p>deduplication key is the resolved path, not the content ― two independently</p>
+<p>deduplication key is the resolved path, not the content: two independently</p>
 <p>maintained files are two real always-on surfaces even when their text coincides.</p>
-<p>Getting this wrong doubles the project&#x27;s <code>startup_full</code> total, which is what the</p>
+<p>Getting this wrong doubles the project&#x27;s <code>startup_full</code> total, which the</p>
 <p>always-on floor is reconciled against (<code>surfaces.md</code>).</p>
-<p>A <code>CLAUDE.md</code> can pull other files in with <code>@path</code> imports, and Claude Code</p>
+<p><strong>Imports.</strong> A <code>CLAUDE.md</code> can pull other files in with <code>@path</code>, and Claude Code</p>
 <p>injects the imported text every session just like the file&#x27;s own. Weighing only</p>
 <p>the importing file would book a config made of import lines as nearly free and</p>
-<p>push the real always-on cost into the unattributed residual ― exactly inverting</p>
-<p>the &quot;always-on heavy&quot; wedge for such a layout. So <code>read_claude_md_surfaces</code></p>
-<p>follows the imports and records **each imported file as its own <code>claude_md</code></p>
-<p>surface** (<code>startup_full</code>, id <code>@&lt;path&gt;</code>, relative to the importing top-level</p>
-<p>file&#x27;s directory when inside it), rather than folding the text into the</p>
-<p>importer: the cost lands on the file that carries it, and each one can be pruned</p>
-<p>on its own. The import rules mirror Claude Code&#x27;s documented behavior: an import</p>
-<p>is an <code>@</code> opening a whitespace-separated word (an e-mail address is not one),</p>
-<p>ignored inside code spans and fenced blocks; it resolves relative to the</p>
-<p>importing file, <code>~/</code> to the home directory, or as an absolute path; recursion</p>
-<p>stops after five hops; an import naming no readable file is skipped. Every</p>
-<p>import is further confined to the importing top-level file&#x27;s directory: a</p>
-<p>target canonicalizing outside it (<code>..</code> escapes, absolute paths, <code>~/</code>, symlink</p>
-<p>hops) is skipped with a warning, so a cloned repo cannot pull host files</p>
-<p>outside its root into the catalog. The same</p>
-<p>resolved-path deduplication as the <code>AGENTS.md</code> symlink applies across the whole</p>
-<p>import graph ― a file imported twice, imported in a cycle, or imported *and*</p>
-<p>read as a top-level <code>AGENTS.md</code> is weighed once, with the top-level name</p>
-<p>winning.</p>
+<p>push the real always-on cost into the unattributed residual, inverting the</p>
+<p>&quot;always-on heavy&quot; wedge. So <code>read_claude_md_surfaces</code> follows the imports and</p>
+<p>records **each imported file as its own <code>claude_md</code> surface** (<code>startup_full</code>,</p>
+<p>id <code>@&lt;path&gt;</code>, relative to the importing top-level file&#x27;s directory when inside</p>
+<p>it): the cost lands on the file that carries it, and each can be pruned on its</p>
+<p>own. The rules mirror Claude Code&#x27;s documented behavior:</p>
+<ul>
+<li>An import is an <code>@</code> opening a whitespace-separated word (an e-mail address is</li>
+</ul>
+<p>not one), ignored inside code spans and fenced blocks.</p>
+<ul>
+<li>It resolves relative to the importing file, <code>~/</code> to the home directory, or as</li>
+</ul>
+<p>an absolute path. Recursion stops after five hops, and an import naming no</p>
+<p>readable file is skipped.</p>
+<ul>
+<li>Every import is confined to the importing top-level file&#x27;s directory: a target</li>
+</ul>
+<p>canonicalizing outside it (<code>..</code> escapes, absolute paths, <code>~/</code>, symlink hops)</p>
+<p>is skipped with a warning, so a cloned repo cannot pull host files outside its</p>
+<p>root into the catalog.</p>
+<ul>
+<li>Resolved-path deduplication applies across the whole import graph: a file</li>
+</ul>
+<p>imported twice, imported in a cycle, or imported *and* read as a top-level</p>
+<p><code>AGENTS.md</code> is weighed once, with the top-level name winning.</p>
 <p><code>settings.json</code> carries two surface kinds at once: <code>permissions</code> (allow/deny) and</p>
 <p><code>hooks</code> (matcher → command); the adapter splits one file into several surfaces.</p>
 <p>Each hook entry becomes a <code>hook</code> surface named <code>Event:Matcher</code> (bare event when</p>

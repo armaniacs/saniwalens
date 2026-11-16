@@ -71,10 +71,9 @@
 <p>adapter may use the field names below</p>
 <p>(<code>.claude/rules/format-isolation.md</code>). The kilocode store is <strong>separate</strong></p>
 <p>from the other stores (one DB per harness), so nothing here constrains the</p>
-<p>other mappings, and vice versa. The shell contract around this mapping ― the</p>
+<p>other mappings, and vice versa. The shell contract around this mapping (the</p>
 <p>harness&#x27;s default <code>--db</code> name, per-task ingest keys, and extraction version</p>
-<p>key ― is the <code>harness.md</code> addendum that lands with the CLI wiring, as</p>
-<p>opencode&#x27;s did.</p>
+<p>key) is in <code>harness.md</code>.</p>
 <blockquote>
 <p>Observed against a real <code>&lt;VSCode globalStorage&gt;/kilocode.kilo-code/tasks/</code></p>
 <p>directory (92 task directories; the <strong>shapes</strong> below come from six of</p>
@@ -93,7 +92,7 @@
 ├── ui_messages.json                # the display log (the token source)
 
 
-├── task_metadata.json              # files_in_context[] only (unread in v1)
+├── task_metadata.json              # files_in_context[] only (read for file_read events)
 
 
 └── checkpoints/                    # editor checkpoints (unread)
@@ -106,8 +105,8 @@
 <p>(<code>~/Library/Application Support/Code/User/globalStorage</code> on macOS,</p>
 <p><code>~/.config/Code/User/globalStorage</code> on Linux). The path varies with the</p>
 <p>editor install (Code / Cursor / VSCodium), so the adapter resolves the</p>
-<p>tasks directory from the harness&#x27;s input root ― <code>--projects</code>, whose</p>
-<p>default the <code>harness.md</code> addendum settles when the wiring lands.</p>
+<p>tasks directory from the harness&#x27;s input root (<code>--projects</code>, whose</p>
+<p>default <code>harness.md</code> settles).</p>
 <ul>
 <li>One task directory is <strong>one saniwalens session</strong>. kilocode&#x27;s own</li>
 </ul>
@@ -214,8 +213,7 @@
 <li><code>model = &quot;unknown&quot;</code> ― the payload carries no model name</li>
 </ul>
 <p>(<code>inferenceProvider</code> is a provider, never a model; mapping one to the</p>
-<p>other would be a guess). The reporting-honesty label for this missing</p>
-<p>model is a <code>cli.md</code> addendum, alongside <code>sub_tokens_estimated</code></p>
+<p>other would be a guess)</p>
 <ul>
 <li>The record is stamped with the window&#x27;s <strong>last</strong> assistant message <code>ts</code> ―</li>
 </ul>
@@ -241,7 +239,7 @@
 </tr></thead><tbody>
 <tr>
 <th scope="row">Skill invocation</th scope="row">
-<td><strong>none observed</strong> ― kilocode config installs <code>skills/</code> and <code>command/*.md</code>, but neither file carries an invocation marker in the samples. The signal stays absent until a marker is measured; a later skills catalog would show live <code>Skill</code> usage as orphaned rows in <code>inventory</code>, which is the honest missing-site signal</td>
+<td><strong>none observed</strong> ― kilocode config installs <code>skills/</code> and <code>command/*.md</code>, but neither file carries an invocation marker in the samples. The signal stays absent until a marker is measured, so catalogued skills read as unused (<code>config-format-kilocode.md</code>)</td>
 </tr>
 <tr>
 <th scope="row">Subagent spawn</th scope="row">
@@ -310,14 +308,14 @@
 <p>usage signals for ranking, not a ledger (<code>architecture.md</code>).</p>
 <ul>
 <li><code>apiProtocol</code> / <code>inferenceProvider</code> ― protocol metadata, not usage.</li>
-<li><code>task_metadata.json</code> (<code>files_in_context[]</code>) ― read since PBI 23 as</li>
+<li><code>task_metadata.json</code> (<code>files_in_context[]</code>) is read as <code>file_read</code> events</li>
 </ul>
-<p><code>file_read</code> events stamped with the task&#x27;s start (the metadata carries no</p>
-<p>timestamps), so the never-fires wedge can match them against rule globs ―</p>
-<p>the same join the Claude Code <code>Read</code> calls feed. A missing or unreadable</p>
-<p>metadata file reads as no files; non-string entries are dropped, never</p>
-<p>stringified into fake paths. The metadata moves the task fingerprint, so a</p>
-<p>later metadata edit re-ingests its task once.</p>
+<p>stamped with the task&#x27;s start (the metadata carries no timestamps), so the</p>
+<p>never-fires wedge can match them against rule globs, the same join the Claude</p>
+<p>Code <code>Read</code> calls feed. A missing or unreadable metadata file reads as no</p>
+<p>files; non-string entries are dropped, never stringified into fake paths. The</p>
+<p>metadata moves the task fingerprint, so a later metadata edit re-ingests its</p>
+<p>task once.</p>
 <ul>
 <li><code>checkpoints/</code> and the task⇔session <code>session.json</code> mapping ― unread.</li>
 <li><code>ui_messages.json</code> kinds other than <code>api_req_started</code> ― display or</li>
@@ -329,11 +327,13 @@
 </ul>
 <p>compaction-safe without it (<code>events.md</code>).</p>
 <ul>
-<li>Slash-command invocations typed by the human ― no structural wrapper in</li>
+<li>Slash-command invocations typed by the human: no structural wrapper in either</li>
 </ul>
-<p>either file, and substring-matching prompts would misread prose discussing</p>
-<p>commands. Config surfaces (<code>~/.config/kilo/</code>, commands, skills, MCP,</p>
-<p>custom modes) ― the catalog half is a separate spec and a separate change.</p>
+<p>file, and substring-matching prompts would misread prose discussing commands.</p>
+<ul>
+<li>Config surfaces (<code>~/.config/kilo/</code>, commands, skills, MCP, custom modes) belong</li>
+</ul>
+<p>to the catalog half, <code>config-format-kilocode.md</code>.</p>
 <h2>Forward compatibility</h2>
 <p>Read only the fields above; ignore unknown <code>say</code>/<code>ask</code> kinds, unknown block</p>
 <p>types, and missing optional keys. A new kilocode tool appears as a generic</p>
@@ -342,13 +342,6 @@
 <p>request record ― a missing measurement is recorded as zero, never</p>
 <p>fabricated, and replace semantics make the in-flight case idempotent on</p>
 <p>re-ingest.</p>
-<p><strong>The full 92-task survey corrected the earlier sample.</strong> The small survey</p>
-<p>behind the first draft assumed no cwd-style field and <code>apply_diff</code>/</p>
-<p><code>write_to_file</code> as the edit tools; the full run showed <code>execute_command.cwd</code></p>
-<p>(640 rows, one distinct value per task) and <code>edit_file</code>/<code>search_and_replace</code></p>
-<p>as the real edit names. Fixing the mapping moved 86 of 92 sessions out of</p>
-<p>unrooted and lifted <code>file_edit</code> events from 115 to 570, so it bumped</p>
-<p><code>KILOCODE_ANALYZER_VERSION</code> to <code>2</code> ― the survey is the version bump&#x27;s reason.</p>
 <h2>Golden regression policy</h2>
 <p><code>tests/e2e_golden_harness.rs</code> pins this harness&#x27;s analyze output</p>
 <p>(<code>tests/golden/kilocode.txt</code>): the same synthetic fixture must always</p>

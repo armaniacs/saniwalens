@@ -124,7 +124,7 @@ flowchart LR
 <li><strong>Optimization proposals</strong> ― turning the findings into concrete advice. This</li>
 </ul>
 <p>is realized by <code>optimize</code> (<code>cli.md</code>): it composes the headline findings with a</p>
-<p>prescribed advisor prompt and hands them to an interactive <code>claude</code> session.</p>
+<p>prescribed advisor prompt and hands them to the harness&#x27;s advisor session.</p>
 <p>The prompt composition is a pure transform (<code>core::optimize</code>); only the process</p>
 <p>launch is I/O. It reads aggregates; it needs nothing the store does not already</p>
 <p>hold.</p>
@@ -215,77 +215,83 @@ flowchart TD
 </tr>
 <tr>
 <th scope="row"><strong>report</strong></th scope="row">
-<td>Turning query results into tables / Markdown and ranking wedges. In <code>src/</code>: <code>cli/mod.rs</code> (the shell: dispatch and the public CLI API), <code>cli/views/</code> holding <code>cli/views/guide.rs</code> (the interactive entry), <code>cli/views/trend.rs</code> (the trend view and the one typed payload both its table and its JSON derive from), <code>cli/views/waste.rs</code> (the waste view), <code>cli/views/models.rs</code> (the per-model cost split), and <code>cli/views/sessions.rs</code> (the per-session cost shape), <code>cli/window.rs</code> (the windowed flag surface every view shares: the period flags declared once as clap args groups, the <code>--format</code> values each view accepts, and the windowed session-open dispatch the report arms resolve through ― <code>open</code> for the views without <code>--scope</code>, <code>open_scoped</code> for the scoped ones, <code>open_scoped_table_json</code> for doctor&#x27;s narrower <code>--format</code>, <code>open_pair</code> for trend), <code>cli/headless.rs</code> (the headless advisor run: the logged pipe and the one guard owning the child and the heartbeat for the run&#x27;s lifetime), <code>cli/report.rs</code> (format, renderer, framing). A new view becomes one file under <code>cli/views/</code>; views never re-grow a shared file. The view-landing rule below makes that a per-PR obligation, not a remembered intention.</td>
+<td>Turning query results into tables / Markdown and ranking wedges (<code>src/cli/</code>, laid out below).</td>
 <td>Raw input shapes; SQL beyond the store&#x27;s API.</td>
 </tr>
 </tbody></table></div>
+<p>The report layer is laid out as:</p>
+<ul>
+<li><code>cli/mod.rs</code>: the shell, dispatch and the public CLI API.</li>
+<li><code>cli/views/</code>: one file per view. <code>cli/views/guide.rs</code> (the interactive entry),</li>
+</ul>
+<p><code>cli/views/trend.rs</code> (the trend view and the one typed payload both its table</p>
+<p>and JSON derive from), <code>cli/views/waste.rs</code>, <code>cli/views/models.rs</code> (the</p>
+<p>per-model cost split), and <code>cli/views/sessions.rs</code> (the per-session cost</p>
+<p>shape).</p>
+<ul>
+<li><code>cli/window.rs</code>: the windowed flag surface every view shares: the period flags</li>
+</ul>
+<p>declared once as clap arg groups, the <code>--format</code> values each view accepts, and</p>
+<p>the windowed session-open dispatch the report arms resolve through (<code>open</code> for</p>
+<p>views without <code>--scope</code>, <code>open_scoped</code> for scoped ones,</p>
+<p><code>open_scoped_table_json</code> for doctor&#x27;s narrower <code>--format</code>, <code>open_pair</code> for</p>
+<p>trend).</p>
+<ul>
+<li><code>cli/headless.rs</code>: the headless advisor run (the logged pipe and the one guard</li>
+</ul>
+<p>owning the child and the heartbeat for the run&#x27;s lifetime).</p>
+<ul>
+<li><code>cli/report.rs</code>: format, renderer, framing.</li>
+</ul>
 <h3>The view-landing rule (per PR)</h3>
-<p>The &quot;next view&quot; above is not left to memory. A PR that adds a <code>Command</code> variant</p>
-<p>― a new view ― lands the view as one file under <code>src/cli/views/</code>:</p>
+<p>A PR that adds a <code>Command</code> variant (a new view) lands the view as one file under</p>
+<p><code>src/cli/views/</code>, so views never re-grow a shared file:</p>
 <ul>
-<li>**<code>src/cli/views/</code> exists since the guided-entry PR.** It was created in</li>
+<li><strong>View helpers are born in the view&#x27;s file</strong>, never appended to <code>cli/mod.rs</code>:</li>
 </ul>
-<p>that same PR, which moved the trend view from directly under <code>cli/</code> into</p>
-<p><code>cli/views/</code> alongside the new <code>cli/views/guide.rs</code>. The &quot;created when</p>
-<p>the next view lands&quot; deferral is discharged ― future views add one file</p>
-<p>under <code>cli/views/</code>, nothing more.</p>
+<p>the shell keeps dispatch and nothing else.</p>
 <ul>
-<li><strong>View helpers are born in the view&#x27;s file</strong>, never appended to</li>
+<li><strong>The line-budget tripwire</strong> (<code>tests/cli_mod_line_budget.rs</code>) makes that</li>
 </ul>
-<p><code>cli/mod.rs</code>: the shell keeps dispatch, and nothing else.</p>
+<p>structural: growing <code>cli/mod.rs</code> past its measured budget fails <code>cargo test</code></p>
+<p>with a message pointing at <code>cli/views/</code>. Raising the budget is a review point,</p>
+<p>done in the same PR as the spec update it forces.</p>
 <ul>
-<li><strong>The line-budget tripwire</strong> (<code>tests/cli_mod_line_budget.rs</code>) makes the</li>
+<li><strong>Spec update map.</strong> When the layout changes, two places change with it in the</li>
 </ul>
-<p>&quot;never re-grow a shared file&quot; half structural: growing <code>cli/mod.rs</code> past its</p>
-<p>measured budget fails <code>cargo test</code> with a message pointing at <code>cli/views/</code>.</p>
-<p>Raising the budget is a review point, done in the same PR as the spec</p>
-<p>update it forces.</p>
-<ul>
-<li><strong>The spec update map when the split landed</strong> ― two places changed with it,</li>
-</ul>
-<p>in the same PR: this rule, and the <strong>report row of the layer table</strong> above (it</p>
-<p>names the current file layout). Both describe the landed <code>src/cli/views/</code></p>
-<p>instead of the future split.</p>
+<p>same PR: this rule and the report layout list above.</p>
 <p>The acceptance-criteria template every view-addition PBI carries is</p>
 <p><code>.claude/rules/cli-view-addition.md</code>.</p>
 <h3>The pure-join placement rule (per PR)</h3>
-<p>The core row&#x27;s &quot;shapes rows already fetched from the store&quot; is not left to</p>
-<p>memory either. A pure join ― a pairing, ordering, or delta over in-memory</p>
-<p>values, no SQLite ― is core&#x27;s wherever it is called from today</p>
+<p>A pure join (a pairing, ordering, or delta over in-memory values, no SQLite)</p>
+<p>over rows already fetched from the store is core&#x27;s, wherever it is called from</p>
 <p>(<code>.claude/rules/pure-join-placement.md</code>):</p>
 <ul>
-<li>A new pure join is born in core, with its tests there; the store keeps the</li>
+<li><strong>Born in core.</strong> A new pure join lands in core with its tests there; the</li>
 </ul>
-<p>query and the row hand-off, never the shaping. The one integration test</p>
-<p>pinning the query→join window split</p>
+<p>store keeps the query and the row hand-off, never the shaping. The one</p>
+<p>integration test pinning the query-to-join window split</p>
 <p>(<code>two_window_aggregation_splits_events_between_the_windows</code>) stays in</p>
 <p><code>store.rs</code> with the query it tests.</p>
 <ul>
-<li>The trend view&#x27;s two-window joins (<code>skill_deltas</code>, <code>TwoWindow</code>,</li>
+<li><strong>The first instance</strong> is the trend view&#x27;s two-window joins (<code>skill_deltas</code>,</li>
 </ul>
-<p><code>SkillDelta</code>, <code>TrendWindowAggregates</code>, <code>kind_pairs</code>) were the 1st pattern:</p>
-<p>they predated the rule and sat in <code>store.rs</code>. PBI 46 fired the trend-metric</p>
-<p>trigger (<code>1ecda2a</code> / <code>3b4349f</code>) but the move did not ride that landing;</p>
-<p>PBI 61 (2026-11-02) is the follow-up remediation that moved them to</p>
-<p><code>src/core/trend.rs</code>. The store keeps the windowed queries that hand them</p>
-<p>rows; <code>kind_pairs</code> was the fifth join, found in the trend view only because</p>
-<p>the move enumerated them. Trigger 2 (the next SQLite-free function) remains</p>
-<p>armed for the next accumulation.</p>
+<p><code>TwoWindow</code>, <code>SkillDelta</code>, <code>TrendWindowAggregates</code>, <code>kind_pairs</code>), which live</p>
+<p>in <code>src/core/trend.rs</code>. The store keeps the windowed queries that hand them</p>
+<p>rows. The next SQLite-free function that appears in <code>store.rs</code> arms the same</p>
+<p>move.</p>
 <ul>
-<li>The trigger is grep-able, not a parser: the rule enumerates the symbols, and</li>
+<li><strong>The trigger is grep-able, not a parser.</strong> The rule enumerates the symbols,</li>
 </ul>
-<p><code>tests/pure_join_placement.rs</code> fails when the enumeration and core drift</p>
-<p>apart. A join that leaves core or re-enters the store carries the core row</p>
-<p>above, the rule&#x27;s enumeration, the ledger&#x27;s note, and the tripwire&#x27;s move</p>
-<p>side in the same PR.</p>
-<p>The four points landed together with the move (PBI 61): the core row above,</p>
-<p>the rule&#x27;s enumeration, the ledger&#x27;s deferral note, and the tripwire itself.</p>
-<p>The tripwire&#x27;s move side now asserts that the definitions sit in</p>
-<p><code>src/core/trend.rs</code> and no longer in <code>store.rs</code>; it turns red if one leaves</p>
-<p>core or re-enters the store. The flip is not a follow-up: an emptied array</p>
-<p>makes both sides of the tripwire pass vacuously, and a tombstone comment</p>
-<p>satisfies a raw <code>contains</code>. Retiring the tripwire instead rewrites the two</p>
-<p>prose anchors that name it (the rule and this section) in the same PR.</p>
+<p>and <code>tests/pure_join_placement.rs</code> fails when the enumeration and core drift</p>
+<p>apart: it asserts the definitions sit in <code>src/core/trend.rs</code> and not in</p>
+<p><code>store.rs</code>. A join that leaves core or re-enters the store must carry four</p>
+<p>updates in the same PR: the core row above, the rule&#x27;s enumeration, the</p>
+<p>ledger&#x27;s note, and the tripwire&#x27;s move side. Emptying the tripwire&#x27;s array or</p>
+<p>leaving a tombstone comment does not count, since an empty array passes</p>
+<p>vacuously and a raw <code>contains</code> reads comments as text. Retiring the tripwire</p>
+<p>means rewriting the two prose anchors that name it (the rule and this</p>
+<p>section) in the same PR.</p>
 <p>The contract between adapter and everything else is the **internal domain</p>
 <p>model** ― tool-centric names stable across Claude Code releases. Renaming an</p>
 <p>upstream field or moving a config file changes the adapter&#x27;s mapping, nothing</p>
