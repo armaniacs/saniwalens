@@ -71,7 +71,7 @@
       <h2 id="pipeline-heading">パイプライン</h2>
       <div class="table-scroll" role="region" aria-label="パイプラインのコマンド" tabindex="0">
         <table>
-          <caption>一度 analyze して何度も読む ― ストアが段階をつなぐ</caption>
+          <caption>一度 analyze して何度も読む ― 分析結果のデータベース（ストア）が段階をつなぐ</caption>
           <thead>
             <tr>
               <th scope="col">コマンド</th>
@@ -146,7 +146,7 @@ saniwalens stuck                   # 同じファイルを書き直し続けた�
       <h2 id="notes-heading">はまる前の注意</h2>
       <ul>
         <li>数値は順位付け用の利用シグナルであり、<strong>課金台帳ではありません</strong>。</li>
-        <li>ストアは transcript が消えても残ります ― 消すのはキャッシュ破棄ではなく本当の損失です。</li>
+        <li>ストア（分析結果をためる SQLite データベース）は、元の transcript が Claude Code 側で刈られても残ります。このファイルを消すと履歴は戻ってきません。一時的なキャッシュではないので、容量目的で消さないでください。</li>
         <li>schema 変更時は自動でその場で移行されるので、消して作り直す必要はありません。</li>
         <li>一覧表は英語のまま。<code>--language en|ja</code> が切り替えるのは advisor への指示文だけです。</li>
       </ul>
