@@ -273,14 +273,11 @@ fn remove_victim(path: &Path) -> Result<bool> {
 }
 
 fn format_time(modified: SystemTime) -> String {
-    chrono::DateTime::<chrono::Local>::from(modified)
-        .format("%Y-%m-%d %H:%M:%S%:z")
-        .to_string()
+    crate::time::format_system_time_local(modified)
 }
 
 fn format_time_rfc3339(modified: SystemTime) -> String {
-    chrono::DateTime::<chrono::Utc>::from(modified)
-        .to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
+    crate::time::format_system_time_utc_rfc3339(modified)
 }
 
 /// List both areas: path, size, and modification time per entry, with the

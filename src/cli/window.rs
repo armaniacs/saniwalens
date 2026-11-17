@@ -354,7 +354,7 @@ impl WindowedDispatch<'_> {
 /// would be undefined. The clock is read here: this is the thin shell around
 /// the pure transforms in `core::period`.
 pub(crate) fn parse_window(args: &WindowArgs, mode: WindowMode) -> Result<ResolvedWindow> {
-    let now = chrono::Utc::now().timestamp();
+    let now = crate::time::now_epoch_secs();
     let (since, until, last) = (
         args.since.as_deref(),
         args.until.as_deref(),
@@ -659,7 +659,7 @@ mod tests {
                 panic!("single mode resolves a single window");
             };
             assert_eq!(window.end.unwrap() - window.start.unwrap() + 1, secs + 1);
-            let skew = chrono::Utc::now().timestamp() - window.end.unwrap();
+            let skew = crate::time::now_epoch_secs() - window.end.unwrap();
             assert!((0..=60).contains(&skew), "the window ends now: {skew}");
         }
         // Error strings carry no clock either: byte parity with the core.
@@ -722,7 +722,7 @@ mod tests {
                 secs
             );
             assert_eq!(pair.previous.end.unwrap() + 1, pair.current.start.unwrap());
-            let skew = chrono::Utc::now().timestamp() - pair.current.end.unwrap();
+            let skew = crate::time::now_epoch_secs() - pair.current.end.unwrap();
             assert!((0..=60).contains(&skew), "the pair ends now: {skew}");
         }
         // Error strings carry no clock either: byte parity with the core.

@@ -5,7 +5,7 @@
 //! `bucket.rs`) while the bounds they produce are UTC epochs
 //! (`docs/specs/cli.md`).
 
-use chrono::{FixedOffset, NaiveDate, NaiveDateTime, TimeZone};
+use crate::time;
 
 /// A resolved evaluation window in UTC epoch seconds. Both ends are
 /// inclusive; `None` is unbounded.
@@ -144,7 +144,7 @@ pub fn derive_previous(
         // A span whose doubled window leaves i64 — or, before that, names a
         // date the calendar cannot express: the derived previous window
         // doubles the reach back, so a span whose current window still
-        // resolves can start it below chrono's floor (e.g. `--last
+        // resolves can start it below the calendar's floor (e.g. `--last
         // 50000000d`), where the disclosure would render an empty `since`.
         // The same invalid-span error as every other bad `--last`, not an
         // overflow panic or an empty previous window.
@@ -198,7 +198,7 @@ pub fn derive_previous(
 /// errors of `resolve` carry over; `--until` without `--since` is an error
 /// because the current window's start is undefined, and a `--since` after the
 /// injected now leaves no current window to compare. A pair whose windows
-/// leave the calendar chrono can express is refused: a `--last` whose derived
+/// leave the expressible calendar is refused: a `--last` whose derived
 /// previous window does fails as the invalid-span error, and a date-derived
 /// current window whose equal-length previous does as the empty-window error
 /// naming `--since`.
@@ -263,16 +263,19 @@ fn day_end_epoch(value: &str, flag: &str, tz_offset_secs: i32) -> Result<i64, St
 
 /// Local midnight of the `YYYY-MM-DD` date, in `tz_offset_secs`.
 fn day_start_epoch(value: &str, flag: &str, tz_offset_secs: i32) -> Result<i64, String> {
-    let date = NaiveDate::parse_from_str(value, "%Y-%m-%d").map_err(|_| {
+    let (y, m, d) = time::parse_ymd(value).ok_or_else(|| {
         format!("invalid {flag} '{value}' — expected a YYYY-MM-DD date (e.g. 2026-10-01)")
     })?;
-    let midnight = date.and_hms_opt(0, 0, 0).expect("midnight always exists");
-    let tz = FixedOffset::east_opt(tz_offset_secs).expect("valid tz offset");
-    let local = tz
-        .from_local_datetime(&midnight)
-        .single()
-        .ok_or_else(|| format!("invalid {flag} '{value}' — not a local time in this zone"))?;
-    Ok(local.timestamp())
+    assert!(time::is_valid_offset(tz_offset_secs), "valid tz offset");
+    // A fixed offset has no daylight-saving gaps: the only unresolvable
+    // midnight is one outside the calendar.
+    let epoch = time::days_from_civil(y, m, d) * 86_400 - i64::from(tz_offset_secs);
+    if !time::in_calendar(epoch) {
+        return Err(format!(
+            "invalid {flag} '{value}' — not a local time in this zone"
+        ));
+    }
+    Ok(epoch)
 }
 
 /// The seconds in a `<N>d | <N>h | <N>w` rolling window.
@@ -302,18 +305,11 @@ fn span_secs(value: &str) -> Result<i64, String> {
     n.checked_mul(secs).ok_or_else(invalid)
 }
 
-/// The epoch range chrono's calendar can express — `NaiveDateTime::MIN` /
-/// `MAX`'s timestamps, the dates `NaiveDate` can name (roughly ±262,000
-/// years). Const-evaluated from chrono's own constants, so a chrono upgrade
-/// that moves the range moves it here too.
-const CALENDAR_MIN_EPOCH: i64 = NaiveDateTime::MIN.and_utc().timestamp();
-const CALENDAR_MAX_EPOCH: i64 = NaiveDateTime::MAX.and_utc().timestamp();
-
 /// Whether an instant names a date the calendar can express. Outside the
 /// range there is no date: the bounds would render an empty string and the
 /// store would compare against an empty one.
 fn in_calendar(epoch: i64) -> bool {
-    (CALENDAR_MIN_EPOCH..=CALENDAR_MAX_EPOCH).contains(&epoch)
+    time::in_calendar(epoch)
 }
 
 /// The window's resolved instants as `%Y-%m-%dT%H:%M:%S%:z` strings — RFC 3339
@@ -324,24 +320,34 @@ fn in_calendar(epoch: i64) -> bool {
 /// names years 0000..=9999 only); the render is pinned there rather than
 /// refused.
 pub fn bounds(range: TimeRange, tz_offset_secs: i32) -> (Option<String>, Option<String>) {
-    let tz = FixedOffset::east_opt(tz_offset_secs).expect("valid tz offset");
+    assert!(time::is_valid_offset(tz_offset_secs), "valid tz offset");
     let instant = |epoch: i64| {
         // Every TimeRange is built by resolve / resolve_pair, which validate
         // both ends against the calendar, so an epoch they accept renders in
-        // any valid offset: `timestamp_opt` yields None only outside the
-        // calendar or for an ambiguous local time, and a fixed offset cannot
-        // have one. There is no unrenderable instant to fall back on — the
-        // empty-string branch is gone, so an out-of-calendar bound cannot be
-        // silently absorbed here. The instant is in-calendar, but the wall
+        // any valid offset. There is no unrenderable instant to fall back on —
+        // the empty-string branch is gone, so an out-of-calendar bound cannot
+        // be silently absorbed here. The instant is in-calendar, but the wall
         // clock it renders at a calendar end can leave the calendar by up to one
         // zone width (under a day), so the spelled-out date by up to one day:
         // that presentation spill is pinned by the tests (`mod tests`), never
         // absorbed.
-        tz.timestamp_opt(epoch, 0)
-            .single()
-            .expect("TimeRange holds an in-calendar epoch: resolve validates both ends")
-            .format("%Y-%m-%dT%H:%M:%S%:z")
-            .to_string()
+        assert!(
+            time::in_calendar(epoch),
+            "TimeRange holds an in-calendar epoch: resolve validates both ends"
+        );
+        let local = epoch + i64::from(tz_offset_secs);
+        let (y, m, d) = time::civil_from_days(local.div_euclid(86_400));
+        let day_secs = local.rem_euclid(86_400);
+        format!(
+            "{}-{:02}-{:02}T{:02}:{:02}:{:02}{}",
+            time::format_year(y),
+            m,
+            d,
+            day_secs / 3600,
+            day_secs % 3600 / 60,
+            day_secs % 60,
+            time::format_offset_colon(tz_offset_secs)
+        )
     };
     (range.start.map(instant), range.end.map(instant))
 }
@@ -365,7 +371,6 @@ pub fn display(range: TimeRange, tz_offset_secs: i32) -> String {
 mod tests {
     use super::*;
     use crate::core::bucket::JST_OFFSET_SECS;
-    use chrono::{DateTime, Datelike};
 
     const NOW: i64 = 1_000_000;
     /// The west offset (`-08:00`) the date path's ceiling check exists for: its
@@ -714,7 +719,7 @@ mod tests {
 
     #[test]
     fn the_calendar_edges_are_the_limits_of_a_rolling_window() {
-        // chrono's calendar range, `NaiveDateTime::MIN`/`MAX`'s timestamps:
+        // The calendar's range, the old `NaiveDateTime::MIN`/`MAX` timestamps:
         // -8,334,601,228,800 (-262143-01-01) .. 8,210,266,876,799 (+262142-12-31).
         const CAL_MIN: i64 = -8_334_601_228_800;
         const CAL_MAX: i64 = 8_210_266_876_799;
@@ -779,12 +784,12 @@ mod tests {
     }
 
     #[test]
-    fn the_calendar_constants_track_chronos_own_range() {
-        // The constants are const-evaluated from chrono's own; pinning the
-        // values turns a chrono upgrade that moves the range into a visible
-        // change instead of a silent one.
-        assert_eq!(CALENDAR_MIN_EPOCH, -8_334_601_228_800);
-        assert_eq!(CALENDAR_MAX_EPOCH, 8_210_266_876_799);
+    fn the_calendar_constants_still_match_the_old_chrono_range() {
+        // The range was const-evaluated from chrono's own constants before
+        // the jiff migration; pinning the values turns any drift into a
+        // visible change instead of a silent one.
+        assert_eq!(time::CALENDAR_MIN_EPOCH, -8_334_601_228_800);
+        assert_eq!(time::CALENDAR_MAX_EPOCH, 8_210_266_876_799);
     }
 
     #[test]
@@ -865,7 +870,7 @@ mod tests {
     /// +262142) are outside it, so those renders are checked through the naive
     /// wall clock instead.
     fn rfc3339_names_year(local: i64) -> bool {
-        DateTime::from_timestamp(local, 0).is_some_and(|wall| (0..=9999).contains(&wall.year()))
+        time::utc_year(local).is_some_and(|y| (0..=9999).contains(&y))
     }
 
     /// The bytes a presentation spill must render. The wall clock is
@@ -873,8 +878,8 @@ mod tests {
     /// width of a calendar end, so its local date is exactly one day past
     /// `NaiveDate::MAX` (east offset) or one day before `NaiveDate::MIN` (west
     /// offset). Built from those edge dates and the wall-clock time of day
-    /// rather than from the renderer, so a chrono format change shows up as a
-    /// diff instead of moving both sides together.
+    /// rather than from the renderer, so a time-library format change shows up
+    /// as a diff instead of moving both sides together.
     fn presentation_spill(epoch: i64, zone: i32) -> String {
         debug_assert!(zone != 0, "a zero offset cannot spill past the calendar");
         debug_assert!(
@@ -915,11 +920,11 @@ mod tests {
             return;
         }
         if rfc3339_names_year(local) {
-            let parsed = DateTime::parse_from_rfc3339(bound)
-                .unwrap_or_else(|e| panic!("{name} {side} is not RFC 3339: {bound} ({e})"));
+            let parsed = time::parse_rfc3339_nanos(bound)
+                .unwrap_or_else(|| panic!("{name} {side} is not RFC 3339: {bound}"));
             assert_eq!(
-                parsed.timestamp(),
-                epoch,
+                parsed,
+                epoch as i128 * 1_000_000_000,
                 "the bound names another instant for {name} {side}: {bound}"
             );
         } else {
@@ -927,10 +932,28 @@ mod tests {
             let wall = bound
                 .strip_suffix(&suffix)
                 .unwrap_or_else(|| panic!("the offset is missing for {name} {side}: {bound}"));
-            let naive = NaiveDateTime::parse_from_str(wall, "%Y-%m-%dT%H:%M:%S")
-                .unwrap_or_else(|e| panic!("{name} {side} is not a wall clock: {bound} ({e})"));
+            // The spill renders are canonical wall clocks this module drew
+            // itself (`%Y-%m-%dT%H:%M:%S`), so a strict fixed-width read
+            // checks them without leaning on the renderer.
+            let (date, clock) = wall
+                .split_once('T')
+                .unwrap_or_else(|| panic!("{name} {side} is not a wall clock: {bound}"));
+            let (y, m, d) = time::parse_ymd(date)
+                .unwrap_or_else(|| panic!("{name} {side} is not a wall clock: {bound}"));
+            let clock_bytes = clock.as_bytes();
+            let two = |lo: usize| {
+                if clock_bytes.len() == 8
+                    && clock_bytes[2] == b':'
+                    && clock_bytes[5] == b':'
+                    && clock_bytes[lo..lo + 2].iter().all(u8::is_ascii_digit)
+                {
+                    clock[lo..lo + 2].parse::<i64>().unwrap()
+                } else {
+                    panic!("{name} {side} is not a wall clock: {bound}")
+                }
+            };
             assert_eq!(
-                naive.and_utc().timestamp(),
+                time::days_from_civil(y, m, d) * 86_400 + two(0) * 3600 + two(3) * 60 + two(6),
                 local,
                 "the bound names another wall clock for {name} {side}: {bound}"
             );
@@ -944,7 +967,7 @@ mod tests {
         // date one day outside the calendar, where `NaiveDate` has no date to
         // name. The instant stays exact and no real clock reaches these years,
         // so the render is a documented limit rather than a refused window: the
-        // bytes are pinned so a chrono change in the extended-year format or in
+        // bytes are pinned so a change in the extended-year format or in
         // the offset rendering shows up as a diff.
         const CAL_MIN: i64 = -8_334_601_228_800;
         const CAL_MAX: i64 = 8_210_266_876_799;

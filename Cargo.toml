@@ -33,7 +33,12 @@ exclude = [
 
 [dependencies]
 anyhow = "1.0.104"
-chrono = { version = "0.4.45", default-features = false, features = ["std", "clock"] }
+# Minimal portable set: the clock + system-zone detection (tz-system),
+# IANA name lookups from the OS zoneinfo dir on Unix (tzdb-zoneinfo), and
+# the embedded database where no system zoneinfo exists (Windows;
+# tzdb-bundle-platform). Without the name lookups, a set `TZ=Asia/Tokyo`
+# fell back to UTC where chrono honored it (see `src/time.rs`).
+jiff = { version = "1", default-features = false, features = ["std", "tz-system", "tzdb-zoneinfo", "tzdb-bundle-platform"] }
 clap = { version = "4.6.1", features = ["derive"] }
 # Pinned to 0.32: newer rusqlite pulls libsqlite3-sys >= 0.38, whose build
 # script uses the still-unstable `cfg_select` feature and so fails on stable
