@@ -154,7 +154,7 @@ pub fn parse_rfc3339_nanos(s: &str) -> Option<i128> {
     }
     let days = days_from_civil(year, month as u32, day as u32);
     let mut epoch = days * 86_400 + hour * 3600 + minute * 60 + second - offset_secs;
-    if !in_calendar(epoch) && !(second == 60 && in_calendar(epoch - 1)) {
+    if !(in_calendar(epoch) || second == 60 && in_calendar(epoch - 1)) {
         // Every 4-digit-year instant sits inside the calendar; the check only
         // guards the arithmetic, and a leap second renders off its `:59`.
         return None;
