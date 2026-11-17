@@ -8,6 +8,20 @@
 バージョンは [Semantic Versioning](https://semver.org/lang/ja/) に従う。
 各節はタグ間差分単位で記録する（ブランチ差分単位ではない）。
 
+## [Unreleased]
+
+### Added
+
+- GitHub Pages サイト (`site/`)。導入・使い方・コマンド対応表・設計
+  spec 全文・`--help` 生成の CLI リファレンスを日英で公開する。
+  `main` への push で自動デプロイされる。
+
+### Changed
+
+- README / README.ja.md を導入から使い方の順に再構成した。リリース
+  手順は CONTRIBUTING のリリース節へ移動した。
+- 設計 spec の重複記述を整理した (cli.md 中心)。
+
 ## [0.6.3] - 2026-11-16
 
 ### Fixed
