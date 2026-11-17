@@ -45,7 +45,6 @@ NAV_BASE_EN = [
     ("specs.html", "Specs"),
     ("cli.html", "CLI"),
     ("https://github.com/armaniacs/saniwalens", "GitHub"),
-    ("index_ja.html", "日本語"),
 ]
 
 
@@ -82,6 +81,7 @@ def page_shell(
   </script>
   <link rel="icon" type="image/svg+xml" href="{base}/assets/favicon.svg">
   <meta name="theme-color" content="#1a1a24">
+  <link rel="alternate" hreflang="ja" href="{base}/index_ja.html">
   <link rel="stylesheet" href="{base}/styles.css">
   <script defer src="{base}/app.js"></script>
 </head>
@@ -110,6 +110,8 @@ def page_shell(
 {nav_html(NAV_BASE_EN, base, current)}
         </ul>
       </nav>
+
+      <a class="lang-toggle" href="{base}/index_ja.html" hreflang="ja" lang="ja">日本語</a>
 
       <button
         id="theme-toggle"

@@ -279,6 +279,25 @@ a:hover {
   vertical-align: -0.125em;
 }
 
+/* Language switch: a plain link, always visible in the header. */
+.lang-toggle {
+  font: inherit;
+  color: var(--ink);
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 0.5rem;
+  padding: 0.35rem 0.6rem;
+  text-decoration: none;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.lang-toggle:hover {
+  text-decoration: underline;
+  text-underline-offset: 0.15em;
+  text-decoration-thickness: 2px;
+}
+
 /* System light (or pinned light): offer dark. Pinned dark (or system dark): offer light. */
 .theme-toggle-light {
   display: none;
