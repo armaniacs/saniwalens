@@ -142,83 +142,64 @@ contract:
   a table that looks like an empty config, and `meta.config_dir` is recorded
   empty (nothing scanned, distinguishable from unknown).
 
-## `optimize` under opencode
+## `optimize` per harness
 
-The briefing composes from the store either way, so `--print` works under
-every harness. Launching runs the harness's own agent on a data-free pointer
-prompt (the briefing travels via a private temp file, as for Claude Code):
-`claude <prompt>` opens interactively, while `opencode run --format json
---title 'saniwalens optimize' <prompt>` runs the advisor headless ― no user is
-present for the approval gate, so the headless instructions
-(`run_instructions`) make the printed plan the final output and forbid
-edits.
+The briefing composes from the store under every harness, so `--print` works
+everywhere. Launching runs the harness's own agent on a data-free pointer prompt
+(the briefing travels via a private temp file; `cli.md`):
 
-The headless terminal stays quiet: saniwalens reads the JSON event stream line
-by line and surfaces only what the agent says ― text parts (narration, then
-the plan) on stdout, one-line tool markers on stderr ― while every raw line
-and the child's stderr go to a private (`0600`) log file whose path is
-printed up front. A successful run removes the log (the raw stream may echo
-secrets); `SANIWALENS_KEEP_RUN_LOG=1` keeps it for post-mortem inspection.
-Rendering is lenient (the upstream event shapes are
-unversioned): a line with no recognizable text stays in the log, and a run
-that renders nothing readable says so instead of leaving silence. Every exit
-from the run ― success, a failed read, a failed spawn, or a failed wait ―
-stops the beat and reaps the child; a failure keeps the log and is reported
-with the raw log's
-path so the full output is still reachable (`cli/headless.rs`).
-`--timeout <DURATION>` bounds the wait; on expiry the child is killed and reaped
-and the error names the raw log. A grandchild that outlives the direct child can
-keep the pipe open: the reader is detached on timeout so the command still
-returns promptly, and the residual process is a known limitation.
-`--verbose` inherits stdio for the raw streaming instead.
+| Harness | Launch | Mode |
+| --- | --- | --- |
+| `claude` | `claude <prompt>` | interactive |
+| `opencode` | `opencode run --format json --title 'saniwalens optimize' <prompt>` | headless |
+| `kilocode` | `kilo --prompt <prompt>` | interactive |
 
-Under kilocode the briefing composes from the store either way, so `--print`
-works. Launching opens an **interactive kilo session** on the pointer prompt ―
-`kilo --prompt <prompt>`, the experience the claude launch gives: the user is
-present to approve the briefing read (kilo gates every tool call where
-opencode does not, so a headless run would need `--auto` instead), steer the
-investigation, and apply the fixes themselves. A bare `kilo <text>` positional
-is treated as a file to open (measured), not a prompt ― `--prompt` is the
-TUI's message surface.
+- **opencode (headless).** No user is present for the approval gate, so the
+  headless instructions (`run_instructions`) make the printed plan the final
+  output and forbid edits. The terminal stays quiet: saniwalens reads the JSON
+  event stream line by line and surfaces only what the agent says (text parts on
+  stdout, one-line tool markers on stderr), while every raw line and the child's
+  stderr go to a private (`0600`) log. The log's lifecycle, `--timeout`, and
+  `--verbose` are as in `cli.md`. Rendering is lenient because the upstream
+  event shapes are unversioned: a line with no recognizable text stays in the
+  log, and a run that renders nothing readable says so instead of leaving
+  silence. Every exit path stops the heartbeat and reaps the child
+  (`cli/headless.rs`). A grandchild that outlives the direct child can keep the
+  pipe open; on timeout the reader is detached so the command still returns
+  promptly, and the residual process is a known limitation.
+- **kilocode (interactive).** The user is present to approve the briefing read
+  (kilo gates every tool call where opencode does not, so a headless run would
+  need `--auto`), steer the investigation, and apply the fixes. A bare
+  `kilo <text>` positional is treated as a file to open (measured), not a
+  prompt; `--prompt` is the TUI's message surface.
 
-The launch shape itself is per-harness **data on the seam**:
-`Harness::launch_command` (`adapter::harness`) returns the binary, the
-leading argv, and the run mode beside the harness's other facts
-(`input_unit`, `db_file_name`), so a new harness lands as one arm there and
-the shell's launch side (`cli/mod.rs`) neither matches nor changes ― the same
-contract the analyze seam keeps (`Harness::analyze`).
+**Launch and rendering are seam data.** `Harness::launch_command`
+(`adapter::harness`) returns the binary, the leading argv, and the run mode
+beside the harness's other facts (`input_unit`, `db_file_name`).
+`Harness::run_line_renderer` returns the adapter fn that turns one raw line into
+a `RunEvent`, and the delivery plan carries it to `run_headless`. A new harness
+lands as one arm each, and neither `cli/mod.rs` nor the `cli/headless.rs` loop
+names a harness: the same contract the analyze seam keeps
+(`Harness::analyze`). Claude's launch is interactive, so it has no headless
+renderer; kilo is an OpenCode fork and shares the event stream, so a headless
+kilo run is the same arm, still gated on `--auto` by its launch shape.
 
-The headless raw stream renders through per-harness data on the seam too:
-`Harness::run_line_renderer` (`adapter::harness`) returns the adapter fn that
-turns one raw line into a `RunEvent` beside the launch shape, and the
-delivery plan carries it to `run_headless`, so the `cli/headless.rs` logged loop
-receives the seam's choice instead of naming a module. Rendering stays lenient
-either way (the upstream event shapes are unversioned). Claude's launch opens
-interactively, so it has no headless renderer; kilo is an OpenCode fork and
-shares the event stream, so a headless kilo run is the same arm ― still gated
-on `--auto` by the launch shape above. The quiet-stretch logic the loop leans
-on lives in one place too (`heartbeat`, `cli/heartbeat.rs`), so the due
-decision is a pure function and the beat model in its tests drives the same
-decision as the spawn. What the seam's test pins is the sample sequence and
-the stop, not the spacing: a beat carries the count it reads when it fires (0
-before any event streams, then the count at that moment), and after `stop`
-flips the thread exits and the receiver disconnects. The wall-clock spacing
-between emitted beats is not observed by a test (the pure decision's spacing
-is pinned by `cli::heartbeat` unit tests). At most one beat is sent between
-the flag being set and the second stop check observing it: a structural
-invariant of the loop's two checks, not an observed quantity ― a beat queued
-before the stop is indistinguishable from one sent after it.
-`CADENCE` (30s) is the minimum scheduled spacing between beats and `POLL` (500ms) is how
-often the thread wakes to re-check `stop` and to see whether the next beat is
-due. A beat fires when the observed elapsed time reaches its deadline, and the
-following deadline is then counted one cadence from that observation, not from
-the old deadline: the slots a stall swallowed (a process freeze, a blocked
-stderr) are dropped rather than replayed, so the resume shows one beat and the
-next one waits a full cadence instead of a back-to-back burst. The phase is not
-anchored to the start, and because the loop only looks after each poll, a
-cadence shorter than the poll is degenerate and beats on the poll, not on the
-cadence. `Beat` rejects a zero cadence or a zero poll at construction, so the
-test seam cannot silently turn into a tight loop or a per-poll beat.
+**Heartbeat.** The quiet-stretch logic lives in one place (`heartbeat`,
+`cli/heartbeat.rs`), so the due decision is a pure function and the tests'
+beat model drives the same decision as the spawn.
+
+- `CADENCE` (30 s) is the minimum spacing between beats; `POLL` (500 ms) is how
+  often the thread wakes to re-check `stop` and the deadline.
+- A beat fires when elapsed time reaches its deadline, and the next deadline
+  counts one cadence from that observation, not from the old deadline. Slots a
+  stall swallowed (a process freeze, a blocked stderr) are dropped rather than
+  replayed, so the resume shows one beat instead of a burst.
+- A beat carries the count it reads when it fires (0 before any event streams).
+  After `stop` flips, the thread exits and the receiver disconnects.
+- `Beat` rejects a zero cadence or zero poll at construction, so the test seam
+  cannot turn into a tight loop. The tests pin the sample sequence and the stop;
+  the pure decision's spacing is pinned by `cli::heartbeat` unit tests, and
+  wall-clock spacing between emitted beats is not observed.
 
 ## Report copy names the harness
 
@@ -284,7 +265,7 @@ harness passes it unchanged; every other per-harness fact reaches the shell
 as seam data. Nothing in the Claude Code path moves ― that immobility is the
 contract this spec protects.
 
-## Non-goals in v1 (as of 0.5.2)
+## Non-goals
 
 DSH (DeepSeek harness app) and any fourth harness are not supported: no
 `Harness` variant, no input route, no store name, no format spec. DSH is the

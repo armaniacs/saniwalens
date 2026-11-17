@@ -1,0 +1,415 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Harness Specification ― saniwalens</title>
+  <meta name="description" content="saniwalens spec harness.md, mirrored from docs/specs/.">
+  <meta name="color-scheme" content="light dark">
+  <script>
+    try {
+      document.querySelector('meta[name="color-scheme"]').content =
+        localStorage.getItem("color-scheme") ?? "light dark";
+    } catch (e) {}
+  </script>
+  <link rel="icon" type="image/svg+xml" href="../assets/favicon.svg">
+  <meta name="theme-color" content="#1a1a24">
+  <link rel="stylesheet" href="../styles.css">
+  <script defer src="../app.js"></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <header class="site-header">
+    <div class="header-inner">
+      <a class="site-logo" href="../index.html" aria-label="saniwalens home"><img src="../assets/favicon.svg" alt="" aria-hidden="true" width="28" height="28">saniwalens</a>
+
+      <nav class="site-nav" aria-label="Primary">
+        <button
+          class="menu-button"
+          type="button"
+          popovertarget="site-menu"
+          popovertargetaction="toggle"
+          aria-controls="site-menu"
+        >
+          <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+            <path d="M2 4h12M2 8h12M2 12h12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" fill="none"/>
+          </svg>
+          <span>Menu</span>
+        </button>
+
+        <ul id="site-menu" class="site-menu" popover="auto">
+          <li><a href="../index.html">Home</a></li>
+          <li><a href="../docs.html">Docs</a></li>
+          <li><a href="../specs.html" aria-current="page">Specs</a></li>
+          <li><a href="../cli.html">CLI</a></li>
+          <li><a href="https://github.com/armaniacs/saniwalens">GitHub</a></li>
+          <li><a href="../index_ja.html">日本語</a></li>
+        </ul>
+      </nav>
+
+      <button
+        id="theme-toggle"
+        class="theme-toggle"
+        type="button"
+        aria-live="polite"
+      >
+        <span class="theme-toggle-dark" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 16 16" focusable="false"><path d="M14 10.2A6 6 0 0 1 5.8 2 6 6 0 1 0 14 10.2Z" fill="currentColor"/></svg></span>
+        <span class="theme-toggle-light" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 16 16" focusable="false"><circle cx="8" cy="8" r="3.2" fill="currentColor"/><g stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M8 1v1.8M8 13.2V15M1 8h1.8M13.2 8H15M3 3l1.3 1.3M11.7 11.7 13 13M13 3l-1.3 1.3M4.3 11.7 3 13"/></g></svg></span>
+        <span class="visually-hidden" id="theme-toggle-label">Switch to dark theme</span>
+      </button>
+    </div>
+  </header>
+
+  <main id="main">
+    <h1>Harness Specification</h1>
+<p>saniwalens analyzes sessions from more than one agent harness (Claude Code,</p>
+<p>opencode, kilocode). This spec owns the <strong>harness contract</strong>:</p>
+<p>how the CLI selects a harness, where each harness&#x27;s input and store live, and</p>
+<p>what each harness can and cannot report in v1. The per-harness *formats* live</p>
+<p>in their own specs (<code>session-format.md</code>, <code>session-format-opencode.md</code>); the</p>
+<p>*analysis semantics* stay shared (<code>events.md</code>, <code>surfaces.md</code>).</p>
+<h2>One store per harness</h2>
+<p>Stores are <strong>never shared</strong> across harnesses. Each harness gets its own SQLite</p>
+<p>file holding a single harness&#x27;s sessions, so the Claude Code path ― behavior,</p>
+<p>defaults, and existing stores ― is untouched by every later harness:</p>
+<div class="table-scroll" role="region" tabindex="0">
+<table><thead><tr>
+<th scope="col">Harness</th>
+<th scope="col">Default store (<code>--db</code>)</th>
+</tr></thead><tbody>
+<tr>
+<th scope="row"><code>claude</code></th scope="row">
+<td><code>${XDG_STATE_HOME:-~/.local/state}/saniwalens/saniwalens.db</code> (unchanged)</td>
+</tr>
+<tr>
+<th scope="row"><code>opencode</code></th scope="row">
+<td>same state dir, <code>saniwalens-opencode.db</code></td>
+</tr>
+<tr>
+<th scope="row"><code>kilocode</code></th scope="row">
+<td>same state dir, <code>saniwalens-kilocode.db</code></td>
+</tr>
+</tbody></table></div>
+<p>An explicit <code>--db</code> always wins, exactly as before. The schema is identical in</p>
+<p>every store (<code>storage.md</code>); only the rows&#x27; origin differs, which is why no</p>
+<p><code>harness</code> column exists ― a file holding one harness needs no per-row label,</p>
+<p>and a shared file is what this design refuses to create. No cross-harness</p>
+<p>aggregation exists in v1.</p>
+<p>Every store records its harness in <code>meta</code> (`harness = claude | opencode |</p>
+<p>kilocode`).</p>
+<p>A command reading a store built by another harness <strong>refuses with a hint</strong></p>
+<p>naming the expected <code>--harness</code> (or a matching <code>--db</code>), rather than reporting</p>
+<p>one harness&#x27;s rows as another&#x27;s. <code>sql</code> enforces the same guard: it resolves</p>
+<p>its default <code>--db</code> through <code>--harness</code>, so <code>saniwalens --harness opencode sql</code></p>
+<p>lands on the opencode store without flags.</p>
+<h2><code>--harness</code></h2>
+<p>A global flag, default <code>claude</code>:</p>
+<pre><code>
+saniwalens [--harness claude|opencode|kilocode] &lt;command&gt;
+
+
+</code></pre>
+<ul>
+<li>The default keeps every existing invocation byte-identical in behavior ―</li>
+</ul>
+<p>this is what keeps the change upstream-mergeable.</p>
+<ul>
+<li>There is deliberately **no <code>auto</code>**: detection order across harnesses would</li>
+</ul>
+<p>be ambiguous (several harnesses installed, several stores present), and an</p>
+<p>ambiguous default misattributes rows silently. Explicitness is the whole</p>
+<p>point of separate stores.</p>
+<ul>
+<li>Unknown values fail with the valid list.</li>
+</ul>
+<p><code>--projects</code> keeps its meaning (&quot;input root&quot;) but resolves per harness:</p>
+<p>a directory for Claude Code (<code>$CLAUDE_CONFIG_DIR/projects</code>), the opencode</p>
+<p>database file for opencode (default <code>~/.local/share/opencode/opencode.db</code>),</p>
+<p>and the kilocode tasks directory for kilocode ― default the **first existing</p>
+<p>editor globalStorage candidate** (<code>kilocode_tasks_candidates</code>), since the</p>
+<p>path varies with the editor install (Code / Cursor / VSCodium) and the</p>
+<p>platform, so the candidate list, not one hardcoded path, is the contract.</p>
+<p>The resolved root is recorded in <code>meta</code> (<code>projects_dir</code>) and reused by the</p>
+<p>read commands&#x27; auto-refresh, unchanged plumbing carrying a new value.</p>
+<h2>opencode analyze (v1 capability)</h2>
+<p><code>--harness opencode analyze</code> reads the opencode database <strong>read-only</strong> and</p>
+<p>ingests it into the opencode store. The mapping itself is</p>
+<p><code>adapter::opencode</code> (<code>session-format-opencode.md</code>); this section is the shell</p>
+<p>contract:</p>
+<ul>
+<li><strong>Sessions</strong> come from the <code>session</code> table in <code>time_created</code> order.</li>
+</ul>
+<p><code>project</code> is the session&#x27;s <code>directory</code> verbatim (real paths need no slug</p>
+<p>recovery), <code>root</code> is the same directory, <code>slug</code> is opencode&#x27;s own slug,</p>
+<p>and the ingest delete-key (<code>source_path</code>) is <code>opencode:&lt;session-id&gt;</code>.</p>
+<ul>
+<li><strong>Incremental ingest is per session</strong>, keyed <code>opencode:&lt;session-id&gt;</code> with</li>
+</ul>
+<p><code>(mtime = session.time_updated, size = message count)</code>. A whole-file</p>
+<p>fingerprint would re-ingest every session on each run (opencode appends</p>
+<p>constantly); per-session keys skip what did not move. Replace semantics</p>
+<p>make re-ingest idempotent, as for Claude Code transcripts.</p>
+<ul>
+<li><strong>Invalidation has its own version key.</strong> The shared <code>ANALYZER_VERSION</code></li>
+</ul>
+<p>would force Claude Code users through a full re-analyze on every</p>
+<p>opencode-only extraction change, so opencode rows stamp</p>
+<p><code>meta.opencode_analyzer_version</code> instead</p>
+<p>(<code>adapter::opencode::OPENCODE_ANALYZER_VERSION</code>). Bump it under the same</p>
+<p>rule: whenever opencode extraction changes what an unchanged database</p>
+<p>yields.</p>
+<ul>
+<li><strong>Subagent runs are not ingested.</strong> opencode has no subagent-side</li>
+</ul>
+<p>transcripts, so <code>sub_tokens</code>/<code>sub_agent_count</code> stay zero and the per-agent</p>
+<p>split is empty. <code>SplitCoverage::is_unavailable</code> requires a positive total,</p>
+<p>so no misleading &quot;run analyze to fill it&quot; warning fires ― zero subagent</p>
+<p>activity reads as zero, which is what it is.</p>
+<ul>
+<li><strong>Prompts are not ingested in v1.</strong> The store&#x27;s prompt pointer is a</li>
+</ul>
+<p><code>(source_path, source_line)</code> file coordinate (<code>storage.md</code>); opencode text</p>
+<p>lives in database rows, so the pointer needs a new encoding. Until then the</p>
+<p><code>prompts</code> view is empty under opencode ― reported as empty, never</p>
+<p>fabricated.</p>
+<ul>
+<li><strong>Permission denials count zero.</strong> No runtime denial marker was found in</li>
+</ul>
+<p>the opencode format, and no heuristic stands in for one.</p>
+<ul>
+<li><strong>The surface catalog covers commands, agents, and `AGENTS.md</strong>. Global</li>
+</ul>
+<p><code>command/</code> and <code>agent/</code> come from the opencode config root; each known</p>
+<p>project root contributes its <code>.opencode/</code> pair plus <code>AGENTS.md</code> (with</p>
+<p><code>@import</code>s). Skills, MCP servers, and permissions stay out until their</p>
+<p>definition sites and usage joins are both observed</p>
+<p>(<code>config-format-opencode.md</code>); live <code>Skill</code> usage meanwhile shows as</p>
+<p>orphaned rows in <code>inventory</code>, which is the honest signal that a catalog</p>
+<p>site is missing.</p>
+<ul>
+<li><code>meta.config_dir</code> is recorded empty: no config was scanned. (An empty</li>
+</ul>
+<p>value, not a missing key, so readers can distinguish &quot;nothing scanned&quot;</p>
+<p>from &quot;unknown&quot;.)</p>
+<h2>kilocode analyze (v1 capability)</h2>
+<p><code>--harness kilocode analyze</code> reads each task directory&#x27;s two JSON files</p>
+<p><strong>read-only</strong> and ingests it into the kilocode store. The mapping itself is</p>
+<p><code>adapter::kilocode</code> (<code>session-format-kilocode.md</code>); this section is the shell</p>
+<p>contract:</p>
+<ul>
+<li><strong>Sessions come from the task directories</strong> under the resolved input root,</li>
+</ul>
+<p>sorted for a deterministic order. A directory without both</p>
+<p><code>api_conversation_history.json</code> and <code>ui_messages.json</code> is not a session and</p>
+<p>is skipped. One task directory is one saniwalens session; the task uuid is both</p>
+<p>the session id and the slug.</p>
+<ul>
+<li><strong>The project root is a stated heuristic</strong> (<code>estimate_root</code>): the common</li>
+</ul>
+<p>parent directory of the <strong>leading</strong> tool paths, since kilocode stamps no</p>
+<p><code>cwd</code> anywhere. A task whose tools name no absolute path stays unrooted ―</p>
+<p>empty, never guessed.</p>
+<ul>
+<li><strong>Per-task ingest keys.</strong> <code>kilocode:&lt;task-uuid&gt;</code> keys each task, with</li>
+</ul>
+<p>(mtime = the later of the two files&#x27;, size = their summed length) as the</p>
+<p>fingerprint ― either file moves on activity, and the directory stat would</p>
+<p>re-ingest every task on each run (checkpoints move too). Replace semantics</p>
+<p>make re-ingest idempotent, as for the other harnesses.</p>
+<ul>
+<li><strong>Invalidation has its own version key</strong>, <code>meta.kilocode_analyzer_version</code></li>
+</ul>
+<p>(<code>adapter::kilocode::KILOCODE_ANALYZER_VERSION</code>), for the same reason the</p>
+<p>opencode rows carry theirs: a kilocode-only extraction change must never</p>
+<p>force other harnesses through a full re-analyze.</p>
+<ul>
+<li><strong>Subagent runs, prompts, and permission denials are not ingested.</strong> No</li>
+</ul>
+<p>spawn marker, no usable prompt pointer (the store&#x27;s `(source_path,</p>
+<p>source_line)` coordinate has no line meaning in JSON), and no denial marker</p>
+<p>was measured in the kilocode format ― the counts stay zero and the views</p>
+<p>read as empty, which is what they are.</p>
+<ul>
+<li><strong>The surface catalog is empty.</strong> The global <code>~/.config/kilo</code> sites are</li>
+</ul>
+<p>measured (commands, skills, <code>kilo.json</code>) but not cataloged yet ― the config</p>
+<p>half is a separate spec and change. <code>inventory</code> says so instead of showing</p>
+<p>a table that looks like an empty config, and <code>meta.config_dir</code> is recorded</p>
+<p>empty (nothing scanned, distinguishable from unknown).</p>
+<h2><code>optimize</code> per harness</h2>
+<p>The briefing composes from the store under every harness, so <code>--print</code> works</p>
+<p>everywhere. Launching runs the harness&#x27;s own agent on a data-free pointer prompt</p>
+<p>(the briefing travels via a private temp file; <code>cli.md</code>):</p>
+<div class="table-scroll" role="region" tabindex="0">
+<table><thead><tr>
+<th scope="col">Harness</th>
+<th scope="col">Launch</th>
+<th scope="col">Mode</th>
+</tr></thead><tbody>
+<tr>
+<th scope="row"><code>claude</code></th scope="row">
+<td><code>claude &lt;prompt&gt;</code></td>
+<td>interactive</td>
+</tr>
+<tr>
+<th scope="row"><code>opencode</code></th scope="row">
+<td><code>opencode run --format json --title &#x27;saniwalens optimize&#x27; &lt;prompt&gt;</code></td>
+<td>headless</td>
+</tr>
+<tr>
+<th scope="row"><code>kilocode</code></th scope="row">
+<td><code>kilo --prompt &lt;prompt&gt;</code></td>
+<td>interactive</td>
+</tr>
+</tbody></table></div>
+<ul>
+<li><strong>opencode (headless).</strong> No user is present for the approval gate, so the</li>
+</ul>
+<p>headless instructions (<code>run_instructions</code>) make the printed plan the final</p>
+<p>output and forbid edits. The terminal stays quiet: saniwalens reads the JSON</p>
+<p>event stream line by line and surfaces only what the agent says (text parts on</p>
+<p>stdout, one-line tool markers on stderr), while every raw line and the child&#x27;s</p>
+<p>stderr go to a private (<code>0600</code>) log. The log&#x27;s lifecycle, <code>--timeout</code>, and</p>
+<p><code>--verbose</code> are as in <code>cli.md</code>. Rendering is lenient because the upstream</p>
+<p>event shapes are unversioned: a line with no recognizable text stays in the</p>
+<p>log, and a run that renders nothing readable says so instead of leaving</p>
+<p>silence. Every exit path stops the heartbeat and reaps the child</p>
+<p>(<code>cli/headless.rs</code>). A grandchild that outlives the direct child can keep the</p>
+<p>pipe open; on timeout the reader is detached so the command still returns</p>
+<p>promptly, and the residual process is a known limitation.</p>
+<ul>
+<li><strong>kilocode (interactive).</strong> The user is present to approve the briefing read</li>
+</ul>
+<p>(kilo gates every tool call where opencode does not, so a headless run would</p>
+<p>need <code>--auto</code>), steer the investigation, and apply the fixes. A bare</p>
+<p><code>kilo &lt;text&gt;</code> positional is treated as a file to open (measured), not a</p>
+<p>prompt; <code>--prompt</code> is the TUI&#x27;s message surface.</p>
+<p><strong>Launch and rendering are seam data.</strong> <code>Harness::launch_command</code></p>
+<p>(<code>adapter::harness</code>) returns the binary, the leading argv, and the run mode</p>
+<p>beside the harness&#x27;s other facts (<code>input_unit</code>, <code>db_file_name</code>).</p>
+<p><code>Harness::run_line_renderer</code> returns the adapter fn that turns one raw line into</p>
+<p>a <code>RunEvent</code>, and the delivery plan carries it to <code>run_headless</code>. A new harness</p>
+<p>lands as one arm each, and neither <code>cli/mod.rs</code> nor the <code>cli/headless.rs</code> loop</p>
+<p>names a harness: the same contract the analyze seam keeps</p>
+<p>(<code>Harness::analyze</code>). Claude&#x27;s launch is interactive, so it has no headless</p>
+<p>renderer; kilo is an OpenCode fork and shares the event stream, so a headless</p>
+<p>kilo run is the same arm, still gated on <code>--auto</code> by its launch shape.</p>
+<p><strong>Heartbeat.</strong> The quiet-stretch logic lives in one place (<code>heartbeat</code>,</p>
+<p><code>cli/heartbeat.rs</code>), so the due decision is a pure function and the tests&#x27;</p>
+<p>beat model drives the same decision as the spawn.</p>
+<ul>
+<li><code>CADENCE</code> (30 s) is the minimum spacing between beats; <code>POLL</code> (500 ms) is how</li>
+</ul>
+<p>often the thread wakes to re-check <code>stop</code> and the deadline.</p>
+<ul>
+<li>A beat fires when elapsed time reaches its deadline, and the next deadline</li>
+</ul>
+<p>counts one cadence from that observation, not from the old deadline. Slots a</p>
+<p>stall swallowed (a process freeze, a blocked stderr) are dropped rather than</p>
+<p>replayed, so the resume shows one beat instead of a burst.</p>
+<ul>
+<li>A beat carries the count it reads when it fires (0 before any event streams).</li>
+</ul>
+<p>After <code>stop</code> flips, the thread exits and the receiver disconnects.</p>
+<ul>
+<li><code>Beat</code> rejects a zero cadence or zero poll at construction, so the test seam</li>
+</ul>
+<p>cannot turn into a tight loop. The tests pin the sample sequence and the stop;</p>
+<p>the pure decision&#x27;s spacing is pinned by <code>cli::heartbeat</code> unit tests, and</p>
+<p>wall-clock spacing between emitted beats is not observed.</p>
+<h2>Report copy names the harness</h2>
+<p>Copy that attributes rows to a harness uses <code>Harness</code> display helpers, so</p>
+<p>opencode output never claims to be Claude Code&#x27;s:</p>
+<ul>
+<li><code>display_name</code> in the <code>doctor</code> heading, the always-on residual line, and</li>
+</ul>
+<p>the <code>prompts</code> framing; the <code>stuck</code>/<code>thrash</code> lines say &quot;the agent&quot; (neutral</p>
+<p>for both harnesses).</p>
+<ul>
+<li><code>instruction_file</code> / <code>project_config_ref</code> / <code>global_config_ref</code> wherever a</li>
+</ul>
+<p>finding routes to the config layer owning the fix (<code>doctor</code>, <code>failures</code>,</p>
+<p><code>inventory</code> framing, <code>overhead</code> breakdown, friction suggestions).</p>
+<ul>
+<li>The <code>optimize</code> briefing and advisor instructions render from a</li>
+</ul>
+<p><code>HarnessCopy</code> (<code>core::optimize</code>), plain data the shell assembles from the</p>
+<p>harness ― the core never names a harness.</p>
+<ul>
+<li>Freshness lines count the harness&#x27;s own unit (<code>transcript(s)</code> vs</li>
+</ul>
+<p><code>session(s)</code>).</p>
+<p>Static <code>--help</code> texts still describe the Claude Code defaults; per-harness</p>
+<p>help generation is out of scope.</p>
+<h2>The analyze seam ― <code>Harness::analyze</code></h2>
+<p><code>analyze</code> is dispatched exactly once, on the harness:</p>
+<ul>
+<li><code>Harness::analyze</code> (<code>adapter::harness</code>) is the only dispatch. Each arm calls</li>
+</ul>
+<p>the matching adapter module&#x27;s <code>analyze</code> (<code>adapter::claude</code>,</p>
+<p><code>adapter::opencode</code>, <code>adapter::kilocode</code>), which owns input discovery,</p>
+<p>fingerprint skipping, extraction wiring, and the store hand-off for that</p>
+<p>harness. The shell guards the store against a cross-harness write and then</p>
+<p>calls the seam ― <code>run_analyze</code> (<code>cli/mod.rs</code>) invokes <code>guard_harness</code></p>
+<p>(<code>session.rs</code>) first ― and names no harness, carrying no dispatch arm.</p>
+<ul>
+<li>The input-route defaults resolve inside that module: the projects directory</li>
+</ul>
+<p>(Claude Code), the opencode database file, the kilocode tasks directory.</p>
+<p><code>--projects</code> still overrides whatever the harness resolves (the top of this</p>
+<p>spec), and the resolved root is recorded in <code>meta.projects_dir</code> unchanged.</p>
+<ul>
+<li>Each harness&#x27;s analyzer-version key sits beside its mapping ―</li>
+</ul>
+<p><code>adapter::transcript::CLAUDE_ANALYZER_META_KEY</code> / <code>CLAUDE_ANALYZER_VERSION</code>,</p>
+<p><code>OPENCODE_ANALYZER_*</code>, <code>KILOCODE_ANALYZER_*</code>. The store&#x27;s invalidation check</p>
+<p>takes the <code>(key, version)</code> it is given, so no harness&#x27;s key lives in</p>
+<p><code>store.rs</code> and a new harness adds its own without touching the store.</p>
+<ul>
+<li>The surface catalog rides the same seam: <code>catalog_surfaces(harness, roots)</code></li>
+</ul>
+<p>(<code>adapter::harness</code>) is the single traversal ― it resolves that harness&#x27;s</p>
+<p>config root, builds each <code>Scope</code>, owns the symlink-dedup <code>seen</code> set, and</p>
+<p>gates roots on disk. Each harness contributes only its <strong>site rows</strong></p>
+<p>(<code>global_sites</code> / <code>project_sites</code>: a path plus a loader), so a new config</p>
+<p>site or surface kind is data, not a traversal edit</p>
+<p>(<code>config-format.md</code>).</p>
+<h2>Forward compatibility</h2>
+<p>A new harness adds: a <code>Harness</code> variant, its default input root and store</p>
+<p>name here, its format spec, and an adapter module carrying its analyze routine</p>
+<p>behind <code>Harness::analyze</code> ― input route, fingerprinting, and its</p>
+<p>analyzer-version key included. Its launch shape rides the same seam:</p>
+<p><code>Harness::launch_command</code> (<code>adapter::harness</code>) holds the binary, the leading</p>
+<p>argv, and the run mode beside the other data arms, and its headless run-line</p>
+<p>renderer beside them (<code>Harness::run_line_renderer</code>), so <code>cli/mod.rs</code> gains no</p>
+<p>dispatch arm on the analyze side, the launch side, or the headless loop. The</p>
+<p>shell&#x27;s only harness-dispatched step is the cross-harness write guard</p>
+<p>(<code>guard_harness</code> in <code>session.rs</code>, invoked from <code>run_analyze</code>), and a new</p>
+<p>harness passes it unchanged; every other per-harness fact reaches the shell</p>
+<p>as seam data. Nothing in the Claude Code path moves ― that immobility is the</p>
+<p>contract this spec protects.</p>
+<h2>Non-goals</h2>
+<p>DSH (DeepSeek harness app) and any fourth harness are not supported: no</p>
+<p><code>Harness</code> variant, no input route, no store name, no format spec. DSH is the</p>
+<p>next candidate, tracked as a contribution, not a committed release item. See</p>
+<p><code>CONTRIBUTING.md</code> for what a new-harness proposal must bring (observable</p>
+<p>transcript and config formats, OSS-reproducible fixtures).</p>
+    <nav aria-label="Spec pages">
+      <ul class="prev-next">
+      <li><a rel="prev" href="./storage.html">← Storage Specification</a></li>
+      <li><a href="../specs.html">Specs index</a></li>
+      <li><a rel="next" href="./session-format.html">Session Format Specification →</a></li>
+      </ul>
+    </nav>
+    <p><a href="https://github.com/armaniacs/saniwalens/blob/main/docs/specs/harness.md">Source: harness.md</a></p>
+
+  </main>
+
+  <footer>
+    <p>
+      saniwalens ― MIT. Source on <a href="https://github.com/armaniacs/saniwalens">GitHub</a>.
+    </p>
+  </footer>
+</body>
+</html>

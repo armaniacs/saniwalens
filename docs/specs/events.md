@@ -33,60 +33,57 @@ New kinds are added additively as the adapter learns to recognise new signals
 (`session-format.md`); the schema's loose `kind` / `surface_*` columns
 (`storage.md`) absorb them without migration.
 
-Two kinds carry caveats that downstream reports must honour:
+Some kinds carry caveats that downstream reports must honour:
 
 - **`prompt`** stores a pointer `(source_path, source_line)` to the raw record,
-  not the prompt text — the text is recovered on demand by the future
+  not the prompt text. The text is recovered on demand by the future
   skill-extraction layer, keeping personal data out of the store (`storage.md`,
-  `.claude/rules/session-data-privacy.md`). This reserves the
-  prompt-clustering capability now so it survives transcript rotation.
+  `.claude/rules/session-data-privacy.md`) while reserving prompt clustering so
+  it survives transcript rotation.
 - **`permission_prompt`** is counted from the denial marker a denying entry
-  carries, falling back to denial text where there is none (`session-format.md`).
-  The marked half is as structural as any other kind; the fallback half is not,
-  so the friction wedge built on it (`surfaces.md`) stays labelled
-  lower-confidence — a transcript written before the marker existed is still
-  counted by an English phrase alone.
-- **`tool_error`** keeps a short, bounded **excerpt** of the error text — unlike
-  `prompt`, which stores only a pointer. The asymmetry is deliberate: prompt text
-  is large and wholesale-sensitive and is needed in full only by a later layer,
-  so a pointer defers the cost; an error excerpt is small and its *value is the
-  concrete instance* (the actual failing path), which a report shows directly.
-  It lives only in the local store (gitignored, never committed), so the privacy
-  rule — no real data in the repo — still holds.
-- A `tool_error`'s friction category (`core::friction`) follows two precedence
-  rules. First, **a concrete cause beats `cancelled`**: the interruption
-  patterns are checked only after every specific cause (path-not-found,
-  edit-precondition, …), so a real failure with an interruption-like fragment
-  appended keeps its cause instead of vanishing into the non-actionable
-  `cancelled` bucket. Second, **short interruption fragments require the whole
-  message**: `tool execution aborted` and `task cancelled` classify as
-  `cancelled` only when they are the entire (trimmed, case-insensitive) error
-  text — project content merely mentioning them is not a user stop. Longer,
-  tool-specific stop markers (`cancelled: parallel tool call`, `request
-  interrupted by user`, …) still match by containment.
+  carries, falling back to denial text where there is none
+  (`session-format.md`). The marked half is as structural as any other kind; the
+  fallback half is not (a transcript written before the marker existed is still
+  counted by an English phrase alone), so the friction wedge built on it
+  (`surfaces.md`) stays labelled lower-confidence.
+- **`tool_error`** keeps a short, bounded **excerpt** of the error text, unlike
+  `prompt`. The asymmetry is deliberate: prompt text is large, wholesale-sensitive,
+  and needed in full only by a later layer, so a pointer defers the cost; an
+  error excerpt is small and its *value is the concrete instance* (the actual
+  failing path), which a report shows directly. It lives only in the local
+  store, never in the repo, so the privacy rule still holds. Its friction
+  category (`core::friction`) follows two precedence rules:
+  - **A concrete cause beats `cancelled`.** Interruption patterns are checked
+    only after every specific cause (path-not-found, edit-precondition, …), so a
+    real failure with an interruption-like fragment appended keeps its cause
+    instead of vanishing into the non-actionable `cancelled` bucket.
+  - **Short interruption fragments require the whole message.**
+    `tool execution aborted` and `task cancelled` classify as `cancelled` only
+    when they are the entire (trimmed, case-insensitive) error text; project
+    content merely mentioning them is not a user stop. Longer, tool-specific
+    stop markers (`cancelled: parallel tool call`,
+    `request interrupted by user`, …) still match by containment.
+- **`file_edit`** stores the basename *and* the full path because they answer
+  different questions.
+  - A hotspot ranking wants the **basename**, the name a human recognises;
+    collapsing every `route.ts` into one row is the point. It is taken on
+    **either separator** (`core::path::basename`): a transcript spells paths the
+    way the machine that wrote it does, and the same file arrives both ways
+    within one session. Cutting on `/` alone let a backslash path stand in for
+    the name and one file compete against itself for a hotspot slot.
+  - Thrash detection wants the opposite. An episode claims *one agent kept
+    retrying this one file*, so it must distinguish two same-named files and two
+    sessions editing one file in parallel; with only the basename, `stuck`
+    reported parallel work as an agent stuck in a loop. Detection therefore
+    groups on `(session_id, path)` (the session implies the project;
+    `core::thrash`). The deliberate cost: thrash continuing across a resume or
+    `/clear` splits into one episode per session. A split under-reports a real
+    burst; a merge invents one that never happened, which is what makes the
+    report untrustworthy.
 
-- **`file_edit`** stores the basename *and* the full path because the two answer
-  different questions. A hotspot ranking wants the basename — it is the name a
-  human recognises, and collapsing every `route.ts` into one row is the point.
-  The name is taken on **either separator** (`core::path::basename`): a
-  transcript spells paths the way the machine that wrote it does, and the same
-  file arrives both ways within one session. Cutting on `/` alone left a
-  backslash path standing in for the name and let one file compete against
-  itself for a hotspot slot, so the list ranked spellings rather than files.
-  Thrash detection wants the opposite: an episode claims *one agent kept retrying
-  this one file*, so it must distinguish two same-named files, and two sessions
-  editing one file in parallel. Keeping only the basename made those
-  indistinguishable and let `stuck` report parallel work as an agent stuck in a
-  loop. Detection therefore groups on `(session_id, path)` — the session implies
-  the project, and the path is unique within it (`core::thrash`). The deliberate
-  cost: thrash continuing across a resume or `/clear` splits into one episode per
-  session. A split under-reports a real burst; a merge invents one that never
-  happened, and the merge is what makes the report untrustworthy.
-
-Surfaces that emit no event at all ― `rule` and `claude_md` ― never produce
-rows here. That is expected, not missing data; `surfaces.md` classifies them as
-catalog-only so their absence of events is never read as disuse. (Hooks used
-to be on this list; firing became observable, so they emit `hook_use`.)
+Surfaces that emit no event at all, `rule` and `claude_md`, never produce rows
+here. That is expected, not missing data: `surfaces.md` classifies them as
+catalog-only so their absence of events is never read as disuse.
 
 A **span** is an event with a duration window — currently `skill_invocation`.
 The rest of this spec is mostly about spans, since that is where boundary and
@@ -116,47 +113,41 @@ wall-clock.
 `IDLE_GAP` is a tuning constant injected into the core (not hard-wired), so
 tests pin it.
 
-## Meta-skills and nesting ― intentionally flat (spike decision, PBI 22)
+## Meta-skills and nesting ― intentionally flat
 
 Some skills drive other skills (`loop` repeatedly invokes `git-commit`,
-`code-review`, …). It is tempting to treat those inner calls as **children** of
-the driver and nest them under a `parent_id`. We deliberately do **not**, and a
-2026-11 design spike re-confirmed this against real transcripts instead of
-reversing it:
+`code-review`, …). It is tempting to nest those inner calls under the driver
+with a `parent_id`. We deliberately do not.
 
 Empirically, a meta-skill's "children" are recorded exactly like sequential
 top-level commands: each appears as its own `slash` invocation with its **own
-distinct `promptId`** — not the driver's, not a tool-path call, not a sidechain.
-There is no structural marker (`source`, `promptId`, nesting depth) that
-distinguishes "a skill `loop` ran" from "a skill the user ran next". Inferring
-nesting would require a fragile time-window or a hard-coded list of meta-skills.
-The spike checked every alternative against real transcripts and found each
-one unsound or out of scope:
+distinct `promptId`**, not the driver's, not a tool-path call, not a sidechain.
+No structural marker (`source`, `promptId`, nesting depth) distinguishes "a
+skill `loop` ran" from "a skill the user ran next". Inferring nesting would need
+a fragile time window or a hard-coded list of meta-skills.
 
 So the model stays flat: each invocation is its own span, and the boundary rules
-(next human turn / next skill / idle gap) apply uniformly. This is not a loss of
-accuracy — a child's cost is correctly attributed to the child (`git-commit`'s
-tokens land on `git-commit`); the driver's own small span reflects that it is an
-orchestrator, not the place the work happened. Reports therefore never
-double-count, and need no parent-inclusive/exclusive distinction.
+(next human turn / next skill / idle gap) apply uniformly. This loses no
+accuracy: a child's cost is correctly attributed to the child (`git-commit`'s
+tokens land on `git-commit`), and the driver's own small span reflects that it
+is an orchestrator, not the place the work happened. Reports never double-count
+and need no parent-inclusive/exclusive distinction. The one thing attributable
+across the boundary is subagent cost, which carries a real join key (below).
 
-The one thing that *is* attributable across the boundary is subagent cost, which
-carries a real join key — see below.
-
-Candidates the spike rejected, with reasons:
+Alternatives checked against real transcripts and rejected:
 
 - **Time-window containment** ("B's span inside A's span ⇒ nested"): sequential
-  siblings nest temporally too ― an agent running skill A over 1-10s and skill
-  B over 3-5s looks identical with or without nesting. Attributing on this
+  siblings nest temporally too. An agent running skill A over 1-10s and skill B
+  over 3-5s looks identical with or without nesting, so attributing on this
   would corrupt the cost join the tool exists to keep honest.
-- **Turn-boundary rule** (no human turn between ⇒ nested): absence of a human
-  turn proves nothing; consecutive invocations in one assistant stretch are as
-  often sequential follow-ups as nested calls.
+- **Turn-boundary rule** (no human turn between ⇒ nested): the absence of a
+  human turn proves nothing; consecutive invocations in one assistant stretch
+  are as often sequential follow-ups as nested calls.
 - **`parentUuid` tree branches**: branches in real transcripts are attachment
-  records (hook results, file snapshots) riding alongside the next message ―
-  parallel metadata, not nested execution. The main line stays a chain.
+  records (hook results, file snapshots) riding alongside the next message,
+  which is parallel metadata, not nested execution. The main line stays a chain.
 - **Hard-coded meta-skill names**: breaks on the first rename and can never
-  cover user-defined loops; the PBI itself flags this as irrecoverable.
+  cover user-defined loops.
 
 ## Metrics
 
@@ -176,22 +167,20 @@ Each metric is computed from the records strictly within the event/span.
 
 ### One message, several records
 
-An `assistant` record is one transcript line, and one API response is written
-as several lines whose usage objects repeat or accumulate the same output
-(`session-format.md`). Summed naively, a response is charged once per line —
-and the factor varies by skill (how often the model thinks before it acts), so
-the error reorders skill rankings rather than merely inflating every figure.
+One API response is written as several transcript lines whose usage objects
+repeat or accumulate the same output (`session-format.md`). Summed naively, a
+response is charged once per line, and the factor varies by skill (how often the
+model thinks before it acts), so the error reorders skill rankings rather than
+merely inflating every figure.
 
-The core does not see this. The adapter reconciles the lines of a response as
-it parses, so each record's `out_tokens` is only the output that record is the
-first to report; the core sums records exactly as the definition above says
-and every response lands once. This keeps the layout knowledge where the
-format-isolation rule wants it, and it also settles the boundary case: when a
-span closes between two lines of one response (the response thought inside
-one skill and then invoked the next), the output is charged to the span that
-saw it first, never to both. Every line still yields a record, so
-`ctx_growth`, `ctx_start`, `ctx_peak` and `duration_sec` see the same
-timestamps and prompt sizes they always did.
+The core does not see this. The adapter reconciles the lines of a response as it
+parses, so each record's `out_tokens` is only the output that record is the
+first to report, and the core's plain sum lands every response once. This keeps
+layout knowledge where the format-isolation rule wants it, and it settles the
+boundary case: when a span closes between two lines of one response, the output
+is charged to the span that saw it first, never to both. Every line still yields
+a record, so `ctx_growth`, `ctx_start`, `ctx_peak`, and `duration_sec` see every
+line's timestamp and prompt size.
 
 ### Why `ctx_growth`, not max-minus-start
 

@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Not found ― saniwalens</title>
+  <meta name="color-scheme" content="light dark">
+  <script>
+    try {
+      document.querySelector('meta[name="color-scheme"]').content =
+        localStorage.getItem("color-scheme") ?? "light dark";
+    } catch (e) {}
+  </script>
+  <link rel="icon" type="image/svg+xml" href="./assets/favicon.svg">
+  <meta name="theme-color" content="#1a1a24">
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="site-header is-wide">
+    <div class="header-inner">
+      <a class="site-logo" href="./index.html" aria-label="saniwalens home"><img src="./assets/favicon.svg" alt="" aria-hidden="true" width="28" height="28">saniwalens</a>
+    </div>
+  </header>
+  <main id="main">
+    <h1>Not found</h1>
+    <p>The page you asked for is not here. Try the <a href="./index.html">home page</a> or the <a href="./docs.html">docs</a>.</p>
+  </main>
+</body>
+</html>

@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Session Format Specification ― opencode ― saniwalens</title>
+  <meta name="description" content="saniwalens spec session-format-opencode.md, mirrored from docs/specs/.">
+  <meta name="color-scheme" content="light dark">
+  <script>
+    try {
+      document.querySelector('meta[name="color-scheme"]').content =
+        localStorage.getItem("color-scheme") ?? "light dark";
+    } catch (e) {}
+  </script>
+  <link rel="icon" type="image/svg+xml" href="../assets/favicon.svg">
+  <meta name="theme-color" content="#1a1a24">
+  <link rel="stylesheet" href="../styles.css">
+  <script defer src="../app.js"></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <header class="site-header">
+    <div class="header-inner">
+      <a class="site-logo" href="../index.html" aria-label="saniwalens home"><img src="../assets/favicon.svg" alt="" aria-hidden="true" width="28" height="28">saniwalens</a>
+
+      <nav class="site-nav" aria-label="Primary">
+        <button
+          class="menu-button"
+          type="button"
+          popovertarget="site-menu"
+          popovertargetaction="toggle"
+          aria-controls="site-menu"
+        >
+          <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+            <path d="M2 4h12M2 8h12M2 12h12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" fill="none"/>
+          </svg>
+          <span>Menu</span>
+        </button>
+
+        <ul id="site-menu" class="site-menu" popover="auto">
+          <li><a href="../index.html">Home</a></li>
+          <li><a href="../docs.html">Docs</a></li>
+          <li><a href="../specs.html" aria-current="page">Specs</a></li>
+          <li><a href="../cli.html">CLI</a></li>
+          <li><a href="https://github.com/armaniacs/saniwalens">GitHub</a></li>
+          <li><a href="../index_ja.html">日本語</a></li>
+        </ul>
+      </nav>
+
+      <button
+        id="theme-toggle"
+        class="theme-toggle"
+        type="button"
+        aria-live="polite"
+      >
+        <span class="theme-toggle-dark" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 16 16" focusable="false"><path d="M14 10.2A6 6 0 0 1 5.8 2 6 6 0 1 0 14 10.2Z" fill="currentColor"/></svg></span>
+        <span class="theme-toggle-light" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 16 16" focusable="false"><circle cx="8" cy="8" r="3.2" fill="currentColor"/><g stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M8 1v1.8M8 13.2V15M1 8h1.8M13.2 8H15M3 3l1.3 1.3M11.7 11.7 13 13M13 3l-1.3 1.3M4.3 11.7 3 13"/></g></svg></span>
+        <span class="visually-hidden" id="theme-toggle-label">Switch to dark theme</span>
+      </button>
+    </div>
+  </header>
+
+  <main id="main">
+    <h1>Session Format Specification ― opencode</h1>
+<p>This spec catalogues what the <strong>adapter layer</strong> knows about the **opencode</p>
+<p>session** format ― the usage half for the opencode harness. Its Claude Code</p>
+<p>sibling is <code>session-format.md</code>; the two specs share the same downstream</p>
+<p>contract (the internal domain model, <code>core::span::Record</code>) but describe</p>
+<p>different upstream shapes. Only the adapter may use the field names below</p>
+<p>(<code>.claude/rules/format-isolation.md</code>). The opencode store is <strong>separate</strong> from</p>
+<p>the Claude Code store (one DB per harness), so nothing here constrains the</p>
+<p>Claude Code mapping, and vice versa.</p>
+<blockquote>
+<p>Observed against a real <code>~/.local/share/opencode/opencode.db</code> (opencode</p>
+<p><code>1.x</code>, SQLite via drizzle) plus its file mirror under</p>
+<p><code>project/global/storage/session/</code>. Counts drift as sessions accumulate; the</p>
+<p><strong>shapes</strong> are what matter. The database is the source of record ― the file</p>
+<p>mirror carries the same content and is not read.</p>
+</blockquote>
+<h2>Where sessions live</h2>
+<pre><code class="language-sql">
+-- ~/.local/share/opencode/opencode.db
+
+
+session(id, project_id, directory, title, agent, model,
+
+
+        tokens_input, tokens_output, cost, time_created, time_updated, ...)
+
+
+message(id, session_id, time_created, time_updated, data JSON)
+
+
+part(id, message_id, session_id, time_created, time_updated, data JSON)
+
+
+</code></pre>
+<ul>
+<li><code>session.directory</code> is the <strong>real working directory</strong> ― no lossy slug</li>
+</ul>
+<p>encoding, so unlike Claude Code there is nothing to recover from record</p>
+<p>fields. Project-config scanning walks these directories directly.</p>
+<ul>
+<li>All timestamps are <strong>milliseconds since the Unix epoch</strong> (13 digits), UTC.</li>
+</ul>
+<p><code>message.time_created</code> orders the transcript; <code>part</code> rows carry their own</p>
+<p><code>state.time{start,end}</code> where the tool ran.</p>
+<ul>
+<li><code>message.data</code> and <code>part.data</code> are JSON blobs. The adapter reads only the</li>
+</ul>
+<p>fields below and ignores the rest; unknown <code>type</code> values are skipped.</p>
+<h2>Records the adapter reads</h2>
+<h3><code>message</code> ― one row per turn</h3>
+<p><code>data.role</code> is <code>user</code> or <code>assistant</code>.</p>
+<p>Assistant (<code>role == assistant</code>) carries the whole turn&#x27;s cost in one place:</p>
+<ul>
+<li><code>data.tokens{input, output, reasoning, cache{read, write}}</code> ― verified</li>
+</ul>
+<p>identical to the same message&#x27;s <code>step-finish</code> part (`total ==</p>
+<p>input+output+reasoning<code>), and at most one </code>step-finish` part exists per</p>
+<p>message. So <strong>message-level tokens are authoritative</strong> and the adapter never</p>
+<p>sums <code>step-finish</code> rows ― there is no multi-line repetition to reconcile</p>
+<p>(the Claude Code <code>message.id</code> problem does not exist here).</p>
+<ul>
+<li><code>data.modelID</code> (e.g. <code>preview/GLM-5.3-Flash</code>) ― the representative model.</li>
+</ul>
+<p>Absent → <code>&quot;unknown&quot;</code> (honest, never a guess).</p>
+<ul>
+<li><code>data.agent</code> / <code>data.mode</code> (e.g. <code>build</code>) ― the running agent.</li>
+<li><code>data.path{cwd, root}</code> ― per-message working directory (informational; the</li>
+</ul>
+<p>session root comes from <code>session.directory</code>).</p>
+<ul>
+<li><code>data.error{name, data{message, statusCode, ...}}</code> ― a failed request</li>
+</ul>
+<p>(e.g. provider <code>APIError</code>). Still yields its record with whatever tokens it</p>
+<p>carries (usually zero); the error half is friction input, not a reason to</p>
+<p>drop the row.</p>
+<ul>
+<li><code>data.parentID</code> ― the reply-chain link. Used as the coarse spawn key</li>
+</ul>
+<p>(below), the way <code>promptId</code> is for Claude Code.</p>
+<p>User (<code>role == user</code>) rows hold <code>part</code> children of type <code>text</code> (the prompt)</p>
+<p>and <code>file</code> (attachments). A user message yields a <code>HumanTurn</code> **only when it</p>
+<p>has a <code>text</code> or <code>file</code> part** ― <code>compaction</code> parts also hang under user</p>
+<p>messages and must not delimit spans.</p>
+<p><code>session.title</code> is a generated summary, not a prompt ― never read as one.</p>
+<h3><code>part</code> ― one row per content block or tool call</h3>
+<p><code>data.type</code> decides the mapping:</p>
+<div class="table-scroll" role="region" tabindex="0">
+<table><thead><tr>
+<th scope="col"><code>type</code></th>
+<th scope="col">Mapping</th>
+</tr></thead><tbody>
+<tr>
+<th scope="row"><code>text</code> (under user message)</th scope="row">
+<td>part of the human turn (prompt material)</td>
+</tr>
+<tr>
+<th scope="row"><code>text</code> / <code>reasoning</code> (under assistant message)</th scope="row">
+<td>display only ― cost already on the message row; no record</td>
+</tr>
+<tr>
+<th scope="row"><code>tool</code> with <code>tool == &quot;skill&quot;</code></th scope="row">
+<td><code>SkillInvocation{skill: input.name, source: Tool}</code></td>
+</tr>
+<tr>
+<th scope="row"><code>tool</code> with <code>tool == &quot;task&quot;</code></th scope="row">
+<td><code>AgentSpawn{agent: input.subagent_type, tool_use_id: callID, prompt_id: message.parentID}</code></td>
+</tr>
+<tr>
+<th scope="row"><code>tool</code> with any other <code>tool</code></th scope="row">
+<td><code>ToolUse{tool}</code> (observed: <code>read</code>, <code>bash</code>, <code>edit</code>, <code>write</code>, <code>glob</code>, <code>grep</code>, <code>todowrite</code>, <code>question</code>, <code>webfetch</code>, …)</td>
+</tr>
+<tr>
+<th scope="row"><code>tool</code> with <code>tool == &quot;skill_use&quot;</code></th scope="row">
+<td><strong>ignored</strong> ― this loads skills into context (<code>input.skill_names</code>), it is not an invocation. Counting it would double-count <code>tool == &quot;skill&quot;</code> rows</td>
+</tr>
+<tr>
+<th scope="row"><code>type == &quot;subtask&quot;</code></th scope="row">
+<td><strong>ignored (child-side mirror)</strong> ― carries <code>{agent, command, model, prompt}</code> for a spawn whose parent-side <code>task</code> part already emitted the <code>AgentSpawn</code>. Emitting both would double-count agent usage</td>
+</tr>
+<tr>
+<th scope="row"><code>type == &quot;step-start&quot;</code> / <code>&quot;step-finish&quot;</code></th scope="row">
+<td>structural/cost echo ― message tokens already counted; no record</td>
+</tr>
+<tr>
+<th scope="row"><code>type == &quot;compaction&quot;</code></th scope="row">
+<td>compaction marker (<code>{auto, overflow, tail_start_id}</code>); the context metric is compaction-safe without it (<code>events.md</code>); no record</td>
+</tr>
+<tr>
+<th scope="row"><code>type == &quot;file&quot;</code></th scope="row">
+<td>attachment pointer; no record</td>
+</tr>
+</tbody></table></div>
+<p>Record order within a session is <code>message.time_created</code> (ties broken by</p>
+<p><code>message.id</code>), and within a message the part-derived records come <strong>before</strong></p>
+<p>that message&#x27;s <code>Assistant</code> cost record ― so a skill span opens at the</p>
+<p>invocation and includes the calling turn&#x27;s cost, mirroring the Claude Code</p>
+<p>adapter&#x27;s ordering. The cost record is stamped with the turn&#x27;s *end* (the</p>
+<p>latest part time, falling back to the message time): tools run after their</p>
+<p>message is created, so stamping the creation time would invert the stream and</p>
+<p>produce negative span durations. Part timestamps use <code>state.time.start</code>,</p>
+<p>falling back to the owning message&#x27;s <code>time_created</code>.</p>
+<h2>Usage signals the adapter extracts</h2>
+<div class="table-scroll" role="region" tabindex="0">
+<table><thead><tr>
+<th scope="col">Signal</th>
+<th scope="col">Where</th>
+</tr></thead><tbody>
+<tr>
+<th scope="row">Skill invocation</th scope="row">
+<td><code>part.tool == &quot;skill&quot;</code>, <code>input.name</code></td>
+</tr>
+<tr>
+<th scope="row">Subagent spawn</th scope="row">
+<td><code>part.tool == &quot;task&quot;</code> (<code>input.subagent_type</code>, <code>callID</code>); coarse key <code>message.parentID</code></td>
+</tr>
+<tr>
+<th scope="row">Tool use</th scope="row">
+<td><code>part.tool</code> (any other name)</td>
+</tr>
+<tr>
+<th scope="row">User prompt</th scope="row">
+<td>user message with a <code>text</code>/<code>file</code> part</td>
+</tr>
+<tr>
+<th scope="row">Tool failure</th scope="row">
+<td><code>part.state.status == &quot;error&quot;</code>, text from <code>state.error</code>. Target from the input&#x27;s first present key of <code>filePath</code>, <code>file_path</code>, <code>path</code>, <code>command</code>, <code>pattern</code>, <code>url</code> (opencode spells it <code>filePath</code>)</td>
+</tr>
+<tr>
+<th scope="row">Permission denial</th scope="row">
+<td><strong>none observed</strong> ― <code>opencode.json</code>&#x27;s <code>permission</code> table (allow/ask/deny) is static config with no runtime marker found. No heuristic fallback is invented; the signal is absent until a marker is found</td>
+</tr>
+<tr>
+<th scope="row">Compaction</th scope="row">
+<td><code>part.type == &quot;compaction&quot;</code> (informational only)</td>
+</tr>
+</tbody></table></div>
+<p>Failure text is classified with the shared <code>core::friction</code> vocabulary, which</p>
+<p>was tuned on Claude Code phrasings. An opencode phrasing outside that</p>
+<p>vocabulary (e.g. <code>Cannot read binary file</code>) lands in <code>Other</code> with its tool,</p>
+<p>target, and excerpt intact ― never dropped. Teaching the classifier new</p>
+<p>phrasings is a cross-harness change (it re-labels already-ingested Claude Code</p>
+<p>sessions, so it needs an <code>ANALYZER_VERSION</code> bump) and is out of scope here.</p>
+<p>**<code>prompt_size</code> is a documented assumption.** opencode reports <code>input</code> plus</p>
+<p><code>cache{read, write}</code> but never states whether <code>input</code> already includes cached</p>
+<p>tokens. The adapter mirrors the Claude Code sum ― `prompt_size = input +</p>
+<p>cache.read + cache.write<code> ― so </code>ctx_growth<code>/</code>ctx_start<code>/</code>ctx_peak` keep their</p>
+<p>meaning. If opencode&#x27;s <code>input</code> already includes cache reads this overstates</p>
+<p>the floor; the <code>overhead</code> reconciliation (<code>surfaces.md</code>) is the honest check,</p>
+<p>and this paragraph is where the assumption is versioned when opencode</p>
+<p>documents it.</p>
+<h2>Subagent linkage (per-run costs)</h2>
+<p>A <code>task</code> spawn is exact on the parent side (<code>callID</code>). opencode runs subagents</p>
+<p>in-session, so there is no sidecar transcript, but each <code>task</code> tool part names</p>
+<p>the run&#x27;s own session in <code>state.metadata.sessionId</code>, and that id joins</p>
+<p><code>session.id</code>. A part whose <code>sessionId</code> matches a session in the snapshot becomes</p>
+<p>one <code>subagent_runs</code> row:</p>
+<ul>
+<li>the agent type from <code>input.subagent_type</code>;</li>
+<li>the parent&#x27;s <code>callID</code> as the join key both sides share (<code>tool_use_id</code> and</li>
+</ul>
+<p><code>root_tool_use_id</code>);</p>
+<ul>
+<li>the model from <code>state.metadata.model.modelID</code>;</li>
+<li><code>out_tokens</code> summed from the child session&#x27;s own assistant cost rows;</li>
+<li>the locator <code>opencode:&lt;child session id&gt;</code>: there is no per-run transcript</li>
+</ul>
+<p>file, so the child session id (joinable back to <code>sessions.id</code>) stands in for</p>
+<p>the sidecar path a Claude Code run carries.</p>
+<p>Spawns count agent-surface usage independently of the run rows.</p>
+<p>Attribution reuses the shared join (<code>core::usage::attribute_subagents</code>): runs</p>
+<p>are built per parent session and matched only against that session&#x27;s spans, so a</p>
+<p><code>callID</code> that repeats in another session can never misattribute (the scoping the</p>
+<p>storage join contract requires). Parts that name no session, or a session</p>
+<p>outside the snapshot, write no run, and the session totals still carry the</p>
+<p>spend. Nested spawns (a <code>task</code> part inside a child session) write their own</p>
+<p>depth-1 rows and stay unattributed until the nesting join exists.</p>
+<h2>What is deliberately not mapped (v1)</h2>
+<ul>
+<li>Slash-command invocations typed by the human (<code>/review</code> etc.) ― user text</li>
+</ul>
+<p>has no structural command wrapper (unlike Claude Code&#x27;s <code>&lt;command-name&gt;</code>),</p>
+<p>and substring-matching prompts would misread prose discussing commands.</p>
+<ul>
+<li><code>skill_use</code> and <code>subtask</code> parts (above) ― context loading and child-side</li>
+</ul>
+<p>mirrors, not invocations.</p>
+<ul>
+<li><code>data.cost</code> (per message, per <code>step-finish</code>) ― billing-adjacent and</li>
+</ul>
+<p>provider-specific; counts are usage signals for ranking, not a ledger</p>
+<p>(<code>architecture.md</code>).</p>
+<ul>
+<li>Config surfaces (<code>opencode.json</code>, commands, agents, MCP): the catalog half is</li>
+</ul>
+<p><code>config-format-opencode.md</code>.</p>
+<h2>Forward compatibility</h2>
+<p>Read only the fields above; ignore unknown <code>type</code>/<code>tool</code> values and missing</p>
+<p>optional keys. A new opencode tool appears as a generic <code>ToolUse</code> (still</p>
+<p>counted in usage), never as a break. <code>tool == &quot;invalid&quot;</code> (the model called a</p>
+<p>tool that does not exist) maps to <code>ToolUse{tool: &quot;invalid&quot;}</code> ― it is a model</p>
+<p>mistake worth counting, not a parse failure.</p>
+<h2>Golden regression policy</h2>
+<p><code>tests/e2e_golden_harness.rs</code> pins this harness&#x27;s analyze output</p>
+<p>(<code>tests/golden/opencode.txt</code>): the same synthetic fixture must always</p>
+<p>produce the same stored rows. An intentional output change re-blesses with</p>
+<p><code>UPDATE_GOLDEN=1</code> ― and the diff is reviewed before committing, never</p>
+<p>blindly regenerated.</p>
+    <nav aria-label="Spec pages">
+      <ul class="prev-next">
+      <li><a rel="prev" href="./session-format.html">← Session Format Specification</a></li>
+      <li><a href="../specs.html">Specs index</a></li>
+      <li><a rel="next" href="./session-format-kilocode.html">Session Format Specification ― kilocode →</a></li>
+      </ul>
+    </nav>
+    <p><a href="https://github.com/armaniacs/saniwalens/blob/main/docs/specs/session-format-opencode.md">Source: session-format-opencode.md</a></p>
+
+  </main>
+
+  <footer>
+    <p>
+      saniwalens ― MIT. Source on <a href="https://github.com/armaniacs/saniwalens">GitHub</a>.
+    </p>
+  </footer>
+</body>
+</html>

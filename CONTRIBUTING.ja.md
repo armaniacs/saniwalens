@@ -6,64 +6,103 @@
 
 <!-- README-I18N:END -->
 
-saniwalensへのコントリビュート手順と、とくに新しいエージェント(ハーネス)対応を提案するときの材料をまとめます。
+saniwalens へのコントリビュート手順と、新しいエージェント（harness）の対応を
+提案するときに用意してほしい材料をまとめます。
 
-## 前提:このプロジェクトの作法
+## 前提: このプロジェクトの作法
 
-saniwalensは仕様駆動・テスト駆動で作られています。コードを書く前に、次の3点を押さえてください。詳しくは`AGENTS.md`と`.claude/rules/`にあります。
+saniwalens は仕様駆動・テスト駆動で作られています。コードを書く前に、次の
+4 点を押さえてください。詳しくは `AGENTS.md` と `.claude/rules/` にあります。
 
-- 仕様優先(spec first):`docs/specs/`が設計意図(なぜ・契約)を持ちます。振る舞いを変えるときは、同じ変更で owning specを更新します。対応表は`.claude/rules/spec-sync.md`にあります。
-- テスト優先(test first):RedからGreenへ、t-wada式です。分析コア(recordsからeventsへ、集計)は純粋・I/Oなしに保ち、小さな合成fixtureで単体テストします(`.claude/rules/tdd.md`)。
-- プライバシー重視:実トランスクリプト・実コンフィグには個人情報や秘密が混ざります。テストfixtureは合成のみとし、採取した実データ・生成DBはコミットしません(`.claude/rules/session-data-privacy.md`)。
-- ユーザー向けの仕事はPBI優先:いつもの進め方(PBIを作って)で進めるときは、実装前に`pbi/YYYY-MM-DD-NN-<type>-<slug>.md`を書きます。実装はサブエージェント駆動で行います。詳しくは`AGENTS.md`を見てください。
+- **仕様が先。** `docs/specs/` が設計意図（なぜ・契約）を持ちます。振る舞いを
+  変えるときは、同じ変更で対応する spec も更新します。対応表は
+  `.claude/rules/spec-sync.md` です。
+- **テストが先。** Red から Green へ、t-wada 式で進めます。分析コア
+  （records から events、集計まで）は純粋に保ち、I/O を持ち込みません。小さな
+  合成 fixture で単体テストできる状態を保つためです（`.claude/rules/tdd.md`）。
+- **プライバシーは譲れない制約。** 実際の transcript や設定には個人情報や秘密が
+  混ざります。fixture は合成データだけを使い、採取した実データや生成した DB は
+  コミットしません（`.claude/rules/session-data-privacy.md`）。
+- **ユーザー向けの変更は PBI が先。** 実装の前に
+  `pbi/YYYY-MM-DD-NN-<type>-<slug>.md` を書き、実装はサブエージェントを使って
+  進めます。詳しくは `AGENTS.md` を見てください。
 
 ## 開発環境
 
 ```sh
-nix develop          # 固定のrust、just、sqliteなどが入る開発シェル
+nix develop          # 固定の rust・just・sqlite などが入る開発シェル
 just                 # タスク一覧
-just check           # rustfmt --check + clippy(CIの関門)
+just check           # rustfmt --check + clippy（CI の関門）
 just test            # cargo test
-just build           # target/release/saniwalensにリリースバイナリ
+just build           # target/release/saniwalens にリリースバイナリ
 ```
 
-nix/justなしで同じタスクを回す `make` もある:
+nix や just なしで同じタスクを回すなら `make` も使えます（`make install` は
+`~/.local/bin` に入れ、`PREFIX=/usr/local` で変更できます）。素の Cargo でも
+動きます（`cargo build --release`）。CI は `nix develop -c just check` と
+`just test` を実行します。
 
-```sh
-make                 # ターゲット一覧
-make check           # rustfmt --check + clippy(CIの関門)
-make test            # cargo test
-make build           # target/release/saniwalensにリリースバイナリ
-make install         # ~/.local/binにインストール(PREFIX=/usr/localで変更可)
-```
+## Issue と PR
 
-素のCargoでも動きます(`cargo build --release`)。CIは`nix develop -c just check`と`just test`を回します。
+- **バグ報告:** 使った `--harness`、再現するコマンド、期待した出力と実際の出力を
+  書いてください。実際の transcript や設定は貼らず、合成した最小の例に
+  置き換えてください。
+- **機能の提案:** 先に Issue で相談してください。新しい harness については
+  次の節を読んでください。
+- **PR:** 小さく、1 つの関心事に絞ります。spec の更新とテストも含めてください。
 
-## IssueとPR
+## 新しい harness の対応を提案するとき
 
-- バグ報告は、使った`--harness`、再現するコマンド、期待と実際の出力を書いてください。実トランスクリプトや実コンフィグそのものは貼らず、合成の最小例に置き換えてください。
-- 新機能の提案は、先にIssueで相談してもらえると助かります。とくに新しいハーネス対応は下の節を読んでください。
-- PRは小さく、1つの関心に絞ります。spec更新とテストを含めてください。
+メンテナはもともと Claude Code を使っていて、VS Code で Kilo Code も使い始め、
+OpenAI 互換のエンドポイント（さくらの AI エンジン）を経て Opencode Go に
+移りました。いま日常で使っているのは opencode v2 で、最近使い始めた
+DeepSeek harness アプリ（DSH）が次の対応候補です。触っていないエージェントが
+多いので、対応してほしいものがあれば教えてください。Issue には次を書いて
+ください。
 
-## 新しいハーネス対応を提案するとき
+- エージェント名と版（例: opencode v2、Kilo Code、DSH アプリ版）
+- セッション記録の置き場所と形式（パス、JSONL か DB か、版で変わる点）
+- 設定ファイルの置き場所と形式（skills、rules、agents、MCP、memory、
+  `AGENTS.md` に相当するものの有無）
+- そのエージェントで毎回かかっているコストの実感（常時読み込みの量、重い定義など）
 
-メンテナの利用状況を先に開示します。もともとClaude Codeを使い、Kilo CodeをVS Codeと合わせて使いはじめ、kiloの無料エンドポイント主体からOpenAI互換のエンドポイント(さくらのAI エンジン)へ移り、Opencode Goを使うようになりました。現状いちばん使っているのはopencode v2です。最近はDeepSeekハーネスのアプリ版を使いはじめたので、次の対応候補にしています。触っていないエージェントが多数あるため、対応してほしいエージェントのおすすめを歓迎します。Issueで次の形で教えてください。
+対応できるかどうかは、OpenAI 互換のエンドポイントを指定できるかでは決まり
+ません。新しい harness に必要なのは次の 3 点です。
 
-- エージェント名と版(例:opencode v2、Kilo Code、DSH アプリ版)
-- セッション記録の置き場所と形式(ファイルパス、JSONLかDBか、版で変わる点)
-- 設定ファイルの置き場所と形式(skills、rules、agents、MCP、memory、`AGENTS.md`相当の有無)
-- あなたがそのエージェントで毎回払っているコスト感(常時読み込みの量、重い定義など)
+1. **観測できる形式。** セッション記録と設定ファイルの読み方が、実機がなくても
+   分かること。ドキュメントか、再現手順つきの説明が必要です。
+2. **OSS で再現できること。** fixture を合成で作れ、リポジトリに入れて CI で
+   回せること。非公開のバイナリやアカウントがないと確認できない形式は、検証も
+   保守もできません。
+3. **続けていける見通し。** 上流の形式変更に追従できること。頻繁に壊れる形式は、
+   adapter 層での隔離だけでは支えきれません
+   （`docs/specs/architecture.md`、`.claude/rules/format-isolation.md`）。
 
-ただし、対応可否はエンドポイント互換では決まりません。OpenAI互換のエンドポイントを指定できるエージェントかどうかは、対応の条件ではありません。対応に必要なのは、次の3点です。
+クローズドなエージェントや OpenAI 互換のエンドポイントを持たないエージェントは、
+この 3 点がそろわないことが多く、対応が難しくなります。ただし、エンドポイントの
+種類やライセンスだけを理由に断ることはありません。まず Issue で材料を集めて
+ください。最初の相談は fixture の作り方からで構いません。
 
-1. 観測可能な形式:セッション記録と設定ファイルの読み方が、実機がなくても分かること。ドキュメントか、再現手順つきの説明が必要です。
-2. OSS由来の再現性:テストfixtureを合成で作れ、リポジトリに載せてCIで回せること。非公開のバイナリやアカウントがないと確認できない形式は、こちらで検証も保守もできません。
-3. 継続の見通し:上流の形式変更に追従できること。形式が頻繁に割れるものは、adapter層の隔離(`docs/specs/architecture.md`、`.claude/rules/format-isolation.md`)だけでは支えきれません。
+技術的な受け入れ条件は、`docs/specs/harness.md` の Forward compatibility 節に
+あります。新しい harness は、`Harness` の列挙子、既定の入力ルートとストア名、
+形式の spec、analyzer-version 鍵つきの adapter モジュールを、`Harness::analyze`
+の後ろに足す形で入ります。Claude Code の経路は変わりません。
 
-OSSでないエージェントや、OpenAI互換のエンドポイントを指定できないエージェントの場合、上記1から3の材料がそろわないことが多く、対応がむずかしくなります。材料がそろうなら、エンドポイントの種類やOSSかどうかだけで断ることはありません。まずIssueで材料をそろえ、fixtureの作り方から相談してください。
+## リリース（メンテナ向けメモ）
 
-技術的な受け入れ条件は`docs/specs/harness.md`のForward compatibility節にあります。新ハーネスは`Harness`の列挙子、既定の入力ルートとストア名、形式spec、analyzer-version鍵つきのadapterモジュールを、`Harness::analyze`の後ろに足す形になります。Claude Code側の振る舞いは変えません。
+版番号はタグだけが持ちます。`Cargo.toml` の `0.0.0` は仮置きで、リリース
+ワークフローがタグから書き換えます。CHANGELOG の Unreleased を版にまとめ、
+README・spec・`--help` の文面が一致していることを確かめてから、タグを切ります。
 
-## リリース時のお願い(メンテナ向けメモ)
+`vX.Y.Z` タグで GitHub Release を公開すると、次の処理が走ります。
 
-版番号はタグだけが持ちます。`Cargo.toml`の`0.0.0`は仮置きで、リリースワークフローがタグから書き換えます。CHANGELOGのUnreleasedを版に倒し、READMEとspecと`--help`の文面が一致していることを確かめてからタグを切ります。
+- Linux・macOS・Windows（x86_64 と arm64）のバイナリをビルドし、`.sha256` つきで
+  Release に添付する。
+- [`armaniacs/homebrew-saniwalens`](https://github.com/armaniacs/homebrew-saniwalens)
+  の tap を新しいアーカイブに向ける（tap は Linux と macOS のみ）。
+- crate を crates.io に公開する。
+
+Release は成果物より先に公開されるので、数分間は本文だけが見える状態になります。
+flake は、タグを教えなくても版を刻めます。`VERSION` が `export-subst` の印を
+持っているため、GitHub が配るタグのアーカイブにタグ名が入るからです
+（[nix-github-release](https://github.com/lambdalisue/nix-github-release) 参照）。

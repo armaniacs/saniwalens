@@ -12,23 +12,25 @@ that tracks an upstream format and will drift.
 
 ## Where config lives
 
-Config exists at two scopes; project overrides/extends global. The adapter scans
-both and records the scope on each surface ― `Scope::Project` carries the
+Config exists at two scopes; project overrides or extends global. The adapter
+scans both and records the scope on each surface: `Scope::Project` carries the
 owning project's normalized slug, since many projects coexist in one catalog
-(`storage.md`). Which project roots get scanned is driven by the *sessions*:
-`analyze` collects the distinct real session roots (`session-format.md`, the
-records' `cwd`, worktree folded onto the parent checkout) and hands them to the
-one traversal, `catalog_surfaces(harness, roots)` (`adapter::harness`), which
-builds each scope, owns the symlink-dedup set, and skips a root that was deleted
-since its sessions ran. What a harness scans is its **site rows** ― a path plus
-a loader (`Site`, listed per harness as `global_sites` / `project_sites`) ― so a
-new surface kind is a row and a loader, never an edit to that traversal;
-`read_project_surfaces` in `adapter/config.rs` remains the direct single-root
-entry point the tests drive.
+(`storage.md`).
+
+Which project roots get scanned is driven by the *sessions*. `analyze` collects
+the distinct real session roots (`session-format.md`: the records' `cwd`,
+worktree folded onto the parent checkout) and hands them to the one traversal,
+`catalog_surfaces(harness, roots)` (`adapter::harness`), which builds each
+scope, owns the symlink-dedup set, and skips a root deleted since its sessions
+ran. What a harness scans is its **site rows** (`Site`: a path plus a loader,
+listed per harness as `global_sites` / `project_sites`), so a new surface kind is
+a row and a loader, never an edit to that traversal. `read_project_surfaces` in
+`adapter/config.rs` remains the direct single-root entry point the tests drive.
+
 `~/.claude` throughout this document means `$CLAUDE_CONFIG_DIR` when that
 variable names a non-empty path, because Claude Code relocates the whole tree
-under it (`claude_config_dir` in `adapter/config.rs`); an empty value is
-treated as unset.
+under it (`claude_config_dir` in `adapter/config.rs`); an empty value is treated
+as unset.
 
 | Surface kind | Global | Project-local |
 | --- | --- | --- |
@@ -40,38 +42,38 @@ treated as unset.
 | `mcp_server` | `~/.claude/mcp.json` (top-level `mcpServers`) | `<project>/.mcp.json` |
 | `mcp_tool` | the MCP server's advertised tool schemas (dynamic ― see below) | ― |
 
-`CLAUDE.md` and `AGENTS.md` are two names for the same always-on context, and a
-repo serving both agent conventions typically ships `AGENTS.md` as a symlink to
-`CLAUDE.md`. Claude Code injects that content once, so the adapter weighs the
-file once: `read_claude_md_surfaces` resolves each candidate and keeps the first
+`CLAUDE.md` and `AGENTS.md` are two names for the same always-on context. A repo
+serving both agent conventions typically ships `AGENTS.md` as a symlink to
+`CLAUDE.md`, and Claude Code injects that content once, so the adapter weighs it
+once: `read_claude_md_surfaces` resolves each candidate and keeps the first
 surface per resolved file, which reports the pair under `CLAUDE.md`. The
-deduplication key is the resolved path, not the content ― two independently
+deduplication key is the resolved path, not the content: two independently
 maintained files are two real always-on surfaces even when their text coincides.
-Getting this wrong doubles the project's `startup_full` total, which is what the
+Getting this wrong doubles the project's `startup_full` total, which the
 always-on floor is reconciled against (`surfaces.md`).
 
-A `CLAUDE.md` can pull other files in with `@path` imports, and Claude Code
+**Imports.** A `CLAUDE.md` can pull other files in with `@path`, and Claude Code
 injects the imported text every session just like the file's own. Weighing only
 the importing file would book a config made of import lines as nearly free and
-push the real always-on cost into the unattributed residual ― exactly inverting
-the "always-on heavy" wedge for such a layout. So `read_claude_md_surfaces`
-follows the imports and records **each imported file as its own `claude_md`
-surface** (`startup_full`, id `@<path>`, relative to the importing top-level
-file's directory when inside it), rather than folding the text into the
-importer: the cost lands on the file that carries it, and each one can be pruned
-on its own. The import rules mirror Claude Code's documented behavior: an import
-is an `@` opening a whitespace-separated word (an e-mail address is not one),
-ignored inside code spans and fenced blocks; it resolves relative to the
-importing file, `~/` to the home directory, or as an absolute path; recursion
-stops after five hops; an import naming no readable file is skipped. Every
-import is further confined to the importing top-level file's directory: a
-target canonicalizing outside it (`..` escapes, absolute paths, `~/`, symlink
-hops) is skipped with a warning, so a cloned repo cannot pull host files
-outside its root into the catalog. The same
-resolved-path deduplication as the `AGENTS.md` symlink applies across the whole
-import graph ― a file imported twice, imported in a cycle, or imported *and*
-read as a top-level `AGENTS.md` is weighed once, with the top-level name
-winning.
+push the real always-on cost into the unattributed residual, inverting the
+"always-on heavy" wedge. So `read_claude_md_surfaces` follows the imports and
+records **each imported file as its own `claude_md` surface** (`startup_full`,
+id `@<path>`, relative to the importing top-level file's directory when inside
+it): the cost lands on the file that carries it, and each can be pruned on its
+own. The rules mirror Claude Code's documented behavior:
+
+- An import is an `@` opening a whitespace-separated word (an e-mail address is
+  not one), ignored inside code spans and fenced blocks.
+- It resolves relative to the importing file, `~/` to the home directory, or as
+  an absolute path. Recursion stops after five hops, and an import naming no
+  readable file is skipped.
+- Every import is confined to the importing top-level file's directory: a target
+  canonicalizing outside it (`..` escapes, absolute paths, `~/`, symlink hops)
+  is skipped with a warning, so a cloned repo cannot pull host files outside its
+  root into the catalog.
+- Resolved-path deduplication applies across the whole import graph: a file
+  imported twice, imported in a cycle, or imported *and* read as a top-level
+  `AGENTS.md` is weighed once, with the top-level name winning.
 
 `settings.json` carries two surface kinds at once: `permissions` (allow/deny) and
 `hooks` (matcher → command); the adapter splits one file into several surfaces.

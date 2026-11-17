@@ -1,0 +1,435 @@
+/* saniwalens docs site — vanilla CSS, no build, no external requests. */
+
+/* ---- Tokens: light-dark() with a prefers-color-scheme fallback ---- */
+:root {
+  --bg-light: #ffffff;
+  --bg-dark: #121417;
+  --ink-light: #1a1d21;
+  --ink-dark: #e8eaed;
+  --muted-light: #5b626b;
+  --muted-dark: #a8b0b9;
+  --line-light: #e1e4e8;
+  --line-dark: #2c3138;
+  --accent-light: #0b5fff;
+  --accent-dark: #8ab4ff;
+  --code-bg-light: #f4f5f7;
+  --code-bg-dark: #1d2126;
+
+  --bg: var(--bg-light);
+  --ink: var(--ink-light);
+  --muted: var(--muted-light);
+  --line: var(--line-light);
+  --accent: var(--accent-light);
+  --code-bg: var(--code-bg-light);
+
+  @media (prefers-color-scheme: dark) {
+    --bg: var(--bg-dark);
+    --ink: var(--ink-dark);
+    --muted: var(--muted-dark);
+    --line: var(--line-dark);
+    --accent: var(--accent-dark);
+    --code-bg: var(--code-bg-dark);
+  }
+
+  --bg: light-dark(var(--bg-light), var(--bg-dark));
+  --ink: light-dark(var(--ink-light), var(--ink-dark));
+  --muted: light-dark(var(--muted-light), var(--muted-dark));
+  --line: light-dark(var(--line-light), var(--line-dark));
+  --accent: light-dark(var(--accent-light), var(--accent-dark));
+  --code-bg: light-dark(var(--code-bg-light), var(--code-bg-dark));
+
+  /* Base MUST stay `light dark` so the meta override below can pin it. */
+  color-scheme: light dark;
+  scrollbar-color: var(--muted) transparent;
+
+  &:has(> head > meta[name="color-scheme"][content="dark"]) {
+    color-scheme: dark;
+  }
+  &:has(> head > meta[name="color-scheme"][content="light"]) {
+    color-scheme: light;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-size: clamp(1rem, 0.96rem + 0.2vw, 1.125rem);
+  line-height: 1.65;
+}
+
+main {
+  inline-size: min(68ch, 100% - 2rem);
+  margin-inline: auto;
+  padding-block: 1.5rem 4rem;
+}
+
+h1 {
+  font-size: clamp(1.75rem, 1.4rem + 1.6vw, 2.5rem);
+  line-height: 1.2;
+  text-wrap: balance;
+}
+
+h2 {
+  margin-block-start: 2.5rem;
+  text-wrap: balance;
+}
+
+.hero {
+  margin-inline: 0;
+}
+
+.hero-logo {
+  inline-size: min(100%, 30rem);
+  block-size: auto;
+  border-radius: 1rem;
+  border: 1px solid var(--line);
+  background: #1a1a24;
+}
+
+.lead {
+  font-size: clamp(1.05rem, 1rem + 0.4vw, 1.25rem);
+  color: var(--ink);
+}
+
+a {
+  color: var(--accent);
+  text-underline-offset: 0.15em;
+}
+
+a:hover {
+  text-decoration-thickness: 2px;
+}
+
+:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+/* ---- Header / navigation (one tree, popover when narrow, inline when wide) ---- */
+.site-header {
+  border-block-end: 1px solid var(--line);
+  background: color-mix(in srgb, var(--bg) 92%, transparent);
+}
+
+.header-inner {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  inline-size: min(68ch, 100% - 2rem);
+  margin-inline: auto;
+  padding-block: 0.75rem;
+  overflow-x: clip;
+}
+
+.header-inner > *,
+.header-inner button,
+.header-inner a {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+/* Measuring: freeze transitions so the row does not animate or flicker. */
+.site-header.is-measuring .site-menu,
+.site-header.is-measuring .site-menu * {
+  transition: none !important;
+}
+
+.site-logo {
+  font-weight: 700;
+  color: var(--ink);
+  text-decoration: none;
+  margin-inline-end: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.site-logo img {
+  inline-size: 28px;
+  block-size: 28px;
+}
+
+.site-nav {
+  display: contents;
+}
+
+.menu-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font: inherit;
+  color: var(--ink);
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 0.5rem;
+  padding: 0.35rem 0.7rem;
+  cursor: pointer;
+  anchor-name: --menu-button;
+}
+
+.site-menu {
+  position: fixed;
+  inset: auto;
+  inset-block-start: 4.75rem; /* fallback without anchor(): header height */
+  inset-block-start: anchor(--menu-button bottom);
+  inset-inline-end: 1rem;
+  inline-size: min(80dvw, 24rem);
+  max-inline-size: calc(100dvw - 2rem);
+  block-size: fit-content;
+  max-block-size: calc(100dvh - 6rem);
+  margin-block-start: 0.5rem;
+  overflow: auto;
+  background: var(--bg);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: 0.75rem;
+  padding: 0.5rem;
+  list-style: none;
+}
+
+.site-menu a {
+  display: block;
+  padding: 0.45rem 0.7rem;
+  border-radius: 0.5rem;
+  color: var(--ink);
+  text-decoration: none;
+}
+
+/* Current page: underline + weight, never color alone. */
+.site-menu a[aria-current="page"] {
+  font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
+  text-decoration-thickness: 2px;
+}
+
+.site-header.is-wide .menu-button {
+  display: none;
+}
+
+.site-header.is-wide .site-menu {
+  position: static;
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  inline-size: auto;
+  max-inline-size: none;
+  block-size: auto;
+  max-block-size: none;
+  overflow: visible;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.site-header.is-wide .site-menu::backdrop {
+  display: none;
+}
+
+/* Popover open/close: opacity + translate only, discrete behavior separate. */
+.site-menu {
+  transition:
+    opacity 160ms ease,
+    translate 160ms ease,
+    display 160ms,
+    overlay 160ms;
+  transition-behavior: allow-discrete;
+}
+
+.site-menu:not(:is(:popover-open, .\:popover-open)) {
+  opacity: 0;
+  translate: 0 -0.4rem;
+}
+
+@starting-style {
+  .site-menu:is(:popover-open, .\:popover-open) {
+    opacity: 0;
+    translate: 0 -0.4rem;
+  }
+}
+
+/* ---- Theme toggle: show only the action that changes something ---- */
+.theme-toggle {
+  font: inherit;
+  color: var(--ink);
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 0.5rem;
+  padding: 0.35rem 0.6rem;
+  cursor: pointer;
+  line-height: 1;
+}
+
+.theme-toggle svg {
+  inline-size: 1em;
+  block-size: 1em;
+  vertical-align: -0.125em;
+}
+
+/* System light (or pinned light): offer dark. Pinned dark (or system dark): offer light. */
+.theme-toggle-light {
+  display: none;
+}
+
+:root:has(> head > meta[name="color-scheme"][content="dark"]) .theme-toggle-dark {
+  display: none;
+}
+
+:root:has(> head > meta[name="color-scheme"][content="dark"]) .theme-toggle-light {
+  display: inline;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not(:has(> head > meta[name="color-scheme"][content="light"])) .theme-toggle-dark {
+    display: none;
+  }
+  :root:not(:has(> head > meta[name="color-scheme"][content="light"])) .theme-toggle-light {
+    display: inline;
+  }
+}
+
+/* ---- Content ---- */
+pre {
+  background: var(--code-bg);
+  border: 1px solid var(--line);
+  border-radius: 0.6rem;
+  padding: 0.9rem 1rem;
+  overflow: auto;
+  max-inline-size: 100%;
+}
+
+code {
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 0.92em;
+}
+
+pre code {
+  font-size: 0.85rem;
+}
+
+figure {
+  margin-inline: 0;
+}
+
+figcaption {
+  color: var(--muted);
+  font-size: 0.95rem;
+  margin-block-end: 0.4rem;
+}
+
+/* Responsive tables: scroll region with keyboard access (see tabindex in HTML). */
+.table-scroll {
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: 0.6rem;
+}
+
+table {
+  border-collapse: collapse;
+  inline-size: 100%;
+  min-inline-size: 34rem;
+  font-size: 0.95rem;
+}
+
+caption {
+  text-align: start;
+  padding: 0.7rem 0.9rem;
+  color: var(--muted);
+  border-block-end: 1px solid var(--line);
+}
+
+th,
+td {
+  text-align: start;
+  padding: 0.6rem 0.9rem;
+  border-block-end: 1px solid var(--line);
+  vertical-align: top;
+}
+
+tbody tr:last-child th,
+tbody tr:last-child td {
+  border-block-end: 0;
+}
+
+.spec-list li {
+  margin-block: 0.4rem;
+}
+
+/* Prev / index / next across the per-spec pages. */
+.prev-next {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1.5rem;
+  justify-content: space-between;
+  list-style: none;
+  margin-block-start: 3rem;
+  padding: 1rem 0 0;
+  border-block-start: 1px solid var(--line);
+}
+
+footer {
+  border-block-start: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 0.95rem;
+}
+
+footer p {
+  inline-size: min(68ch, 100% - 2rem);
+  margin-inline: auto;
+  padding-block: 1.25rem;
+}
+
+/* ---- Accessibility helpers ---- */
+.skip-link {
+  position: absolute;
+  inset-block-start: 0.5rem;
+  inset-inline-start: 0.5rem;
+  background: var(--ink);
+  color: var(--bg);
+  padding: 0.5rem 0.9rem;
+  border-radius: 0.5rem;
+  translate: 0 -300%;
+  z-index: 10;
+}
+
+.skip-link:focus-visible {
+  translate: 0 0;
+}
+
+.visually-hidden {
+  position: absolute;
+  inline-size: 1px;
+  block-size: 1px;
+  overflow: clip;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .site-menu {
+    transition: none;
+  }
+
+  html {
+    scroll-behavior: auto;
+  }
+}
+
+@media (forced-colors: active) {
+  .site-menu a[aria-current="page"] {
+    forced-color-adjust: auto;
+  }
+}

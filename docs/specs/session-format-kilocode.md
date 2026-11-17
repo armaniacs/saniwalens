@@ -8,10 +8,9 @@ share the same downstream contract (the internal domain model,
 adapter may use the field names below
 (`.claude/rules/format-isolation.md`). The kilocode store is **separate**
 from the other stores (one DB per harness), so nothing here constrains the
-other mappings, and vice versa. The shell contract around this mapping — the
+other mappings, and vice versa. The shell contract around this mapping (the
 harness's default `--db` name, per-task ingest keys, and extraction version
-key — is the `harness.md` addendum that lands with the CLI wiring, as
-opencode's did.
+key) is in `harness.md`.
 
 > Observed against a real `<VSCode globalStorage>/kilocode.kilo-code/tasks/`
 > directory (92 task directories; the **shapes** below come from six of
@@ -25,7 +24,7 @@ opencode's did.
 <globalStorage>/kilocode.kilo-code/tasks/<task-uuid>/
 ├── api_conversation_history.json   # the conversation (the record spine)
 ├── ui_messages.json                # the display log (the token source)
-├── task_metadata.json              # files_in_context[] only (unread in v1)
+├── task_metadata.json              # files_in_context[] only (read for file_read events)
 └── checkpoints/                    # editor checkpoints (unread)
 ```
 
@@ -33,8 +32,8 @@ opencode's did.
   (`~/Library/Application Support/Code/User/globalStorage` on macOS,
   `~/.config/Code/User/globalStorage` on Linux). The path varies with the
   editor install (Code / Cursor / VSCodium), so the adapter resolves the
-  tasks directory from the harness's input root — `--projects`, whose
-  default the `harness.md` addendum settles when the wiring lands.
+  tasks directory from the harness's input root (`--projects`, whose
+  default `harness.md` settles).
 - One task directory is **one saniwalens session**. kilocode's own
   task⇔session mapping (`sessions/<id>/session.json`, holding
   `taskSessionMap`) lives outside the tasks tree and is not read — the
@@ -109,8 +108,7 @@ adapter walks the merged `ts` order of both files.
   - `out_tokens = tokensOut`
   - `model = "unknown"` — the payload carries no model name
     (`inferenceProvider` is a provider, never a model; mapping one to the
-    other would be a guess). The reporting-honesty label for this missing
-    model is a `cli.md` addendum, alongside `sub_tokens_estimated`
+    other would be a guess)
 - The record is stamped with the window's **last** assistant message `ts` —
   the request's completion point — so the cost record sits *after* its
   window's tool records instead of inverting the stream (the same lesson
@@ -130,7 +128,7 @@ opencode adapter's ordering.
 
 | Signal | Where |
 | --- | --- |
-| Skill invocation | **none observed** — kilocode config installs `skills/` and `command/*.md`, but neither file carries an invocation marker in the samples. The signal stays absent until a marker is measured; a later skills catalog would show live `Skill` usage as orphaned rows in `inventory`, which is the honest missing-site signal |
+| Skill invocation | **none observed** — kilocode config installs `skills/` and `command/*.md`, but neither file carries an invocation marker in the samples. The signal stays absent until a marker is measured, so catalogued skills read as unused (`config-format-kilocode.md`) |
 | Subagent spawn | **none observed** — no spawn marker or join key measured. Subagent runs are not ingested; `sub_tokens`/`sub_agent_count` stay zero and the split reads as unavailable, as under opencode |
 | Tool use | `tool_use` blocks in assistant messages. Measured across 92 tasks: `execute_command` (754), `read_file` (616), `edit_file` (361), `search_files` (201), `update_todo_list` (155), `attempt_completion` (148), `apply_diff` (101), `search_and_replace` (93) |
 | Tool failure | the `tool_result` paired by `tool_use_id` carrying `is_error == true` (1 of 155 sampled blocks — the Anthropic-compatible failure field). The failure rides as a JSON envelope (`{"status":"error",...,"error":"..."}`) inside a text block, followed by an `environment_details` block — the envelope is unwrapped per block and the decoration dropped, so the excerpt is the readable message and the classification reads the message, not the envelope's own fields |
@@ -179,23 +177,23 @@ than a guess.
 - `cost` (per request) — billing-adjacent and provider-specific; counts are
   usage signals for ranking, not a ledger (`architecture.md`).
 - `apiProtocol` / `inferenceProvider` — protocol metadata, not usage.
-- `task_metadata.json` (`files_in_context[]`) ― read since PBI 23 as
-  `file_read` events stamped with the task's start (the metadata carries no
-  timestamps), so the never-fires wedge can match them against rule globs ―
-  the same join the Claude Code `Read` calls feed. A missing or unreadable
-  metadata file reads as no files; non-string entries are dropped, never
-  stringified into fake paths. The metadata moves the task fingerprint, so a
-  later metadata edit re-ingests its task once.
+- `task_metadata.json` (`files_in_context[]`) is read as `file_read` events
+  stamped with the task's start (the metadata carries no timestamps), so the
+  never-fires wedge can match them against rule globs, the same join the Claude
+  Code `Read` calls feed. A missing or unreadable metadata file reads as no
+  files; non-string entries are dropped, never stringified into fake paths. The
+  metadata moves the task fingerprint, so a later metadata edit re-ingests its
+  task once.
 - `checkpoints/` and the task⇔session `session.json` mapping — unread.
 - `ui_messages.json` kinds other than `api_req_started` — display or
   interaction furniture (`ask=tool` is the approval point; the signals
   table explains why it is not a usage signal).
 - Compaction — no marker observed in either file; the context metric is
   compaction-safe without it (`events.md`).
-- Slash-command invocations typed by the human — no structural wrapper in
-  either file, and substring-matching prompts would misread prose discussing
-  commands. Config surfaces (`~/.config/kilo/`, commands, skills, MCP,
-  custom modes) — the catalog half is a separate spec and a separate change.
+- Slash-command invocations typed by the human: no structural wrapper in either
+  file, and substring-matching prompts would misread prose discussing commands.
+- Config surfaces (`~/.config/kilo/`, commands, skills, MCP, custom modes) belong
+  to the catalog half, `config-format-kilocode.md`.
 
 ## Forward compatibility
 
@@ -206,14 +204,6 @@ is missing, unparseable, or marked `usageMissing=true` yields a zero-token
 request record — a missing measurement is recorded as zero, never
 fabricated, and replace semantics make the in-flight case idempotent on
 re-ingest.
-
-**The full 92-task survey corrected the earlier sample.** The small survey
-behind the first draft assumed no cwd-style field and `apply_diff`/
-`write_to_file` as the edit tools; the full run showed `execute_command.cwd`
-(640 rows, one distinct value per task) and `edit_file`/`search_and_replace`
-as the real edit names. Fixing the mapping moved 86 of 92 sessions out of
-unrooted and lifted `file_edit` events from 115 to 570, so it bumped
-`KILOCODE_ANALYZER_VERSION` to `2` — the survey is the version bump's reason.
 
 ## Golden regression policy
 

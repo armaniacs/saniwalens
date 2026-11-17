@@ -1,0 +1,64 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400" width="100%" height="100%">
+  <!-- 背景: 角丸(squircle)でアプリアイコンやFaviconとして自然に馴染むように調整 -->
+  <rect width="400" height="400" rx="80" fill="#1a1a24" />
+  
+  <!-- 座標を中心に合わせるためのトランスフォーム -->
+  <g transform="translate(-200, -34)">
+    
+    <!-- レンズ外枠 (縮小時に潰れないようstroke-widthを1.5倍に強化) -->
+    <circle cx="400" cy="270" r="160" fill="none" stroke="#e0e0e0" stroke-width="12" />
+    <circle cx="400" cy="270" r="148" fill="none" stroke="#7a7a8c" stroke-width="4" />
+    <circle cx="400" cy="270" r="135" fill="#14141c" stroke="#4a4a5c" stroke-width="6" />
+    
+    <!-- 絞り羽 -->
+    <g stroke="#3a3a4c" stroke-width="4" opacity="0.8">
+      <line x1="265" y1="270" x2="350" y2="175" />
+      <line x1="335" y1="153" x2="450" y2="195" />
+      <line x1="486" y1="195" x2="475" y2="310" />
+      <line x1="520" y1="330" x2="410" y2="385" />
+      <line x1="410" y1="385" x2="315" y2="350" />
+      <line x1="290" y1="365" x2="275" y2="280" />
+    </g>
+    
+    <circle cx="400" cy="270" r="100" fill="#0d0d14" stroke="#2a2a3c" stroke-width="3"/>
+
+    <!-- 中央奥のコア -->
+    <circle cx="400" cy="270" r="25" fill="none" stroke="#333344" stroke-width="2" />
+    
+    <!-- 入力の光 (白) -->
+    <line x1="400" y1="50" x2="400" y2="140" stroke="#ffffff" stroke-width="10" />
+    
+    <!-- プリズム -->
+    <polygon points="400,140 340,230 460,230" fill="rgba(255,255,255,0.05)" stroke="#b0b0c0" stroke-width="6" stroke-linejoin="round" />
+    <!-- プリズム内部の光の反射線 -->
+    <line x1="400" y1="140" x2="400" y2="230" stroke="rgba(255,255,255,0.2)" stroke-width="3" />
+    <line x1="370" y1="185" x2="430" y2="185" stroke="rgba(255,255,255,0.2)" stroke-width="3" />
+    
+    <!-- 紙垂(シデ) 兼 回路 -->
+    
+    <!-- 左 (シアン) -->
+    <polyline points="370,230 330,270 360,270 320,310 350,310 310,350 340,350 290,400" fill="none" stroke="#00e5ff" stroke-width="6" stroke-linejoin="miter" />
+    <circle cx="290" cy="400" r="6" fill="#00e5ff" />
+    <circle cx="290" cy="400" r="10" fill="none" stroke="#00e5ff" stroke-width="2" />
+    <circle cx="360" cy="270" r="3" fill="#00e5ff" />
+    <circle cx="350" cy="310" r="3" fill="#00e5ff" />
+    <circle cx="340" cy="350" r="3" fill="#00e5ff" />
+    
+    <!-- 中央 (紫) -->
+    <polyline points="400,230 380,280 420,280 380,330 420,330 380,380 400,410" fill="none" stroke="#aa00ff" stroke-width="6" stroke-linejoin="miter" />
+    <circle cx="400" cy="410" r="6" fill="#aa00ff" />
+    <circle cx="400" cy="410" r="10" fill="none" stroke="#aa00ff" stroke-width="2" />
+    <circle cx="420" cy="280" r="3" fill="#aa00ff" />
+    <circle cx="420" cy="330" r="3" fill="#aa00ff" />
+    <circle cx="380" cy="380" r="3" fill="#aa00ff" />
+
+    <!-- 右 (赤・ピンク) -->
+    <polyline points="430,230 470,270 440,270 480,310 450,310 490,350 460,350 510,400" fill="none" stroke="#ff0055" stroke-width="6" stroke-linejoin="miter" />
+    <circle cx="510" cy="400" r="6" fill="#ff0055" />
+    <circle cx="510" cy="400" r="10" fill="none" stroke="#ff0055" stroke-width="2" />
+    <circle cx="440" cy="270" r="3" fill="#ff0055" />
+    <circle cx="450" cy="310" r="3" fill="#ff0055" />
+    <circle cx="460" cy="350" r="3" fill="#ff0055" />
+    
+  </g>
+</svg>

@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ドキュメント ― saniwalens</title>
+  <meta name="description" content="saniwalens のコマンド・ビュー・設計 spec 対応表（日本語）。">
+  <meta name="color-scheme" content="light dark">
+  <script>
+    try {
+      document.querySelector('meta[name="color-scheme"]').content =
+        localStorage.getItem("color-scheme") ?? "light dark";
+    } catch (e) {}
+  </script>
+  <link rel="icon" type="image/svg+xml" href="./assets/favicon.svg">
+  <meta name="theme-color" content="#1a1a24">
+  <link rel="stylesheet" href="./styles.css">
+  <script defer src="./app.js"></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">本文へ移動</a>
+
+  <header class="site-header">
+    <div class="header-inner">
+      <a class="site-logo" href="./index_ja.html" aria-label="saniwalens ホーム"><img src="./assets/favicon.svg" alt="" aria-hidden="true" width="28" height="28">saniwalens</a>
+
+      <nav class="site-nav" aria-label="主要">
+        <button
+          class="menu-button"
+          type="button"
+          popovertarget="site-menu"
+          popovertargetaction="toggle"
+          aria-controls="site-menu"
+        >
+          <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+            <path d="M2 4h12M2 8h12M2 12h12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" fill="none"/>
+          </svg>
+          <span>メニュー</span>
+        </button>
+
+        <ul id="site-menu" class="site-menu" popover="auto">
+          <li><a href="./index_ja.html">ホーム</a></li>
+          <li><a href="./docs_ja.html" aria-current="page">ドキュメント</a></li>
+          <li><a href="./specs.html">仕様（英語）</a></li>
+          <li><a href="./cli.html">CLI（英語）</a></li>
+          <li><a href="https://github.com/armaniacs/saniwalens">GitHub</a></li>
+          <li><a href="./docs.html">English</a></li>
+        </ul>
+      </nav>
+
+      <button
+        id="theme-toggle"
+        class="theme-toggle"
+        type="button"
+        aria-live="polite"
+      >
+        <span class="theme-toggle-dark" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 16 16" focusable="false"><path d="M14 10.2A6 6 0 0 1 5.8 2 6 6 0 1 0 14 10.2Z" fill="currentColor"/></svg></span>
+        <span class="theme-toggle-light" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 16 16" focusable="false"><circle cx="8" cy="8" r="3.2" fill="currentColor"/><g stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M8 1v1.8M8 13.2V15M1 8h1.8M13.2 8H15M3 3l1.3 1.3M11.7 11.7 13 13M13 3l-1.3 1.3M4.3 11.7 3 13"/></g></svg></span>
+        <span class="visually-hidden" id="theme-toggle-label">ダークテーマに切り替え</span>
+      </button>
+    </div>
+  </header>
+
+  <main id="main">
+    <h1>ドキュメント</h1>
+    <p class="lead">
+      設計意図は <code>docs/specs/</code> にあり、このページは操作方法の案内です。
+      初回は上から順に読み、2 回目以降は表とリンク集を引いてください。
+      英語版は <a href="./docs.html">こちら</a>。
+    </p>
+
+    <section aria-labelledby="pipeline-heading">
+      <h2 id="pipeline-heading">パイプライン</h2>
+      <div class="table-scroll" role="region" aria-label="パイプラインのコマンド" tabindex="0">
+        <table>
+          <caption>一度 analyze して何度も読む ― 分析結果のデータベース（ストア）が段階をつなぐ</caption>
+          <thead>
+            <tr>
+              <th scope="col">コマンド</th>
+              <th scope="col">すること</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <th scope="row"><code>saniwalens tui</code></th>
+              <td>対話で harness → 見るもの → 範囲の順に聞いて回します。初回はここから。引数なしの <code>saniwalens</code> でも同じです。</td>
+            </tr>
+            <tr>
+              <th scope="row"><code>saniwalens doctor</code></th>
+              <td>健康診断。全体／プロジェクト別に表示。</td>
+            </tr>
+            <tr>
+              <th scope="row"><code>saniwalens analyze</code></th>
+              <td>transcript（対話履歴）と設定をストアに展開（変わった分だけ追加）。読み取りコマンドの実行時に自動で走ります。</td>
+            </tr>
+            <tr>
+              <th scope="row"><code>saniwalens sql '&lt;query&gt;'</code></th>
+              <td>ストアへの読み取り専用 SQL なら何でも書けます。分析の中心はストアです。</td>
+            </tr>
+            <tr>
+              <th scope="row"><code>saniwalens optimize</code></th>
+              <td>所見をもとに改善案を作ります。advisor（相談相手のセッション）と対話しながら進めます。</td>
+            </tr>
+            <tr>
+              <th scope="row"><code>saniwalens cleanup</code></th>
+              <td>保存した <code>--apply</code> 計画と backup の一覧・掃除。ストアは要らない。</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section aria-labelledby="views-heading">
+      <h2 id="views-heading">定番の切り口（ビュー）</h2>
+      <p>
+        定番の見方が要るときは、SQL を書く前にここを見ます。
+        単なるクエリでは書けない分類・提案をまとめた切り口です。
+        使う範囲は <code>--scope global | project | project:&lt;slug&gt;</code> で絞ります。
+      </p>
+      <figure>
+        <figcaption id="views-code">よく使う切り口:</figcaption>
+        <pre role="region" aria-labelledby="views-code" tabindex="0"><code>saniwalens waste                 # どこに無駄があるかを順位付きで見る
+saniwalens inventory               # 全 surface × 実際の利用
+saniwalens overhead                # セッション毎の常時読み込み
+saniwalens usage                   # skill 別の利用回数順
+saniwalens failures                # 繰り返す失敗の分類別ランクと直し方
+saniwalens prompts                 # 指示の出し方の内訳
+saniwalens stuck                   # 同じファイルを書き直し続けた箇所</code></pre>
+      </figure>
+    </section>
+
+    <section aria-labelledby="specs-heading">
+      <h2 id="specs-heading">spec 対応表</h2>
+      <p>仕様本文は英語です。下はこのサイト内の spec ページへの対応表で、各ページの末尾から GitHub の原文にも飛べます。</p>
+      <ul class="spec-list">
+        <li><a href="./specs/architecture.html"><code>architecture.md</code></a> ― SQLite を挟んだ二段階。カタログ × 利用の結合</li>
+        <li><a href="./specs/cli.html"><code>cli.md</code></a> ― コマンド契約と報告モデル（<a href="./cli.html">生成済み CLI リファレンス</a>も参照）</li>
+        <li><a href="./specs/surfaces.html"><code>surfaces.md</code></a> ― 設定 surface のカタログ</li>
+        <li><a href="./specs/events.html"><code>events.md</code></a> ― 利用イベントの spine</li>
+        <li><a href="./specs/storage.html"><code>storage.md</code></a> ― ストアの schema と移行</li>
+        <li><a href="./specs/harness.html"><code>harness.md</code></a> ― harness 別の契約</li>
+        <li><a href="./specs/session-format.html"><code>session-format*.md</code></a> ― harness 別の transcript 形式</li>
+        <li><a href="./specs/config-format.html"><code>config-format*.md</code></a> ― harness 別の設定形式</li>
+      </ul>
+    </section>
+
+    <section aria-labelledby="notes-heading">
+      <h2 id="notes-heading">はまる前の注意</h2>
+      <ul>
+        <li>レポートに出る件数やトークン数は、どれから直すかの順位付けのための目安であり、<strong>課金の請求額ではありません</strong>。</li>
+        <li>ストア（分析結果をためる SQLite データベース）は、元の transcript が Claude Code 側で刈られても残ります。このファイルを消すと履歴は戻ってきません。一時的なキャッシュではないので、容量目的で消さないでください。</li>
+        <li>schema 変更時は自動でその場で移行されるので、消して作り直す必要はありません。</li>
+        <li>一覧表は英語のまま。<code>--language en|ja</code> が切り替えるのは advisor への指示文だけです。</li>
+      </ul>
+    </section>
+  </main>
+
+  <footer>
+    <p>
+      saniwalens ― MIT。ソースは <a href="https://github.com/armaniacs/saniwalens">GitHub</a>。
+      使い方の質問は <a href="https://github.com/armaniacs/saniwalens/issues">GitHub の issue</a> へ
+     （セキュリティ報告は非公開 advisory。公開 issue 禁止）。
+    </p>
+  </footer>
+</body>
+</html>

@@ -901,7 +901,7 @@ mod tests {
         // OpenCode fork, but its TUI takes a prompt rather than the opencode
         // run surface: `kilo --prompt <prompt>` opens the interactive session
         // on the pointer prompt, the experience the claude launch gives
-        // (`docs/specs/harness.md`, "`optimize` under opencode").
+        // (`docs/specs/harness.md`, "`optimize` per harness").
         assert_eq!(
             Harness::Claude.launch_command(),
             ("claude", &[] as &[&str], RunMode::Interactive)

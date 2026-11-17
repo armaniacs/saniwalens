@@ -52,21 +52,20 @@ rest; unknown types are skipped.
   `2026-05-14T22:40:06.133Z`). Parsed to a UTC instant; timezone presentation
   happens later (`cli.md`).
 - `message.id` ― the API response id. One response is written as **several
-  lines, one per content block** (`thinking`, `text`, `tool_use`), and every
-  line repeats `message.model` and carries a `message.usage`; the id is what
-  ties them back to one response. The lines take two shapes: on the main
-  thread each line's `output_tokens` is the response's final value repeated;
-  in a subagent transcript it is a running total that only grows, the last
-  line carrying the whole response. The adapter reconciles both at parse time
-  by emitting, per line, only the output not yet reported under that id ― the
-  whole value on the first line and zero on a repeat, or each step of a
-  running total (`adapter::transcript::assistant_records`). That is the
-  per-id maximum, spread over the lines that first observed it, so the core
-  can sum records and count each response once (`events.md`). Keeping the
-  *first* line's value instead would under-count subagents badly, and
-  `stop_reason` is no substitute: every main-thread line carries one, and some
-  subagent responses carry it on no line. A line with no id reports its value
-  as is.
+  lines, one per content block** (`thinking`, `text`, `tool_use`); every line
+  repeats `message.model` and carries a `message.usage`, and the id ties them
+  back to one response. The lines take two shapes: on the main thread each
+  line's `output_tokens` is the response's final value repeated; in a subagent
+  transcript it is a running total that only grows, the last line carrying the
+  whole response. The adapter reconciles both at parse time
+  (`adapter::transcript::assistant_records`) by emitting, per line, only the
+  output not yet reported under that id: the whole value on the first line and
+  zero on a repeat, or each step of a running total. That is the per-id maximum
+  spread over the lines that first observed it, so the core can sum records and
+  count each response once (`events.md`). Keeping the *first* line's value
+  instead would under-count subagents badly, and `stop_reason` is no substitute:
+  every main-thread line carries one, and some subagent responses carry it on no
+  line. A line with no id reports its value as is.
 - `message.model` ― e.g. `claude-opus-4-7`. May be the sentinel `<synthetic>`
   for locally-generated turns; excluded when choosing an event's representative
   model (`events.md`).
@@ -113,6 +112,7 @@ becomes an event). The adapter recognises at least:
 | User prompt | `user` **human turns** (not `last-prompt`, which is a single leaf-pointer to the latest prompt ― one per region, not per turn) |
 | Tool failure | a `tool_result` block flagged `is_error` or wrapping `<tool_use_error>`. Categorised from the entry's `toolDenialKind` where that marker can be attributed to it (below), else from the text (`core::friction`); a short readable excerpt is kept. Linking the result's `tool_use_id` to the assistant `tool_use` block recovers both the **originating tool** and the call's **target** (its `input.file_path` / `command`) ― so a report shows which tool produced each failure and which file/command it hit, even when the error text omits the path (e.g. edit-precondition names no file) |
 | Permission denial | `toolDenialKind` on the entry that carries the denied `tool_result`, else the denial text inside it (`"Permission for this action was denied"`). Structural where the marker is present; a low-confidence heuristic where it is not ― see note below |
+| Hook firing | an `attachment` record with `type: "hook_success"`; its `hookName` (`Event:Matcher`) joins the catalogued hook. Context and summary attachments are not executions |
 | Compaction | `system` `subtype == compact_boundary` |
 
 These map to configuration surfaces (`surfaces.md`): a `Skill` invocation to a
@@ -127,9 +127,9 @@ string appearing anywhere in content. Quoted text (a transcript that discusses
 skills, a prompt containing the literal tags) must not be mis-read as an
 invocation. The adapter matches on record structure and field position.
 
-**Not every surface emits a usage signal.** `rule`, `hook`, and `claude_md` have
-no discrete invocation in the transcript ― they are injected context, not
-events. They appear in the catalog (`config-format.md`) but acquire no events;
+**Not every surface emits a usage signal.** `rule` and `claude_md` have no
+discrete invocation in the transcript: they are injected context, not events.
+They appear in the catalog (`config-format.md`) but acquire no events;
 `surfaces.md` classifies surface kinds as usage-measurable vs catalog-only so the
 join does not mistake "no event possible" for "unused". The permission-denial
 signal above is the one partly heuristic signal, and is flagged as

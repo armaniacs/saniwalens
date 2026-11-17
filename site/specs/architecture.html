@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Architecture Specification ― saniwalens</title>
+  <meta name="description" content="saniwalens spec architecture.md, mirrored from docs/specs/.">
+  <meta name="color-scheme" content="light dark">
+  <script>
+    try {
+      document.querySelector('meta[name="color-scheme"]').content =
+        localStorage.getItem("color-scheme") ?? "light dark";
+    } catch (e) {}
+  </script>
+  <link rel="icon" type="image/svg+xml" href="../assets/favicon.svg">
+  <meta name="theme-color" content="#1a1a24">
+  <link rel="stylesheet" href="../styles.css">
+  <script defer src="../app.js"></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <header class="site-header">
+    <div class="header-inner">
+      <a class="site-logo" href="../index.html" aria-label="saniwalens home"><img src="../assets/favicon.svg" alt="" aria-hidden="true" width="28" height="28">saniwalens</a>
+
+      <nav class="site-nav" aria-label="Primary">
+        <button
+          class="menu-button"
+          type="button"
+          popovertarget="site-menu"
+          popovertargetaction="toggle"
+          aria-controls="site-menu"
+        >
+          <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+            <path d="M2 4h12M2 8h12M2 12h12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" fill="none"/>
+          </svg>
+          <span>Menu</span>
+        </button>
+
+        <ul id="site-menu" class="site-menu" popover="auto">
+          <li><a href="../index.html">Home</a></li>
+          <li><a href="../docs.html">Docs</a></li>
+          <li><a href="../specs.html" aria-current="page">Specs</a></li>
+          <li><a href="../cli.html">CLI</a></li>
+          <li><a href="https://github.com/armaniacs/saniwalens">GitHub</a></li>
+          <li><a href="../index_ja.html">日本語</a></li>
+        </ul>
+      </nav>
+
+      <button
+        id="theme-toggle"
+        class="theme-toggle"
+        type="button"
+        aria-live="polite"
+      >
+        <span class="theme-toggle-dark" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 16 16" focusable="false"><path d="M14 10.2A6 6 0 0 1 5.8 2 6 6 0 1 0 14 10.2Z" fill="currentColor"/></svg></span>
+        <span class="theme-toggle-light" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 16 16" focusable="false"><circle cx="8" cy="8" r="3.2" fill="currentColor"/><g stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M8 1v1.8M8 13.2V15M1 8h1.8M13.2 8H15M3 3l1.3 1.3M11.7 11.7 13 13M13 3l-1.3 1.3M4.3 11.7 3 13"/></g></svg></span>
+        <span class="visually-hidden" id="theme-toggle-label">Switch to dark theme</span>
+      </button>
+    </div>
+  </header>
+
+  <main id="main">
+    <h1>Architecture Specification</h1>
+<p>saniwalens answers one question about a coding-agent setup: **where can the</p>
+<p>configuration be optimized, and how?** It does that by measuring, from real</p>
+<p>usage, the <strong>cost</strong> and <strong>actual use</strong> of every configuration surface ― skills,</p>
+<p>rules, hooks, MCP servers and their tool schemas, agents, <code>CLAUDE.md</code> /</p>
+<p><code>AGENTS.md</code> / memory, permissions ― and surfacing the wedges between the two.</p>
+<p>Skills are one surface among many. The tool is configuration-wide. AI-assisted</p>
+<p>optimization *proposals* are a planned later layer; the core measures and</p>
+<p>visualizes, it does not advise.</p>
+<p>The design follows from three facts about the problem:</p>
+<ol>
+<li><strong>Two inputs, both upstream-owned.</strong> Cost and use cannot be read from one</li>
+</ol>
+<p>source. *What is installed and what it costs* comes from <strong>live config</strong></p>
+<p>(skill/rule files, <code>settings.json</code>, MCP schemas); *what was actually used and</p>
+<p>at what runtime cost* comes from <strong>session transcripts</strong>. Both formats are</p>
+<p>Claude Code&#x27;s, and both change between releases.</p>
+<ol>
+<li><strong>The answer is a join, not a tally.</strong> Optimization opportunities live in the</li>
+</ol>
+<p>gap between configured and used: installed-but-never-invoked, costly-but-rare,</p>
+<p>redundant. So the model must relate a catalog of surfaces to a log of usage.</p>
+<ol>
+<li><strong>Re-parsing is expensive; analysis is iterative.</strong> Hundreds of megabytes are</li>
+</ol>
+<p>read once into a compact store; every report (and the future AI layer) reads</p>
+<p>the store.</p>
+<h2>Two stages</h2>
+<pre><code class="language-mermaid">
+flowchart LR
+
+
+    raw[&quot;transcripts + config&quot;] --&gt;|analyze| db[(&quot;SQLite&lt;br/&gt;sessions ・ surfaces ・ events&quot;)]
+
+
+    db --&gt;|views / sql| out[&quot;CLI tables / Markdown&quot;]
+
+
+    db --&gt;|optimize| ai[&quot;interactive claude session&lt;br/&gt;(AI optimization proposals)&quot;]
+
+
+</code></pre>
+<ul>
+<li>**<code>analyze</code>** reads both inputs and writes the normalized store. The verb is</li>
+</ul>
+<p><code>analyze</code> (not <code>build</code>): the command *analyzes* raw input into facts, it does</p>
+<p>not build an artifact.</p>
+<ul>
+<li><strong>The read commands</strong> ― the curated views and the arbitrary-query <code>sql</code> ―</li>
+</ul>
+<p>query the store and render. See <code>cli.md</code>.</p>
+<p>The stages are decoupled *only* by the store. The read commands&#x27; <strong>rendering</strong></p>
+<p>never reads raw input; <code>analyze</code> never renders. But the stages <strong>compose</strong>: a</p>
+<p>view runs the incremental <code>analyze</code> stage first by default (<code>cli.md</code></p>
+<p><code>--frozen</code>), the way <code>optimize</code> always has ― otherwise the store silently goes</p>
+<p>stale and the user cannot notice. Composition is stage-before-stage, not a leak:</p>
+<p>the view&#x27;s queries still see only the store. Consumers read the same store. Two</p>
+<p>were anticipated, and shape what <code>analyze</code> must capture:</p>
+<ul>
+<li><strong>Optimization proposals</strong> ― turning the findings into concrete advice. This</li>
+</ul>
+<p>is realized by <code>optimize</code> (<code>cli.md</code>): it composes the headline findings with a</p>
+<p>prescribed advisor prompt and hands them to the harness&#x27;s advisor session.</p>
+<p>The prompt composition is a pure transform (<code>core::optimize</code>); only the process</p>
+<p>launch is I/O. It reads aggregates; it needs nothing the store does not already</p>
+<p>hold.</p>
+<ul>
+<li><strong>Skill extraction</strong> ― clustering recurring user prompts into candidate new</li>
+</ul>
+<p>skills (the &quot;synthesize a new surface&quot; goal, distinct from pruning existing</p>
+<p>ones). The store keeps only the pointer (<code>events.prompt</code> → `(source_path,</p>
+<p>source_line)<code>; </code>storage.md<code>); the </code>prompts` view re-reads the text at</p>
+<p>report time, masks variable spans (quoted strings, paths, numbers) into a</p>
+<p>reusable template (<code>core::prompt</code>), and lists templates repeated at least</p>
+<p>three times as candidates with a count, an exemplar, and their sources.</p>
+<p>Rotated or missing transcripts count as pruned, never as errors. Reworded</p>
+<p>asks that no masking unifies stay unclustered ― that recall limit is</p>
+<p>documented, not papered over. Proposals are presented only, never advised.</p>
+<h2>The central model: catalog × usage</h2>
+<pre><code class="language-mermaid">
+flowchart TD
+
+
+    cfg[&quot;config files&quot;] --&gt;|adapter| S[&quot;surfaces&lt;br/&gt;(catalog: what is installed + static cost)&quot;]
+
+
+    tx[&quot;transcripts&quot;] --&gt;|adapter| E[&quot;events&lt;br/&gt;(usage: what ran + runtime cost)&quot;]
+
+
+    S --&gt; J[&quot;surface × usage join&quot;]
+
+
+    E --&gt; J
+
+
+    J --&gt; W[&quot;optimization wedges&lt;br/&gt;(unused ・ costly+rare ・ redundant ・ friction)&quot;]
+
+
+</code></pre>
+<ul>
+<li>A <strong>surface</strong> is one configurable thing (a skill, a rule, an MCP server, …)</li>
+</ul>
+<p>with a <strong>static cost</strong> ― the token weight of its definition, measured by</p>
+<p>reading the config file. See <code>surfaces.md</code> and <code>config-format.md</code>.</p>
+<ul>
+<li>An <strong>event</strong> is one timestamped occurrence with a <strong>runtime cost</strong> (tokens,</li>
+</ul>
+<p>context growth, duration). A skill invocation is one event kind among many.</p>
+<p>See <code>events.md</code> and <code>session-format.md</code>.</p>
+<ul>
+<li>A surface with no matching events is unused; a surface whose static cost is</li>
+</ul>
+<p>high but whose events are few is a prune candidate. The join is the product.</p>
+<h2>Layers</h2>
+<p>Inside <code>analyze</code>, knowledge is stratified so an upstream format change lands in</p>
+<p>exactly one layer.</p>
+<pre><code class="language-mermaid">
+flowchart TD
+
+
+    A[&quot;adapter&lt;br/&gt;(owns both Claude Code input formats)&quot;] --&gt;|domain model| C[&quot;core&lt;br/&gt;(pure: records→events, catalog×usage, aggregates)&quot;]
+
+
+    C --&gt;|surfaces / events| S[&quot;store (SQLite)&quot;]
+
+
+    S --&gt; R[&quot;report (store → presentation)&quot;]
+
+
+</code></pre>
+<div class="table-scroll" role="region" tabindex="0">
+<table><thead><tr>
+<th scope="col">Layer</th>
+<th scope="col">Owns</th>
+<th scope="col">Must NOT know</th>
+</tr></thead><tbody>
+<tr>
+<th scope="row"><strong>adapter</strong></th scope="row">
+<td>The raw shapes of *both* inputs: transcript JSONL (record types, field names, <code>subagents/</code> layout) and config files (skill/rule frontmatter, <code>settings.json</code>, MCP schemas, <code>CLAUDE.md</code>). Maps them into the internal domain model.</td>
+<td>The SQLite schema; how costs are computed.</td>
+</tr>
+<tr>
+<th scope="row"><strong>core</strong></th scope="row">
+<td>Event extraction, static-cost weighing inputs, the catalog×usage join, the trend view&#x27;s two-window joins (<code>core::trend</code>), the briefing&#x27;s findings assembly (<code>core::findings</code>), and aggregation ― all <strong>pure functions</strong> over the domain model; a function that only shapes rows already fetched from the store is core&#x27;s wherever it is called from today (the placement rule below). No I/O, no clock, no DB.</td>
+<td>Claude Code field names or config path conventions; SQL.</td>
+</tr>
+<tr>
+<th scope="row"><strong>store</strong></th scope="row">
+<td>Persisting and querying <code>sessions</code> / <code>surfaces</code> / <code>events</code> in SQLite.</td>
+<td>Raw input shapes.</td>
+</tr>
+<tr>
+<th scope="row"><strong>report</strong></th scope="row">
+<td>Turning query results into tables / Markdown and ranking wedges (<code>src/cli/</code>, laid out below).</td>
+<td>Raw input shapes; SQL beyond the store&#x27;s API.</td>
+</tr>
+</tbody></table></div>
+<p>The report layer is laid out as:</p>
+<ul>
+<li><code>cli/mod.rs</code>: the shell, dispatch and the public CLI API.</li>
+<li><code>cli/views/</code>: one file per view. <code>cli/views/guide.rs</code> (the interactive entry),</li>
+</ul>
+<p><code>cli/views/trend.rs</code> (the trend view and the one typed payload both its table</p>
+<p>and JSON derive from), <code>cli/views/waste.rs</code>, <code>cli/views/models.rs</code> (the</p>
+<p>per-model cost split), and <code>cli/views/sessions.rs</code> (the per-session cost</p>
+<p>shape).</p>
+<ul>
+<li><code>cli/window.rs</code>: the windowed flag surface every view shares: the period flags</li>
+</ul>
+<p>declared once as clap arg groups, the <code>--format</code> values each view accepts, and</p>
+<p>the windowed session-open dispatch the report arms resolve through (<code>open</code> for</p>
+<p>views without <code>--scope</code>, <code>open_scoped</code> for scoped ones,</p>
+<p><code>open_scoped_table_json</code> for doctor&#x27;s narrower <code>--format</code>, <code>open_pair</code> for</p>
+<p>trend).</p>
+<ul>
+<li><code>cli/headless.rs</code>: the headless advisor run (the logged pipe and the one guard</li>
+</ul>
+<p>owning the child and the heartbeat for the run&#x27;s lifetime).</p>
+<ul>
+<li><code>cli/report.rs</code>: format, renderer, framing.</li>
+</ul>
+<h3>The view-landing rule (per PR)</h3>
+<p>A PR that adds a <code>Command</code> variant (a new view) lands the view as one file under</p>
+<p><code>src/cli/views/</code>, so views never re-grow a shared file:</p>
+<ul>
+<li><strong>View helpers are born in the view&#x27;s file</strong>, never appended to <code>cli/mod.rs</code>:</li>
+</ul>
+<p>the shell keeps dispatch and nothing else.</p>
+<ul>
+<li><strong>The line-budget tripwire</strong> (<code>tests/cli_mod_line_budget.rs</code>) makes that</li>
+</ul>
+<p>structural: growing <code>cli/mod.rs</code> past its measured budget fails <code>cargo test</code></p>
+<p>with a message pointing at <code>cli/views/</code>. Raising the budget is a review point,</p>
+<p>done in the same PR as the spec update it forces.</p>
+<ul>
+<li><strong>Spec update map.</strong> When the layout changes, two places change with it in the</li>
+</ul>
+<p>same PR: this rule and the report layout list above.</p>
+<p>The acceptance-criteria template every view-addition PBI carries is</p>
+<p><code>.claude/rules/cli-view-addition.md</code>.</p>
+<h3>The pure-join placement rule (per PR)</h3>
+<p>A pure join (a pairing, ordering, or delta over in-memory values, no SQLite)</p>
+<p>over rows already fetched from the store is core&#x27;s, wherever it is called from</p>
+<p>(<code>.claude/rules/pure-join-placement.md</code>):</p>
+<ul>
+<li><strong>Born in core.</strong> A new pure join lands in core with its tests there; the</li>
+</ul>
+<p>store keeps the query and the row hand-off, never the shaping. The one</p>
+<p>integration test pinning the query-to-join window split</p>
+<p>(<code>two_window_aggregation_splits_events_between_the_windows</code>) stays in</p>
+<p><code>store.rs</code> with the query it tests.</p>
+<ul>
+<li><strong>The first instance</strong> is the trend view&#x27;s two-window joins (<code>skill_deltas</code>,</li>
+</ul>
+<p><code>TwoWindow</code>, <code>SkillDelta</code>, <code>TrendWindowAggregates</code>, <code>kind_pairs</code>), which live</p>
+<p>in <code>src/core/trend.rs</code>. The store keeps the windowed queries that hand them</p>
+<p>rows. The next SQLite-free function that appears in <code>store.rs</code> arms the same</p>
+<p>move.</p>
+<ul>
+<li><strong>The trigger is grep-able, not a parser.</strong> The rule enumerates the symbols,</li>
+</ul>
+<p>and <code>tests/pure_join_placement.rs</code> fails when the enumeration and core drift</p>
+<p>apart: it asserts the definitions sit in <code>src/core/trend.rs</code> and not in</p>
+<p><code>store.rs</code>. A join that leaves core or re-enters the store must carry four</p>
+<p>updates in the same PR: the core row above, the rule&#x27;s enumeration, the</p>
+<p>ledger&#x27;s note, and the tripwire&#x27;s move side. Emptying the tripwire&#x27;s array or</p>
+<p>leaving a tombstone comment does not count, since an empty array passes</p>
+<p>vacuously and a raw <code>contains</code> reads comments as text. Retiring the tripwire</p>
+<p>means rewriting the two prose anchors that name it (the rule and this</p>
+<p>section) in the same PR.</p>
+<p>The contract between adapter and everything else is the **internal domain</p>
+<p>model** ― tool-centric names stable across Claude Code releases. Renaming an</p>
+<p>upstream field or moving a config file changes the adapter&#x27;s mapping, nothing</p>
+<p>downstream. This boundary is enforced by <code>.claude/rules/format-isolation.md</code>; a</p>
+<p>format change whose diff escapes the adapter is a boundary bug.</p>
+<p>The per-harness routine that walks this pipeline sits behind one seam:</p>
+<p><code>Harness::analyze</code> (<code>adapter::harness</code>) dispatches to each harness&#x27;s own module</p>
+<p>― <code>adapter::claude</code>, <code>adapter::opencode</code>, <code>adapter::kilocode</code> ― which owns that</p>
+<p>harness&#x27;s input route, fingerprinting, and extraction wiring, and hands rows to</p>
+<p><code>Store::ingest</code> (the store&#x27;s API, never SQL). The analyzer-version key each</p>
+<p>harness stamps lives beside its mapping, and the store compares whatever pair it</p>
+<p>is handed. A new harness therefore adds a variant and a module; the shell does</p>
+<p>not change (<code>harness.md</code>).</p>
+<h3>Why a pure core</h3>
+<p>The tool&#x27;s value is its analysis logic ― event boundaries, the compaction-safe</p>
+<p>context metric, subagent attribution, the catalog×usage join. That logic is</p>
+<p>where bugs hide and where the specs make the most claims, so it must be</p>
+<p>exhaustively unit-testable. Keeping it free of I/O, clocks, and SQL lets every</p>
+<p>rule be driven by a small synthetic fixture (<code>.claude/rules/tdd.md</code>). File</p>
+<p>walking, reading, tokenizing, SQLite, and &quot;now&quot; are thin shells; non-determinism</p>
+<p>(current time, timezone, tuning constants) is injected.</p>
+<h2>Forward compatibility</h2>
+<p>The adapter deserializes defensively: it reads only the fields the tool needs,</p>
+<p>ignores unknown fields, tolerates missing optional ones. A new Claude Code field</p>
+<p>or config key must never break <code>analyze</code>. The concrete shapes the adapter</p>
+<p>depends on ― and which are most likely to drift ― are catalogued in</p>
+<p><code>session-format.md</code> (transcripts) and <code>config-format.md</code> (config).</p>
+<h2>What this tool deliberately is not</h2>
+<ul>
+<li><strong>Not a live monitor.</strong> It analyzes inputs at rest, not a running session.</li>
+<li><strong>Not a billing tool.</strong> Token counts rank surfaces; they are not an accounting</li>
+</ul>
+<p>ledger. Approximations (estimated subagent attribution, tokenizer-based static</p>
+<p>cost) are acceptable and flagged, not avoided.</p>
+<ul>
+<li><strong>Not an advisor (yet).</strong> The core reports opportunities; turning them into</li>
+</ul>
+<p>concrete proposals is the future AI layer&#x27;s job.</p>
+<ul>
+<li><strong>Not a data store.</strong> Raw transcripts and config stay where Claude Code put</li>
+</ul>
+<p>them; the tool reads them read-only and never copies them into the repo or the</p>
+<p>store (<code>.claude/rules/session-data-privacy.md</code>).</p>
+    <nav aria-label="Spec pages">
+      <ul class="prev-next">
+      <li><a href="../specs.html">Specs index</a></li>
+      <li><a rel="next" href="./cli.html">CLI Specification →</a></li>
+      </ul>
+    </nav>
+    <p><a href="https://github.com/armaniacs/saniwalens/blob/main/docs/specs/architecture.md">Source: architecture.md</a></p>
+
+  </main>
+
+  <footer>
+    <p>
+      saniwalens ― MIT. Source on <a href="https://github.com/armaniacs/saniwalens">GitHub</a>.
+    </p>
+  </footer>
+</body>
+</html>

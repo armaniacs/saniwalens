@@ -1,7 +1,7 @@
 # Surfaces Specification
 
 A **surface** is one configurable thing in a Claude Code setup — a skill, a
-rule, an MCP server, a hook, a permission, an `CLAUDE.md`, an agent. This spec
+rule, an MCP server, a hook, a permission, a `CLAUDE.md`, an agent. This spec
 defines the surface catalog and the **catalog × usage join** that is the whole
 point of the tool (`architecture.md`): relating *what is installed and what it
 costs* (surfaces, from `config-format.md`) to *what was actually used and at what
@@ -62,12 +62,11 @@ fastest way to a wrong recommendation. Each kind is classified:
 | `hook` | usage-measurable | `hook_use` (a fired `hook_success` attachment; its `hookName` joins the catalog id) |
 | `claude_md` | **catalog-only** | none (always-on; usage is not the question — static cost is) |
 
-For a **catalog-only** surface, absence of events is *not* evidence of disuse —
+For a **catalog-only** surface, absence of events is *not* evidence of disuse:
 no event could ever appear. The join still lists it (with zero usage), but the
-wedges below gate on this class so a rule is never flagged "unused →
-delete" merely for emitting nothing. Hooks left that class once firings became
-observable: a hook with firings is used, one without is an unused delete
-candidate like any other measurable surface.
+wedges below gate on this class so a rule is never flagged "unused → delete"
+merely for emitting nothing. A hook with firings is used; one without is an
+unused delete candidate like any other measurable surface.
 
 ## The join
 
@@ -127,7 +126,8 @@ invoked)`, because the seeded session acts on those figures and a single
 unlabelled number there becomes a fix proposal that frees nothing.
 
 The "Requires" column makes the coverage explicit: **Unused** and **Costly +
-rare** apply only to usage-measurable kinds ― never to `rule` / `claude_md`. A few wedges depend on signals the tool does not yet fully have:
+rare** apply only to usage-measurable kinds, never to `rule` / `claude_md`. Two
+wedges depend on signals the tool derives indirectly:
 
 - **Never-fires rule** needs evidence a rule's `paths:` glob *could* have fired.
   The only honest source is session activity — did any file matching the glob
@@ -150,7 +150,7 @@ rare** apply only to usage-measurable kinds ― never to `rule` / `claude_md`. A
 
 **Load mode** is a first-class part of a surface because the same static-token
 figure means something very different for a `CLAUDE.md` paid every session than
-for a skill body paid only when invoked — but load mode is an assumption, so the
+for a skill body paid only when invoked. But load mode is an assumption, so the
 always-on wedge is confirmed empirically, not asserted:
 
 ### Always-on reconciliation
@@ -168,13 +168,12 @@ weight is unknown (an MCP schema) stay out of the sum rather than entering it as
 zero — they land in the unattributed residual, where the report already says the
 figure is an upper bound on system + tools + MCP.
 
-The floor must come from an actual session start (the `session_start` event —
-`events.md`), never from a skill span's `ctx_start`. Spans were the original
-source and are a rejected alternative, not a supported one: a span's `ctx_start`
-is the prompt size wherever that skill happened to run, which in a long or
-resumed session is far above what the session started with, so a project whose
-only skill invocations came late reported a mid-session size as its startup cost
-— inverting the advice this section exists to give.
+The floor must come from an actual session start (the `session_start` event,
+`events.md`), never from a skill span's `ctx_start`. A span's `ctx_start` is the
+prompt size wherever that skill happened to run, which in a long or resumed
+session is far above what the session started with; a project whose only skill
+invocations came late would report a mid-session size as its startup cost,
+inverting the advice this section exists to give.
 
 What still bounds the figure is the observation set, not the source: a start is a
 lower bound only for a *fresh* session, since a resumed one begins with its
