@@ -36,11 +36,11 @@ Scenario: ローカル時刻の表示が変わらない
 ```
 
 ## 受け入れ基準
-- [ ] `cargo deny check` が exit 0
-- [ ] `cargo test --locked` 全緑（既存テストが時刻フォーマットのピン留めになっている）
-- [ ] `cargo fmt --check` と `cargo clippy --all-targets --all-features -- -D warnings` が通る
-- [ ] `Cargo.lock` に chrono が残っていない
-- [ ] 代表コマンドの新旧出力 diff が空（少なくとも doctor / waste / usage / failures）
+- [x] `cargo deny check` が exit 0
+- [x] `cargo test --locked` 全緑（既存テストが時刻フォーマットのピン留めになっている）
+- [x] `cargo fmt --check` と `cargo clippy --all-targets --all-features -- -D warnings` が通る
+- [x] `Cargo.lock` に chrono が残っていない
+- [x] 代表コマンドの新旧出力 diff が空（少なくとも doctor / waste / usage / failures）
 
 ## テスト戦略（t_wadaスタイル）
 
@@ -94,8 +94,8 @@ grep -rn "chrono::" src/ | grep -v "^.*://" | grep -v "chrono can express\|chron
 - spec に時刻書式の記述があれば `.claude/rules/spec-sync.md` に従い同梱更新する
 
 ## Definition of Done
-- [ ] 全BDDシナリオが自動テストとして実装されパスする
-- [ ] `cargo deny check` / `cargo test --locked` / `just check` がすべて Green
-- [ ] 新旧バイナリの代表コマンド出力 diff が空
+- [x] 全BDDシナリオが自動テストとして実装されパスする
+- [x] `cargo deny check` / `cargo test --locked` / `just check` がすべて Green
+- [x] 新旧バイナリの代表コマンド出力 diff が空
 - [ ] コードレビュー完了
-- [ ] ドキュメント更新済み（spec-sync 該当があれば）
+- [x] ドキュメント更新済み（spec-sync 該当があれば）
