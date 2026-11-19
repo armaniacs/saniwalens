@@ -8,7 +8,7 @@
 バージョンは [Semantic Versioning](https://semver.org/lang/ja/) に従う。
 各節はタグ間差分単位で記録する（ブランチ差分単位ではない）。
 
-## [Unreleased]
+## [0.6.5] - 2026-11-20
 
 ### Added
 
