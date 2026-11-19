@@ -606,12 +606,13 @@ pub(crate) fn eprint_freshness(line: &str) {
 /// The `--frozen` freshness header: how old the store is, with a refresh hint
 /// once it is older than a day. This is what lets the user *notice* staleness.
 pub(crate) fn freshness_line(analyzed_at: Option<&str>) -> String {
-    let Some(parsed) = analyzed_at.and_then(|at| chrono::DateTime::parse_from_rfc3339(at).ok())
-    else {
+    let Some(parsed) = analyzed_at.and_then(crate::time::parse_rfc3339_nanos) else {
         return "store: freshness unknown (no analyze recorded) — run `saniwalens analyze`"
             .to_string();
     };
-    let age_secs = (chrono::Utc::now() - parsed.with_timezone(&chrono::Utc)).num_seconds();
+    // Whole seconds between now and the stamp, truncated toward zero — the
+    // old `(Utc::now() - parsed).num_seconds()`.
+    let age_secs = ((crate::time::now_nanos() - parsed) / 1_000_000_000) as i64;
     let hint = if age_secs >= 24 * 3600 {
         " — run `saniwalens analyze` (or drop --frozen) to refresh"
     } else {

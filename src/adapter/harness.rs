@@ -422,7 +422,7 @@ where
     store.replace_surfaces(&surfaces)?;
 
     store.record_analyzer_version(analyzer_key, analyzer_version)?;
-    store.set_meta("analyzed_at", &chrono::Utc::now().to_rfc3339())?;
+    store.set_meta("analyzed_at", &crate::time::now_rfc3339_utc())?;
     store.set_meta("projects_dir", &projects_dir.display().to_string())?;
     store.set_meta("config_dir", &config_dir.display().to_string())?;
     store.set_meta("harness", harness.label())?;

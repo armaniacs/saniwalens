@@ -278,8 +278,9 @@ error, since the comparison window is undefined without a current start.
   silently reinterpreted by a stray `--since`. The conflict is declared once on
   the shared period-flags group (`cli/window.rs`); trend's pair keeps its own
   declaration so its pair-specific help survives.
-- **Calendar bound.** Every resolved instant must stay inside the calendar
-  chrono can express (`NaiveDate`, roughly ±262,000 years), checked once at the
+- **Calendar bound.** Every resolved instant must stay inside the calendar the
+  internal civil-calendar module (`src/time.rs`) can express (roughly
+  ±262,000 years), checked once at the
   resolve entry rather than trusted to the zone's sign. A `--last` span that
   leaves it (e.g. `--last 100000000d`) gets the invalid-span error. A named day
   whose resolved midnight or last second leaves it gets the empty-window error

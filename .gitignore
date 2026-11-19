@@ -25,3 +25,10 @@
 
 # OS / editor noise
 .DS_Store
+
+# Local working artifacts (review tooling, generated graphs, scratch plans)
+/.checking-team-tmp
+/graphify-out
+/plans
+/promo/*/images/
+/saniwalens_VULNHUNT_RESULTS_*

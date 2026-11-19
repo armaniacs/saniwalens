@@ -8,6 +8,16 @@
 バージョンは [Semantic Versioning](https://semver.org/lang/ja/) に従う。
 各節はタグ間差分単位で記録する（ブランチ差分単位ではない）。
 
+## [Unreleased]
+
+### Changed
+
+- 依存クレート chrono をやめ、jiff へ置き換えた。chrono が
+  RUSTSEC-2026-0543 で unmaintained 宣言され、`cargo deny` の依存ゲートが
+  赤くなっていたため。RFC3339 表記・JST バケット境界・`--since` /
+  `--last` の暦境界（±262,000年）・`cleanup` のローカル時刻表示は
+  従来とバイト同一。
+
 ## [0.6.4] - 2026-11-17
 
 ### Added

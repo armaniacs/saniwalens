@@ -631,9 +631,7 @@ fn range_clause_utc_text(range: TimeRange, column: &str) -> (String, Vec<String>
 /// The RFC 3339 UTC text of an epoch second, in the one format
 /// `sessions.started_at` is stamped with.
 fn epoch_to_rfc3339_utc(epoch: i64) -> String {
-    chrono::DateTime::from_timestamp(epoch, 0)
-        .map(|dt| dt.to_rfc3339())
-        .unwrap_or_default()
+    crate::time::epoch_to_rfc3339_utc(epoch)
 }
 
 impl Store {
@@ -2382,9 +2380,7 @@ fn source_label(source: Source) -> &'static str {
 }
 
 fn epoch_ms_to_rfc3339(epoch_ms: i64) -> String {
-    chrono::DateTime::from_timestamp_millis(epoch_ms)
-        .map(|dt| dt.to_rfc3339())
-        .unwrap_or_default()
+    crate::time::epoch_ms_to_rfc3339(epoch_ms)
 }
 
 /// A SQLite cell as a typed JSON value, for the `--format json` surface.

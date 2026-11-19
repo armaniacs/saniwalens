@@ -748,9 +748,7 @@ pub fn subagent_sidecar_path(run_path: &Path) -> PathBuf {
 }
 
 fn parse_timestamp_ms(timestamp: &str) -> Option<i64> {
-    chrono::DateTime::parse_from_rfc3339(timestamp)
-        .ok()
-        .map(|dt| dt.timestamp_millis())
+    crate::time::parse_rfc3339_millis(timestamp)
 }
 
 /// Classify a `tool_use` content block into a domain record kind: the Skill tool
