@@ -12,8 +12,8 @@ use anyhow::{Context, Result};
 use serde_json::Value;
 
 use crate::adapter::harness::{
-    AnalyzeStats, Harness, ParsedSession, Site, home_dir, load_agents, load_claude_md,
-    load_commands, load_skills_deduped, xdg_from_env,
+    AnalyzeStats, Harness, ParsedSession, Site, load_agents, load_claude_md, load_commands,
+    load_skills_deduped,
 };
 use crate::adapter::transcript::{
     ToolError, WorkEvent, sanitize_usage_field, warn_dropped_usage_fields,
@@ -26,6 +26,7 @@ use crate::core::span::{
 use crate::core::subagent::SubagentRun;
 use crate::core::surface::{LoadMode, Scope, Surface};
 use crate::core::usage::{attribute_subagents, extract_usage_events, output_tokens};
+use crate::session::{home_dir, xdg_from_env};
 use crate::store::SessionMeta;
 
 /// The model label when a message names none — honest, never a guess.

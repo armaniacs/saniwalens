@@ -265,6 +265,18 @@ harness passes it unchanged; every other per-harness fact reaches the shell
 as seam data. Nothing in the Claude Code path moves ― that immobility is the
 contract this spec protects.
 
+The full touchpoint set for a new variant, measured in `adapter/harness.rs`
+and enforced by exhaustive matches (a forgotten arm fails to compile): the
+`HarnessFacts` aggregate (`facts()` — label, help, analyzer version key,
+config surface catalog entry, static-copy facts) covers eleven one-arm
+methods, so adding a variant is one `facts()` arm plus the data it carries.
+Five methods intentionally stay as per-harness matches because they carry
+behavior or paths rather than static facts: `launch_command`,
+`interactive_launch_command`, `run_line_renderer`, `inventory_preamble`, and
+`db_file_name` (plus `analyze`, `catalog_surfaces`, and `copy`, which are
+data/dispatch arms). `HarnessFacts` is adapter-local: the shell consumes the
+existing accessors unchanged.
+
 ## Non-goals
 
 DSH (DeepSeek harness app) and any fourth harness are not supported: no

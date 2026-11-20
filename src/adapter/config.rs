@@ -8,8 +8,8 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 
-use crate::adapter::harness::home_dir;
 use crate::core::surface::{LoadMode, Scope, Surface};
+use crate::session::home_dir;
 
 /// The Claude Code config root: `$CLAUDE_CONFIG_DIR` when it names a non-empty
 /// path, else `.claude` under the home directory. Reading those two values is

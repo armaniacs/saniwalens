@@ -21,6 +21,7 @@ use crate::core::span::Span;
 use crate::core::subagent::SubagentRun;
 use crate::core::surface::{Scope, Surface};
 use crate::core::usage::UsageEvent;
+use crate::session::home_dir;
 use crate::store::{IngestBatch, OpenMode, SessionMeta, Store};
 
 /// One rendered slice of a headless run's raw stdout line — what the
@@ -436,6 +437,27 @@ where
     })
 }
 
+/// The static per-harness copy as one dataset — the strings every report,
+/// prompt, and hint renders from. One exhaustive match in [`Harness::facts`]
+/// fills it, so a new harness's static copy is one arm there and the
+/// compiler, not review, catches a missing one. The per-field accessors on
+/// `Harness` remain the seam callers render through; each reads exactly one
+/// field of this struct.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HarnessFacts {
+    pub label: &'static str,
+    pub display_name: &'static str,
+    pub article: &'static str,
+    pub instruction_file: &'static str,
+    pub project_config_ref: &'static str,
+    pub global_config_ref: &'static str,
+    pub source_noun: &'static str,
+    pub raw_source: &'static str,
+    pub config_inventory: &'static str,
+    pub readable_config: &'static str,
+    pub input_unit: &'static str,
+}
+
 impl Harness {
     /// Every harness, in canonical order: the single list `parse` and the
     /// error-hint vocabulary derive from, so a new harness lands in one place.
@@ -492,110 +514,115 @@ impl Harness {
             .find(|harness| harness.label() == value)
     }
 
+    /// The harness's static copy assembled in one exhaustive match: a new
+    /// harness adds one arm here and every static-copy consumer is covered —
+    /// the `copy()` aggregation pattern, extended to the whole copy. The
+    /// per-field accessors below stay as the public seam; each delegates to
+    /// exactly its field, so this arm is the single source of the copy.
+    pub fn facts(&self) -> HarnessFacts {
+        match self {
+            Harness::Claude => HarnessFacts {
+                label: "claude",
+                display_name: "Claude Code",
+                article: "a",
+                instruction_file: "CLAUDE.md",
+                project_config_ref: ".claude / CLAUDE.md",
+                global_config_ref: "~/.claude",
+                source_noun: "session transcripts",
+                raw_source: "~/.claude/projects transcripts",
+                config_inventory: "CLAUDE.md, rules, hooks, skills, and settings",
+                readable_config: "CLAUDE.md, always-on rules, skill/agent descriptions",
+                input_unit: "transcript(s)",
+            },
+            Harness::Opencode => HarnessFacts {
+                label: "opencode",
+                display_name: "opencode",
+                article: "an",
+                instruction_file: "AGENTS.md",
+                project_config_ref: ".opencode / AGENTS.md",
+                global_config_ref: "~/.config/opencode",
+                source_noun: "sessions",
+                raw_source: "opencode database",
+                config_inventory: "AGENTS.md, commands, agents, and opencode.json",
+                readable_config: "AGENTS.md, commands, agent descriptions",
+                input_unit: "session(s)",
+            },
+            Harness::Kilocode => HarnessFacts {
+                label: "kilocode",
+                display_name: "kilocode",
+                article: "a",
+                instruction_file: "AGENTS.md",
+                project_config_ref: "AGENTS.md",
+                global_config_ref: "~/.config/kilo",
+                source_noun: "sessions",
+                raw_source: "kilocode task files",
+                config_inventory: "AGENTS.md, commands, skills, and kilo.json",
+                readable_config: "AGENTS.md, command and skill descriptions",
+                input_unit: "session(s)",
+            },
+        }
+    }
+
     /// The `meta.harness` value and the error-hint vocabulary.
     pub fn label(&self) -> &'static str {
-        match self {
-            Harness::Claude => "claude",
-            Harness::Opencode => "opencode",
-            Harness::Kilocode => "kilocode",
-        }
+        self.facts().label
     }
 
     /// The human-facing name for report copy. Reports name the harness whose
     /// rows they render, so opencode output never claims to be Claude Code's.
     pub fn display_name(&self) -> &'static str {
-        match self {
-            Harness::Claude => "Claude Code",
-            Harness::Opencode => "opencode",
-            Harness::Kilocode => "kilocode",
-        }
+        self.facts().display_name
     }
 
     /// The indefinite article for the display name in prose ("a Claude Code
     /// advisor", "an opencode advisor").
     pub fn article(&self) -> &'static str {
-        match self {
-            Harness::Claude => "a",
-            Harness::Opencode => "an",
-            Harness::Kilocode => "a",
-        }
+        self.facts().article
     }
 
     /// The instruction file reports point at: the file a file-map or rule
     /// fix lands in. kilocode reads the shared `AGENTS.md` convention.
     pub fn instruction_file(&self) -> &'static str {
-        match self {
-            Harness::Claude => "CLAUDE.md",
-            Harness::Opencode => "AGENTS.md",
-            Harness::Kilocode => "AGENTS.md",
-        }
+        self.facts().instruction_file
     }
 
     /// How reports name the project config layer that owns a fix. kilocode's
     /// project-level conventions (`.kilocode/rules` and the like) are not
     /// observed, so the copy names the one instruction file that exists.
     pub fn project_config_ref(&self) -> &'static str {
-        match self {
-            Harness::Claude => ".claude / CLAUDE.md",
-            Harness::Opencode => ".opencode / AGENTS.md",
-            Harness::Kilocode => "AGENTS.md",
-        }
+        self.facts().project_config_ref
     }
 
     /// How reports name the global config layer that owns a fix.
     pub fn global_config_ref(&self) -> &'static str {
-        match self {
-            Harness::Claude => "~/.claude",
-            Harness::Opencode => "~/.config/opencode",
-            Harness::Kilocode => "~/.config/kilo",
-        }
+        self.facts().global_config_ref
     }
 
     /// The noun for analyzed input in prose ("their Claude Code session
     /// transcripts", "their opencode sessions").
     pub fn source_noun(&self) -> &'static str {
-        match self {
-            Harness::Claude => "session transcripts",
-            Harness::Opencode => "sessions",
-            Harness::Kilocode => "sessions",
-        }
+        self.facts().source_noun
     }
 
     /// The raw input advisors must not re-parse ("the raw ~/.claude/projects
     /// transcripts", "the raw opencode database").
     pub fn raw_source(&self) -> &'static str {
-        match self {
-            Harness::Claude => "~/.claude/projects transcripts",
-            Harness::Opencode => "opencode database",
-            Harness::Kilocode => "kilocode task files",
-        }
+        self.facts().raw_source
     }
 
     /// The config files an advisor opens to pin down a root cause.
     pub fn config_inventory(&self) -> &'static str {
-        match self {
-            Harness::Claude => "CLAUDE.md, rules, hooks, skills, and settings",
-            Harness::Opencode => "AGENTS.md, commands, agents, and opencode.json",
-            Harness::Kilocode => "AGENTS.md, commands, skills, and kilo.json",
-        }
+        self.facts().config_inventory
     }
 
     /// The readable-config breakdown in the `overhead` view.
     pub fn readable_config(&self) -> &'static str {
-        match self {
-            Harness::Claude => "CLAUDE.md, always-on rules, skill/agent descriptions",
-            Harness::Opencode => "AGENTS.md, commands, agent descriptions",
-            Harness::Kilocode => "AGENTS.md, command and skill descriptions",
-        }
+        self.facts().readable_config
     }
 
     /// The unit a refresh re-analyzes ("transcript(s)", "session(s)").
     pub fn input_unit(&self) -> &'static str {
-        match self {
-            Harness::Claude => "transcript(s)",
-            Harness::Opencode => "session(s)",
-            Harness::Kilocode => "session(s)",
-        }
+        self.facts().input_unit
     }
 
     /// The launch shape for an optimize delivery: the binary plus any leading
@@ -770,13 +797,6 @@ impl Harness {
     }
 }
 
-// Bridge re-export, not a definition: `home_dir`/`xdg_from_env` live in
-// `session.rs` now (they are process-env reads, not harness-format knowledge).
-// This keeps the adapter-internal consumers (`config.rs`, `kilocode.rs`,
-// `opencode.rs`, and this module's own `catalog_surfaces`) compiling until
-// their imports are re-pointed at `crate::session` directly.
-pub(crate) use crate::session::{home_dir, xdg_from_env};
-
 /// A file's `(mtime epoch nanos, size)` — the cheap change detector for
 /// incremental ingest. `None` when the file cannot be stat'ed (it is then
 /// ingested unconditionally and not recorded).
@@ -860,6 +880,56 @@ mod tests {
         assert_eq!(Harness::Opencode.input_unit(), "session(s)");
         assert!(Harness::Opencode.inventory_preamble().contains("AGENTS.md"));
         assert!(!Harness::Opencode.inventory_preamble().contains("CLAUDE.md"));
+    }
+
+    // ---- harness facts: the static copy as one arm ----
+
+    #[test]
+    fn facts_fields_are_the_same_set_and_non_empty_for_every_harness() {
+        // HarnessFacts is one struct, so the field set is identical by
+        // construction; the assertable half of the contract is that every
+        // harness fills every field — an empty string would leak into
+        // reports, prompts, and hints verbatim.
+        for harness in Harness::ALL {
+            let facts = harness.facts();
+            for (field, value) in [
+                ("label", facts.label),
+                ("display_name", facts.display_name),
+                ("article", facts.article),
+                ("instruction_file", facts.instruction_file),
+                ("project_config_ref", facts.project_config_ref),
+                ("global_config_ref", facts.global_config_ref),
+                ("source_noun", facts.source_noun),
+                ("raw_source", facts.raw_source),
+                ("config_inventory", facts.config_inventory),
+                ("readable_config", facts.readable_config),
+                ("input_unit", facts.input_unit),
+            ] {
+                assert!(!value.is_empty(), "{harness:?}.{field} must be non-empty");
+            }
+        }
+    }
+
+    #[test]
+    fn every_accessor_reads_its_own_facts_field() {
+        // The accessors stay as the seam callers render through; each must
+        // read exactly its HarnessFacts field so the facts() arm is the
+        // single source — an accessor drifting from facts() would render
+        // stale copy while the consolidated data moves on.
+        for harness in Harness::ALL {
+            let facts = harness.facts();
+            assert_eq!(harness.label(), facts.label);
+            assert_eq!(harness.display_name(), facts.display_name);
+            assert_eq!(harness.article(), facts.article);
+            assert_eq!(harness.instruction_file(), facts.instruction_file);
+            assert_eq!(harness.project_config_ref(), facts.project_config_ref);
+            assert_eq!(harness.global_config_ref(), facts.global_config_ref);
+            assert_eq!(harness.source_noun(), facts.source_noun);
+            assert_eq!(harness.raw_source(), facts.raw_source);
+            assert_eq!(harness.config_inventory(), facts.config_inventory);
+            assert_eq!(harness.readable_config(), facts.readable_config);
+            assert_eq!(harness.input_unit(), facts.input_unit);
+        }
     }
 
     #[test]

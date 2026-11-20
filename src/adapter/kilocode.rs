@@ -16,8 +16,8 @@ use anyhow::{Context, Result};
 use serde_json::Value;
 
 use crate::adapter::harness::{
-    AnalyzeStats, Harness, ParsedSession, Site, file_fingerprint, home_dir, load_agents,
-    load_claude_md, load_commands, load_kilo_instructions, load_skills_deduped, xdg_from_env,
+    AnalyzeStats, Harness, ParsedSession, Site, file_fingerprint, load_agents, load_claude_md,
+    load_commands, load_kilo_instructions, load_skills_deduped,
 };
 use crate::adapter::transcript::{
     ToolError, WorkEvent, sanitize_usage_field, warn_dropped_usage_fields,
@@ -27,6 +27,7 @@ use crate::core::path::basename;
 use crate::core::span::{DEFAULT_IDLE_GAP_MS, Record, RecordKind, extract_spans, session_start};
 use crate::core::surface::{Scope, Surface};
 use crate::core::usage::extract_usage_events;
+use crate::session::{home_dir, xdg_from_env};
 use crate::store::SessionMeta;
 use std::collections::HashSet;
 use std::fs;
