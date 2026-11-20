@@ -565,6 +565,22 @@ fn range_clause(range: TimeRange, column: &str) -> (String, Vec<i64>) {
     }
 }
 
+/// The bind vector a range+LIMIT reader passes to `params_from_iter`: the
+/// reader's own leading cells (`extra`, e.g. `work_counts_briefing`'s kind
+/// cell) first, then the range binds as `Value`s, then the LIMIT bind. The
+/// [`saturating_limit`] boundary contract lives here so the briefing
+/// readers assemble their parameters without re-deriving it.
+fn range_params(
+    binds: &[i64],
+    extra: impl IntoIterator<Item = rusqlite::types::Value>,
+    limit: usize,
+) -> Vec<rusqlite::types::Value> {
+    let mut params: Vec<rusqlite::types::Value> = extra.into_iter().collect();
+    params.extend(binds.iter().copied().map(rusqlite::types::Value::from));
+    params.push(rusqlite::types::Value::from(saturating_limit(limit)));
+    params
+}
+
 /// The same window for a uniform RFC 3339 UTC timestamp column
 /// (`sessions.started_at`): lexicographic order is chronological order for
 /// the one format the writer stamps (`epoch_ms_to_rfc3339`), and the upper
@@ -1845,12 +1861,7 @@ impl Store {
              WHERE e.kind = 'file_edit' AND e.{path} IS NOT NULL{filter}
              ORDER BY e.started_epoch LIMIT ?"
         );
-        let mut params: Vec<rusqlite::types::Value> = binds
-            .iter()
-            .copied()
-            .map(rusqlite::types::Value::from)
-            .collect();
-        params.push(rusqlite::types::Value::from(saturating_limit(limit)));
+        let params = range_params(&binds, [], limit);
         let mut stmt = self.conn.prepare(&sql)?;
         let rows = stmt
             .query_map(params_from_iter(params), |row| {
@@ -1883,9 +1894,7 @@ impl Store {
              GROUP BY {id} ORDER BY COUNT(*) DESC LIMIT ?"
         );
         let kind_cell = rusqlite::types::Value::Text(kind.to_string());
-        let mut params: Vec<rusqlite::types::Value> = vec![kind_cell];
-        params.extend(binds.iter().copied().map(rusqlite::types::Value::from));
-        params.push(rusqlite::types::Value::from(saturating_limit(limit)));
+        let params = range_params(&binds, [kind_cell], limit);
         let mut stmt = self.conn.prepare(&sql)?;
         let rows = stmt
             .query_map(params_from_iter(params), |row| {
@@ -1911,12 +1920,7 @@ impl Store {
              GROUP BY s.project, e.{category}, e.{tool}
              ORDER BY COUNT(*) DESC, s.project, e.{category} LIMIT ?"
         );
-        let mut params: Vec<rusqlite::types::Value> = binds
-            .iter()
-            .copied()
-            .map(rusqlite::types::Value::from)
-            .collect();
-        params.push(rusqlite::types::Value::from(saturating_limit(limit)));
+        let params = range_params(&binds, [], limit);
         let mut stmt = self.conn.prepare(&sql)?;
         let rows = stmt
             .query_map(params_from_iter(params), |row| {
@@ -1946,12 +1950,7 @@ impl Store {
              GROUP BY s.project, e.{category}
              ORDER BY COUNT(*) DESC, s.project, e.{category} LIMIT ?"
         );
-        let mut params: Vec<rusqlite::types::Value> = binds
-            .iter()
-            .copied()
-            .map(rusqlite::types::Value::from)
-            .collect();
-        params.push(rusqlite::types::Value::from(saturating_limit(limit)));
+        let params = range_params(&binds, [], limit);
         let mut stmt = self.conn.prepare(&sql)?;
         let rows = stmt
             .query_map(params_from_iter(params), |row| {
@@ -1977,12 +1976,7 @@ impl Store {
             "SELECT {behavior}, COUNT(*) FROM events WHERE kind = 'prompt' AND {behavior} IS NOT NULL{filter}
              GROUP BY {behavior} ORDER BY COUNT(*) DESC LIMIT ?"
         );
-        let mut params: Vec<rusqlite::types::Value> = binds
-            .iter()
-            .copied()
-            .map(rusqlite::types::Value::from)
-            .collect();
-        params.push(rusqlite::types::Value::from(saturating_limit(limit)));
+        let params = range_params(&binds, [], limit);
         let mut stmt = self.conn.prepare(&sql)?;
         let rows = stmt
             .query_map(params_from_iter(params), |row| {
@@ -1995,12 +1989,7 @@ impl Store {
     /// Bounded `skill_usage`: the most-invoked `limit` skills, same order.
     pub fn skill_usage_briefing(&self, range: TimeRange, limit: usize) -> Result<Vec<SkillUsage>> {
         let (filter, binds) = range_clause(range, "started_epoch");
-        let mut params: Vec<rusqlite::types::Value> = binds
-            .iter()
-            .copied()
-            .map(rusqlite::types::Value::from)
-            .collect();
-        params.push(rusqlite::types::Value::from(saturating_limit(limit)));
+        let params = range_params(&binds, [], limit);
         let mut stmt = self.conn.prepare(&format!(
             "SELECT surface_id,
                     COUNT(*),
@@ -2033,12 +2022,7 @@ impl Store {
         limit: usize,
     ) -> Result<Vec<AgentCost>> {
         let (filter, binds) = range_clause(range, "started_epoch");
-        let mut params: Vec<rusqlite::types::Value> = binds
-            .iter()
-            .copied()
-            .map(rusqlite::types::Value::from)
-            .collect();
-        params.push(rusqlite::types::Value::from(saturating_limit(limit)));
+        let params = range_params(&binds, [], limit);
         let mut stmt = self.conn.prepare(&format!(
             "SELECT agent, COUNT(*), COALESCE(SUM(out_tokens), 0)
              FROM subagent_runs
@@ -2066,12 +2050,7 @@ impl Store {
         limit: usize,
     ) -> Result<Vec<EventCost>> {
         let (filter, binds) = range_clause(range, "started_epoch");
-        let mut params: Vec<rusqlite::types::Value> = binds
-            .iter()
-            .copied()
-            .map(rusqlite::types::Value::from)
-            .collect();
-        params.push(rusqlite::types::Value::from(saturating_limit(limit)));
+        let params = range_params(&binds, [], limit);
         let mut stmt = self.conn.prepare(&format!(
             "SELECT started_epoch, out_tokens, ctx_growth, duration_sec
              FROM events
@@ -2098,12 +2077,7 @@ impl Store {
         limit: usize,
     ) -> Result<Vec<CatalogEntry>> {
         let (filter, binds) = range_clause(events_window, "e.started_epoch");
-        let mut params: Vec<rusqlite::types::Value> = binds
-            .iter()
-            .copied()
-            .map(rusqlite::types::Value::from)
-            .collect();
-        params.push(rusqlite::types::Value::from(saturating_limit(limit)));
+        let params = range_params(&binds, [], limit);
         let mut stmt = self.conn.prepare(&format!(
             "SELECT f.kind, f.id, f.scope, f.project, f.static_tokens,
                     f.startup_tokens, f.load_mode, f.attrs_json, f.description, COUNT(u.event_id)
