@@ -77,17 +77,30 @@ pub fn process_locale_language() -> Option<AdvisorLanguage> {
     )
 }
 
-/// Whether one locale value names Japanese: lowercase it, drop the encoding
+/// Whether one locale value votes a language: lowercase it, drop the encoding
 /// (`.UTF-8`) and any `@` modifier, then match the first `_`/`-`-separated
-/// subtag against `ja`. `C`, `POSIX`, and the empty value sit on the
-/// English side (`false`) — a strange value falls back to the default, it
-/// never fails the invocation.
-pub fn locale_is_japanese(value: &str) -> bool {
+/// subtag against the subtag table. `C`, `POSIX`, and the empty value vote
+/// nothing (`None`) — a strange value falls back to the default, it never
+/// fails the invocation. The table is the single source for locale voting, so
+/// a language that gains a locale mapping is one row.
+const LOCALE_SUBTAG_LANGUAGE: [(&str, AdvisorLanguage); 1] = [("ja", AdvisorLanguage::Ja)];
+
+/// The advisor language one locale value votes for, if any, resolved through
+/// the subtag table. `None` means the value carries no opinion.
+pub fn locale_language(value: &str) -> Option<AdvisorLanguage> {
     let lower = value.trim().to_lowercase();
     let base = lower.split(['.', '@']).next().unwrap_or("");
-    base.split(['_', '-'])
-        .next()
-        .is_some_and(|subtag| subtag == "ja")
+    let subtag = base.split(['_', '-']).next().unwrap_or("");
+    LOCALE_SUBTAG_LANGUAGE
+        .iter()
+        .find(|(subtag_language, _)| *subtag_language == subtag)
+        .map(|(_, language)| *language)
+}
+
+/// Whether one locale value names Japanese — derived from the subtag table
+/// (`locale_language`), never a hardcoded subtag.
+pub fn locale_is_japanese(value: &str) -> bool {
+    locale_language(value) == Some(AdvisorLanguage::Ja)
 }
 
 /// Whether a locale value is the bare `C` / `POSIX` locale that suppresses
@@ -108,12 +121,13 @@ pub fn language_head(value: &str) -> Option<&str> {
 
 /// Resolve the locale fallback with POSIX precedence: `LC_ALL` wins over
 /// `LC_MESSAGES`, which wins over `LANG`; an empty value counts as unset.
-/// Beneath a quiet POSIX layer — no winner, or a non-Japanese, non-C one —
-/// the `LANGUAGE` head votes (its own colon-separated first entry, normalized
-/// like every other locale value). A bare-`C` / `POSIX` winner suppresses
-/// `LANGUAGE` entirely (gettext's C priority), as does a Japanese winner
-/// needing no help. Yields `Some(Ja)` exactly when the layer votes Japanese,
-/// `None` otherwise — the caller falls back to the English default, so
+/// Beneath a quiet POSIX layer — no winner, or one that votes no language
+/// and is not bare `C` — the `LANGUAGE` head votes (its own colon-separated
+/// first entry, normalized like every other locale value). A bare-`C` /
+/// `POSIX` winner suppresses `LANGUAGE` entirely (gettext's C priority), as
+/// does a language-voting winner needing no help. Yields `Some(language)`
+/// exactly when a layer votes one through the subtag table, `None`
+/// otherwise — the caller falls back to the English default, so
 /// `C`/`en_US`/unset all render byte-identical to before.
 pub fn resolve_locale_language(
     lc_all: Option<&str>,
@@ -127,17 +141,14 @@ pub fn resolve_locale_language(
         .map(str::trim)
         .find(|value| !value.is_empty());
     if let Some(winner) = winner {
-        if locale_is_japanese(winner) {
-            return Some(AdvisorLanguage::Ja);
+        if let Some(vote) = locale_language(winner) {
+            return Some(vote);
         }
         if locale_is_c(winner) {
             return None;
         }
     }
-    language
-        .and_then(language_head)
-        .filter(|head| locale_is_japanese(head))
-        .map(|_| AdvisorLanguage::Ja)
+    language.and_then(language_head).and_then(locale_language)
 }
 
 /// What `--harness` / `--profile` / `--language` plus the config file resolve
@@ -179,11 +190,11 @@ impl LanguageSource {
 /// Rendered on stderr by the caller — never into prompts or JSON — so normal
 /// output stays byte-identical with or without `--verbose`.
 pub fn language_decision_line(source: LanguageSource, language: AdvisorLanguage) -> String {
-    let code = match language {
-        AdvisorLanguage::En => "en",
-        AdvisorLanguage::Ja => "ja",
-    };
-    format!("language: {code} (decided by {})", source.label())
+    format!(
+        "language: {} (decided by {})",
+        language.label(),
+        source.label()
+    )
 }
 
 /// Print [`language_decision_line`] on stderr, dimmed like the other shell
@@ -234,9 +245,9 @@ pub fn resolve_cli_with_language(
         .transpose()?
         .flatten();
     let resolved = config_file::resolve(cli_harness, cli_profile, None, file.as_ref(), config_dir)?;
-    // The locale only ever votes Ja: Some(En) carries no opinion, same as
-    // None — so the enum feeds the default directly instead of round-tripping
-    // through a "ja" string and the parser.
+    // The locale votes at most one language through the subtag table: Some
+    // names it, None carries no opinion — so the vote feeds the resolution
+    // directly instead of round-tripping through a string and the parser.
     let (language, language_source) =
         match config_file::resolve_language(cli_language, file.as_ref()) {
             // A present flag always wins the merge above, so its presence names
@@ -249,9 +260,7 @@ pub fn resolve_cli_with_language(
                 };
                 (parse_language(Some(&code))?, source)
             }
-            None if locale == Some(AdvisorLanguage::Ja) => {
-                (AdvisorLanguage::Ja, LanguageSource::Locale)
-            }
+            None if let Some(vote) = locale => (vote, LanguageSource::Locale),
             None => (AdvisorLanguage::default(), LanguageSource::Default),
         };
     Ok(ResolvedCli {
@@ -268,9 +277,8 @@ pub fn resolve_cli_with_language(
 pub fn parse_language(value: Option<&str>) -> Result<AdvisorLanguage> {
     match value {
         None => Ok(AdvisorLanguage::default()),
-        Some(v) => {
-            AdvisorLanguage::parse(v).with_context(|| format!("unknown language '{v}' (en | ja)"))
-        }
+        Some(v) => AdvisorLanguage::parse(v)
+            .with_context(|| format!("unknown language '{v}' ({})", AdvisorLanguage::label_list())),
     }
 }
 
@@ -882,6 +890,15 @@ mod tests {
     }
 
     #[test]
+    fn parse_language_unknown_hint_pins_the_candidate_bytes() {
+        // PBI 2026-11-21-04: the hint vocabulary moves to the AdvisorLanguage
+        // single source; this literal pins the bytes across the refactor, the
+        // same shape as parse_harness's pin above.
+        let err = parse_language(Some("fr")).unwrap_err();
+        assert_eq!(format!("{err:#}"), "unknown language 'fr' (en | ja)");
+    }
+
+    #[test]
     fn resolve_cli_language_flag_beats_the_file() {
         let dir = example_dir("file-language-override");
         let _ = std::fs::remove_dir_all(&dir);
@@ -964,6 +981,21 @@ mod tests {
         ] {
             assert!(!locale_is_japanese(not_ja), "{not_ja}");
         }
+    }
+
+    #[test]
+    fn locale_votes_resolve_through_the_subtag_table() {
+        // PBI 2026-11-21-04: the subtag→language table is the single source
+        // for locale voting; `locale_is_japanese` stays a derived view of it,
+        // so a language that gains a locale mapping is one table row.
+        assert_eq!(locale_language("ja_JP.UTF-8"), Some(AdvisorLanguage::Ja));
+        assert_eq!(locale_language("ja"), Some(AdvisorLanguage::Ja));
+        assert_eq!(locale_language("JA-jp"), Some(AdvisorLanguage::Ja));
+        for silent in ["en_US.UTF-8", "C", "C.UTF-8", "", "japanese", "de_JA"] {
+            assert_eq!(locale_language(silent), None, "{silent}");
+        }
+        assert!(locale_is_japanese("ja_JP.UTF-8"));
+        assert!(!locale_is_japanese("en_US.UTF-8"));
     }
 
     #[test]

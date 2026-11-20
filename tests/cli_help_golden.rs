@@ -408,3 +408,29 @@ fn each_windowed_view_declares_format_once() {
         }
     }
 }
+
+/// The global `--language` help must carry the single-source vocabulary: clap
+/// doc comments need string literals, so the wording cannot interpolate
+/// `AdvisorLanguage::label_list()`. This pin fails when a new language joins
+/// `ALL` and forces the help doc comment to follow. The byte-exact captures
+/// above pin the same bytes; this one states the contract.
+#[test]
+fn the_language_help_vocabulary_is_single_sourced() {
+    use saniwalens::core::optimize::AdvisorLanguage;
+
+    let help = saniwalens::cli::Cli::command()
+        .get_arguments()
+        .find(|arg| arg.get_id() == "language")
+        .expect("the global --language flag exists")
+        .get_help()
+        .expect("the --language flag carries a help text")
+        .to_string();
+    let default = AdvisorLanguage::En.label();
+    let expected =
+        AdvisorLanguage::label_list().replacen(default, &format!("{default} (the default)"), 1);
+    assert!(
+        help.contains(&expected),
+        "the --language help must carry the single-source vocabulary \
+         ({expected}):\n{help}"
+    );
+}

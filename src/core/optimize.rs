@@ -179,15 +179,40 @@ pub enum AdvisorLanguage {
 }
 
 impl AdvisorLanguage {
-    /// Parse a `language` value (`en` | `ja`). `None` for anything else, so
-    /// the caller fails with the valid list — the same shape as
-    /// `Harness::parse`.
-    pub fn parse(value: &str) -> Option<Self> {
-        match value {
-            "en" => Some(Self::En),
-            "ja" => Some(Self::Ja),
-            _ => None,
+    /// Every language, in canonical order: the single list `parse`, the
+    /// error hints, and the decision line derive from, so a new language
+    /// lands in one place — the same shape as `Harness::ALL`.
+    pub const ALL: [AdvisorLanguage; 2] = [AdvisorLanguage::En, AdvisorLanguage::Ja];
+
+    /// The valid `--language` spelling and the decision-line code: the one
+    /// literal per variant, which every vocabulary surface references and
+    /// never re-spells.
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::En => "en",
+            Self::Ja => "ja",
         }
+    }
+
+    /// Every valid `--language` spelling, in canonical order, for error
+    /// hints (`session::parse_language`): built from [`AdvisorLanguage::ALL`],
+    /// never re-spelled.
+    pub fn label_list() -> String {
+        Self::ALL
+            .iter()
+            .map(|language| language.label())
+            .collect::<Vec<_>>()
+            .join(" | ")
+    }
+
+    /// Parse a `language` value. `None` for anything else, so the caller
+    /// fails with the valid list. Single-sourced from [`AdvisorLanguage::ALL`]:
+    /// the spelling compared here is the same [`AdvisorLanguage::label`] the
+    /// hints and decision line use — the same shape as `Harness::parse`.
+    pub fn parse(value: &str) -> Option<Self> {
+        Self::ALL
+            .into_iter()
+            .find(|language| language.label() == value)
     }
 
     /// The single wording source for the language instruction: `Some` only
@@ -1719,6 +1744,22 @@ mod tests {
         assert_eq!(AdvisorLanguage::parse(""), None);
         assert_eq!(AdvisorLanguage::parse("jp"), None);
         assert_eq!(AdvisorLanguage::parse("EN"), None);
+    }
+
+    #[test]
+    fn advisor_language_vocabulary_is_single_sourced() {
+        // PBI 2026-11-21-04: the vocabulary derives from ALL / label() /
+        // label_list(), the same shape as Harness — a new language lands in
+        // one place and parse, the hints, the decision line, and the help
+        // vocabulary all follow.
+        assert_eq!(
+            AdvisorLanguage::ALL,
+            [AdvisorLanguage::En, AdvisorLanguage::Ja]
+        );
+        assert_eq!(AdvisorLanguage::label_list(), "en | ja");
+        for language in AdvisorLanguage::ALL {
+            assert_eq!(AdvisorLanguage::parse(language.label()), Some(language));
+        }
     }
 
     #[test]
