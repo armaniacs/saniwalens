@@ -17,7 +17,7 @@ use crate::core::surface::{StartupSavings, Wedge};
 use crate::session::{
     AnalyzeStats, Session, SessionEnv, Style, env_roots, eprint_freshness,
     eprint_language_decision, freshness_line, guard_harness, home_dir, process_locale_language,
-    resolve_cli_with_language,
+    refreshed_just_now_line, resolve_cli_with_language,
 };
 use crate::store::{OpenMode, Store};
 
@@ -565,6 +565,30 @@ fn parse_scope(value: Option<&str>) -> Result<ScopeFilter> {
     }
 }
 
+/// The prologue `optimize` and `--apply` share, one seam so the money path's
+/// preparation cannot drift between the two routes.
+fn prepare_optimize(
+    sess: &Session,
+    projects: Option<PathBuf>,
+    frozen: bool,
+) -> Result<(optimize_mod::Findings, String, optimize_mod::HarnessCopy)> {
+    if !frozen {
+        let stats = run_analyze(&sess.harness, projects, &sess.db_path)?;
+        let line = refreshed_just_now_line(stats, &sess.harness);
+        eprintln!("{}", Style::stderr().dim(&line));
+    }
+    // `optimize` takes the whole history — no period flags reach it.
+    let findings = collect_findings(&sess.store, TimeRange::ALL)?;
+    // Absolute store path, so the session's `saniwalens sql --db …` hits this store.
+    let db_display = std::fs::canonicalize(&sess.db_path)
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or_else(|_| sess.db_path.to_string_lossy().into_owned());
+    // The harness copy every prompt renders from; the advisor language rides it.
+    let mut copy = sess.harness.copy();
+    copy.language = sess.language;
+    Ok((findings, db_display, copy))
+}
+
 ///
 /// The briefing carries concrete paths and error excerpts that may be sensitive,
 /// so it is written to a private (`0600`) temp file and only a pointer is passed
@@ -582,33 +606,8 @@ fn optimize(
     timeout: Option<std::time::Duration>,
 ) -> Result<()> {
     eprint_language_decision(verbose, sess.language_source, sess.language);
-    if !frozen {
-        let stats = run_analyze(&sess.harness, projects, &sess.db_path)?;
-        eprintln!(
-            "{}",
-            Style::stderr().dim(&format!(
-                "store: refreshed just now ({} {} re-analyzed, {} unchanged)",
-                stats.sessions,
-                sess.harness.input_unit(),
-                stats.skipped
-            ))
-        );
-    }
-    // `optimize` takes the whole history — no period flags reach it.
-    let findings = collect_findings(&sess.store, TimeRange::ALL)?;
+    let (findings, db_display, copy) = prepare_optimize(sess, projects, frozen)?;
 
-    // The absolute store path so the session's `saniwalens sql --db …` hits the
-    // store this run built, wherever it is launched from.
-    let db_display = std::fs::canonicalize(&sess.db_path)
-        .map(|p| p.to_string_lossy().into_owned())
-        .unwrap_or_else(|_| sess.db_path.to_string_lossy().into_owned());
-
-    // The harness copy for every prompt and briefing rendered here — the
-    // harness assembles its own (adapter side), so the core stays agnostic.
-    // The resolved advisor language rides the same copy, so every prompt
-    // builder shares the one wording source (`core::optimize`).
-    let mut copy = sess.harness.copy();
-    copy.language = sess.language;
     // The launch shape is the harness's own data (`Harness::launch_command`,
     // beside its other arms), so the shell names no harness here.
     let (binary, leading, run_mode) = sess.harness.launch_command();

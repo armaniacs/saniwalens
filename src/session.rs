@@ -494,12 +494,7 @@ impl Session {
         let stats = analyze(&self.harness, projects, &self.db_path)?;
         eprintln!(
             "{}",
-            Style::stderr().dim(&format!(
-                "store: refreshed just now ({} {} re-analyzed, {} unchanged)",
-                stats.sessions,
-                self.harness.input_unit(),
-                stats.skipped
-            ))
+            Style::stderr().dim(&refreshed_just_now_line(stats, &self.harness))
         );
         self.store = Store::open(&self.db_path, OpenMode::ReadWrite).context("open store")?;
         Ok(())
@@ -634,6 +629,18 @@ fn migrate_legacy_store(resolved: &Path) {
         };
         let _ = std::fs::rename(entry.path(), new_dir.join(format!("saniwalens{rest}")));
     }
+}
+
+/// The single wording site for the just-refreshed line: `Session::refresh`
+/// (the report views' auto-refresh) and the `optimize` / `--apply` prologue
+/// both print through it, so the three routes cannot drift apart.
+pub(crate) fn refreshed_just_now_line(stats: AnalyzeStats, harness: &Harness) -> String {
+    format!(
+        "store: refreshed just now ({} {} re-analyzed, {} unchanged)",
+        stats.sessions,
+        harness.input_unit(),
+        stats.skipped
+    )
 }
 
 /// Print a freshness line to stderr — dimmed context normally, highlighted

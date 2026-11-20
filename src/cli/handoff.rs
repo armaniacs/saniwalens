@@ -19,7 +19,6 @@ use anyhow::{Context, Result};
 
 use crate::adapter::harness::{Harness, RunLine, RunLineRenderer, extract_plan_text};
 use crate::core::optimize as optimize_mod;
-use crate::core::period::TimeRange;
 use crate::core::scope::ScopeFilter;
 use crate::session::{Session, SessionEnv, Style, state_base};
 
@@ -27,7 +26,7 @@ use super::deliver::{
     BriefingFile, ProcessAdvisor, create_private_dir_all, write_private_tempfile,
 };
 use super::headless::{Beat, run_headless};
-use super::{AdvisorLaunch, collect_findings, run_analyze, write_private_file};
+use super::{AdvisorLaunch, write_private_file};
 
 /// The `--apply`-capable harness labels, derived from the launch table: every
 /// harness whose [`RunMode`](optimize_mod::RunMode) is headless. Generated —
@@ -374,32 +373,7 @@ pub fn run_apply(
     // Fail fast before the expensive store refresh: without a writable plans
     // home there is nothing to hand off to.
     let plans = plans_dir(env.state_home, env.home.map(Path::new))?;
-    if !frozen {
-        let stats = run_analyze(&sess.harness, projects, &sess.db_path)?;
-        eprintln!(
-            "{}",
-            Style::stderr().dim(&format!(
-                "store: refreshed just now ({} {} re-analyzed, {} unchanged)",
-                stats.sessions,
-                sess.harness.input_unit(),
-                stats.skipped
-            ))
-        );
-    }
-    // `optimize` takes the whole history — no period flags reach it.
-    let findings = collect_findings(&sess.store, TimeRange::ALL)?;
-
-    // The absolute store path so the session's `saniwalens sql --db …` hits the
-    // store this run built, wherever it is launched from.
-    let db_display = std::fs::canonicalize(&sess.db_path)
-        .map(|p| p.to_string_lossy().into_owned())
-        .unwrap_or_else(|_| sess.db_path.to_string_lossy().into_owned());
-
-    // The harness copy for every prompt rendered here — the harness assembles
-    // its own (adapter side), so the core stays agnostic. The resolved
-    // advisor language rides the same copy, like the normal `optimize` path.
-    let mut copy = sess.harness.copy();
-    copy.language = sess.language;
+    let (findings, db_display, copy) = super::prepare_optimize(sess, projects, frozen)?;
 
     let briefing = optimize_mod::render_briefing(&findings, filter, &copy);
     let briefing_path = write_private_tempfile(&briefing).context("write briefing temp file")?;
