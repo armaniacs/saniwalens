@@ -259,15 +259,17 @@ fn format_row(cells: &[String], widths: &[usize], aligns: &[Align]) -> String {
 
 /// Strip ANSI escape sequences from one data cell. Transcript-derived strings
 /// (agent/skill ids, project/file paths, friction labels) can carry `ESC`
-/// bytes; `render()` is the single choke point where they would reach the
-/// terminal, so both the Table and Markdown paths sanitize here, before any
-/// width math. Only ASCII-range bytes are ever removed, so multi-byte UTF-8
+/// bytes; `render()` is the choke point where they would reach the terminal,
+/// so both the Table and Markdown paths sanitize here, before any width
+/// math. Doctor's prose bypasses `render()` (it is its own text layout), so
+/// it routes its interpolated values through this function directly. Only
+/// ASCII-range bytes are ever removed, so multi-byte UTF-8
 /// (including Japanese) passes through untouched. Handles:
 /// - CSI `ESC [ … final` (e.g. `\x1b[2J`, `\x1b[31m`),
 /// - OSC `ESC ] … (BEL | ESC \)` (e.g. `\x1b]0;title\x07`),
 /// - other `ESC` + follower sequences and a trailing bare `ESC`,
 ///   plus a stray `BEL` left over from a split sequence.
-fn sanitize_cell(cell: &str) -> String {
+pub(crate) fn sanitize_cell(cell: &str) -> String {
     let bytes = cell.as_bytes();
     let mut out: Vec<u8> = Vec::with_capacity(bytes.len());
     let mut i = 0;

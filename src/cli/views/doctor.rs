@@ -5,6 +5,7 @@
 use anyhow::Result;
 
 use crate::adapter::harness::{Harness, home_dir};
+use crate::cli::report::sanitize_cell;
 use crate::core::friction::ErrorCategory;
 use crate::core::optimize as optimize_mod;
 use crate::core::period::TimeRange;
@@ -87,12 +88,16 @@ pub(crate) fn doctor(
         .iter()
         .filter(|p| filter.includes_project(&p.project))
         .collect();
+    // The prose bypasses render()'s sanitize choke point, so every
+    // transcript-derived value it interpolates is sanitized here: a hostile
+    // or hallucinated project name / root must not carry ESC, C1, or BEL
+    // bytes to the terminal.
     let display = |p: &optimize_mod::ProjectFindings| {
-        if p.root.is_empty() {
+        sanitize_cell(&if p.root.is_empty() {
             p.project.clone()
         } else {
             tilde_path(&p.root)
-        }
+        })
     };
 
     // ---- WHAT TO FIX FIRST: recurring problems, biggest first. -------------
@@ -124,7 +129,7 @@ pub(crate) fn doctor(
         if let Some(worst) = p.thrash.first() {
             lines.push(format!(
                 "  …and the agent got stuck re-editing {} ({} edits in {}m).",
-                worst.file,
+                sanitize_cell(&worst.file),
                 worst.edits,
                 worst.span_secs.div_euclid(60).max(1)
             ));
@@ -134,7 +139,7 @@ pub(crate) fn doctor(
             harness.project_config_ref(),
             style.command(&format!(
                 "saniwalens failures --scope project:{}",
-                p.project
+                sanitize_cell(&p.project)
             ))
         ));
         items.push(Item {
@@ -288,7 +293,10 @@ pub(crate) fn doctor(
             "  {}: {} → {}",
             display(p),
             prune_phrase(&p.unused, &p.always_on_heavy),
-            style.command(&format!("saniwalens waste --scope project:{}", p.project))
+            style.command(&format!(
+                "saniwalens waste --scope project:{}",
+                sanitize_cell(&p.project)
+            ))
         ));
     }
     if !pruning.is_empty() {

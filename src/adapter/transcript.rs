@@ -643,12 +643,7 @@ pub fn extract_work_events(jsonl: &str) -> Vec<WorkEvent> {
                         .and_then(|i| i.get("file_path"))
                         .and_then(|v| v.as_str())
                     {
-                        events.push(WorkEvent {
-                            epoch_ms: ts,
-                            kind: "file_edit",
-                            id: basename(path).to_string(),
-                            path: Some(path.to_string()),
-                        });
+                        events.push(file_event(ts, "file_edit", path));
                     }
                 }
                 // Read targets are observed, never attributed: they feed the
@@ -659,12 +654,7 @@ pub fn extract_work_events(jsonl: &str) -> Vec<WorkEvent> {
                         .and_then(|i| i.get("file_path"))
                         .and_then(|v| v.as_str())
                     {
-                        events.push(WorkEvent {
-                            epoch_ms: ts,
-                            kind: "file_read",
-                            id: basename(path).to_string(),
-                            path: Some(path.to_string()),
-                        });
+                        events.push(file_event(ts, "file_read", path));
                     }
                 }
                 _ => {}
@@ -672,6 +662,21 @@ pub fn extract_work_events(jsonl: &str) -> Vec<WorkEvent> {
         }
     }
     events
+}
+
+/// One file-touching work event, with the transcript-derived path normalized
+/// at the boundary: whitespace-collapse and the 200-scalar cap — the same
+/// normalization the opencode adapter applies to tool targets. These values
+/// reach the store unchanged and outlive the transcript, and the id's
+/// basename is what a doctor prose line prints, so the cap is applied to each
+/// form separately rather than deriving the basename from a truncated path.
+fn file_event(epoch_ms: i64, kind: &'static str, raw_path: &str) -> WorkEvent {
+    WorkEvent {
+        epoch_ms,
+        kind,
+        id: clean_truncate(basename(raw_path)),
+        path: Some(clean_truncate(raw_path)),
+    }
 }
 
 /// Count the denials an allow rule could have prevented — the friction signal
@@ -1048,6 +1053,47 @@ mod tests {
         assert_eq!(events[1].id, "cli.rs");
         // The full path still distinguishes them for thrash detection.
         assert_eq!(events[0].path.as_deref(), Some(r"C:\example\repo\cli.rs"));
+    }
+
+    #[test]
+    fn work_events_collapse_whitespace_and_cap_an_over_long_file_path() {
+        // A transcript-derived path is untrusted input: the same whitespace
+        // collapse and 200-scalar cap the opencode adapter applies to tool
+        // targets applies at this boundary too, on both the hotspot id and the
+        // full path — the basename feeds a doctor prose line directly.
+        let raw = format!("/tmp/ex/{}  tail\t", "x".repeat(195));
+        let jsonl = format!(
+            r#"{{"type":"assistant","timestamp":"2026-01-01T00:00:00.000Z","message":{{"content":[{{"type":"tool_use","name":"Edit","input":{{"file_path":{:?}}}}}]}}}}"#,
+            raw
+        );
+        let events = extract_work_events(&jsonl);
+        assert_eq!(events.len(), 1);
+        // The id is the basename, sitting exactly at the cap: 195 x's plus the
+        // collapsed " tail" is 200 scalars, kept in full.
+        assert_eq!(events[0].id, format!("{} tail", "x".repeat(195)));
+        // The full path is cut to 200 scalars: "/tmp/ex/" plus 192 x's.
+        let expected_path = format!("/tmp/ex/{}", "x".repeat(192));
+        assert_eq!(events[0].path.as_deref(), Some(expected_path.as_str()));
+    }
+
+    #[test]
+    fn work_events_normalize_a_read_target_the_same_way() {
+        // The Read arm pushes the raw path the same way the Edit arm does, so
+        // the boundary normalization covers it identically: reads are observed,
+        // never attributed, but still store- and display-bound.
+        let raw = format!("{}  tail\t", "y".repeat(202));
+        let jsonl = format!(
+            r#"{{"type":"assistant","timestamp":"2026-01-01T00:00:00.000Z","message":{{"content":[{{"type":"tool_use","name":"Read","input":{{"file_path":{:?}}}}}]}}}}"#,
+            raw
+        );
+        let events = extract_work_events(&jsonl);
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].kind, "file_read");
+        // A bare name with no separator: the collapse gives 202 y's plus
+        // " tail" (207), and the cap cuts it to exactly 200 scalars.
+        let expected = "y".repeat(200);
+        assert_eq!(events[0].id, expected);
+        assert_eq!(events[0].path.as_deref(), Some(expected.as_str()));
     }
 
     #[test]
