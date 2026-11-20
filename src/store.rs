@@ -297,7 +297,13 @@ const SCHEMA_VERSION: i64 = 1;
 /// Tables holding analysis history. Claude Code prunes transcripts on its own
 /// retention schedule, after which these rows are the only surviving record of
 /// those sessions — so a shape change adds columns in place, never rebuilds.
-const MIGRATED_TABLES: [&str; 4] = ["sessions", "events", "ingested_files", "meta"];
+const MIGRATED_TABLES: [&str; 5] = [
+    "sessions",
+    "events",
+    "ingested_files",
+    "meta",
+    "subagent_runs",
+];
 
 /// Tables regenerated wholesale from live config on every analyze
 /// (`replace_surfaces`), so a shape change costs nothing to drop and recreate.
@@ -770,7 +776,7 @@ impl Store {
     }
 
     fn from_connection(mut conn: Connection) -> Result<Self> {
-        migrate(&mut conn)?;
+        migrate(&mut conn, SCHEMA)?;
         Ok(Self { conn })
     }
 
@@ -2206,8 +2212,15 @@ impl Store {
 /// Drift is reconciled per table by what the table costs to lose, and the
 /// declared schema is the single source of truth for the target shape: it is
 /// applied to a scratch database and read back, so adding a column to `SCHEMA`
-/// is all a future change needs.
-fn migrate(conn: &mut Connection) -> Result<()> {
+/// is all a future change needs — provided the changed table is classified
+/// into [`MIGRATED_TABLES`] or [`REBUILT_TABLES`], since the convergence loop
+/// visits only those. An unclassified declaration would drift every existing
+/// store silently, so the migration refuses it up front.
+///
+/// The schema text is a parameter only so tests can replay a declaration this
+/// release has not made yet — the classification guard's mistake is by
+/// definition absent from a correct `SCHEMA`.
+fn migrate(conn: &mut Connection, schema: &str) -> Result<()> {
     let version: i64 = conn.query_row("PRAGMA user_version", [], |row| row.get(0))?;
     if version > SCHEMA_VERSION {
         // Reconciliation only ever adds; it cannot undo a newer saniwalens's
@@ -2220,9 +2233,10 @@ fn migrate(conn: &mut Connection) -> Result<()> {
     }
 
     let desired = Connection::open_in_memory()?;
-    desired.execute_batch(SCHEMA)?;
+    desired.execute_batch(schema)?;
     desired.execute_batch(INDEX_SCHEMA)?;
     desired.execute_batch(&view_schema())?;
+    ensure_all_classified(&desired)?;
 
     // One transaction for the whole migration, as every other multi-statement
     // write in this file does: reconciliation may bail partway through, and a
@@ -2237,7 +2251,7 @@ fn migrate(conn: &mut Connection) -> Result<()> {
             rebuilt = true;
         }
     }
-    tx.execute_batch(SCHEMA)?;
+    tx.execute_batch(schema)?;
     for table in MIGRATED_TABLES {
         reconcile_columns(&tx, &desired, table)?;
     }
@@ -2254,6 +2268,31 @@ fn migrate(conn: &mut Connection) -> Result<()> {
 
     tx.execute_batch(&format!("PRAGMA user_version = {SCHEMA_VERSION}"))?;
     tx.commit()?;
+    Ok(())
+}
+
+/// Every table the declaration names must be classified. The convergence loop
+/// visits only `MIGRATED_TABLES` and `REBUILT_TABLES`, so an unclassified table
+/// would keep its stored shape on every store opened before it was declared —
+/// the declared promise holding only where the table is created fresh. Internal
+/// `sqlite_*` tables are never classifiable and never declared, so they are
+/// excluded rather than reported.
+fn ensure_all_classified(desired: &Connection) -> Result<()> {
+    let mut stmt = desired.prepare(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'",
+    )?;
+    let names = stmt
+        .query_map([], |row| row.get::<_, String>(0))?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    for name in names {
+        if !MIGRATED_TABLES.contains(&name.as_str()) && !REBUILT_TABLES.contains(&name.as_str()) {
+            anyhow::bail!(
+                "`{name}` is declared in the schema but listed in neither MIGRATED_TABLES nor \
+                 REBUILT_TABLES, so its drift would never be reconciled on existing stores — \
+                 classify it before declaring it"
+            );
+        }
+    }
     Ok(())
 }
 
@@ -3050,7 +3089,7 @@ mod tests {
         )
         .unwrap();
 
-        migrate(&mut conn).expect_err("the drifted events.out_tokens must be reported");
+        migrate(&mut conn, SCHEMA).expect_err("the drifted events.out_tokens must be reported");
 
         let names: Vec<String> = table_shape(&conn, "sessions")
             .unwrap()
@@ -3223,6 +3262,84 @@ mod tests {
                 .is_analyzer_current(TEST_ANALYZER_KEY, TEST_ANALYZER_VERSION)
                 .unwrap()
         );
+    }
+
+    #[test]
+    fn subagent_runs_column_drift_is_reconciled_and_its_rows_survive() {
+        // The red/green line for the classification guard: a store whose
+        // `subagent_runs` predates a declared column is exactly the drift a
+        // future column addition produces, and the one case the "table absent
+        // → created" test cannot see. The table holds run history the
+        // transcripts may no longer contain, so the drift must converge in
+        // place — silently keeping the old shape would make every later
+        // INSERT fail on the missing column.
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE subagent_runs (
+                 id            INTEGER PRIMARY KEY,
+                 session_id    TEXT NOT NULL,
+                 source_path   TEXT NOT NULL,
+                 run_path      TEXT NOT NULL,
+                 agent         TEXT,
+                 agent_id      TEXT NOT NULL,
+                 started_at    TEXT NOT NULL,
+                 started_epoch INTEGER NOT NULL
+             );
+             INSERT INTO subagent_runs (session_id, source_path, run_path, agent_id, started_at, started_epoch)
+             VALUES ('s1', '/tmp/example/s1.jsonl', '/tmp/example/s1-child.jsonl',
+                     'agent-1', '2026-01-01T00:00:00Z', 1767225600);",
+        )
+        .unwrap();
+
+        let store = Store::from_connection(conn).expect("must migrate, not refuse");
+
+        let declared = Connection::open_in_memory().unwrap();
+        declared.execute_batch(SCHEMA).unwrap();
+        // Sorted by name: ALTER TABLE appends, so physical order legitimately
+        // differs after an in-place reconcile; what must match is the set of
+        // columns and each one's declared type/default.
+        let mut shape = table_shape(&store.conn, "subagent_runs").unwrap();
+        shape.sort_by(|a, b| a.name.cmp(&b.name));
+        let mut target = table_shape(&declared, "subagent_runs").unwrap();
+        target.sort_by(|a, b| a.name.cmp(&b.name));
+        assert_eq!(
+            shape, target,
+            "subagent_runs must converge onto the declared shape"
+        );
+        let (_, rows) = store
+            .query("SELECT session_id, agent_id, started_at FROM subagent_runs")
+            .unwrap();
+        assert_eq!(
+            rows,
+            vec![vec![
+                "s1".to_string(),
+                "agent-1".to_string(),
+                "2026-01-01T00:00:00Z".to_string()
+            ]],
+            "the pre-existing run is irreplaceable once the transcript is pruned"
+        );
+    }
+
+    #[test]
+    fn migrate_refuses_a_declared_table_no_convergence_list_classifies() {
+        // The convergence loop visits only the classified lists, so a table
+        // declared without classification would keep its stored shape on every
+        // existing store — the guard exists so the next `subagent_runs` cannot
+        // happen. The mistake cannot exist in a correct `SCHEMA`, so the test
+        // replays it through the same seam a future release would trip on.
+        let mut conn = Connection::open_in_memory().unwrap();
+        let mut future_schema = SCHEMA.to_string();
+        future_schema.push_str(
+            "CREATE TABLE IF NOT EXISTS future_table (
+                 id    INTEGER PRIMARY KEY,
+                 value TEXT NOT NULL
+             );",
+        );
+
+        let err = migrate(&mut conn, &future_schema)
+            .expect_err("a declared table the lists classify nowhere must be refused");
+
+        assert!(err.to_string().contains("future_table"), "{err}");
     }
 
     #[test]

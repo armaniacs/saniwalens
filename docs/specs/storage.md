@@ -279,7 +279,11 @@ The declared schema is the single source of truth for the target shape: it is
 applied to a scratch in-memory database, read back through
 `PRAGMA table_info`, and the live store is reconciled against that. Adding a
 column to the declaration is the whole of a routine migration; there is no
-parallel list of ALTER statements to keep in step.
+parallel list of ALTER statements to keep in step. Every table the declaration
+names must be classified in the migration's convergence lists (`MIGRATED` /
+`REBUILT` in `store.rs`); a declared table missing from both fails the migration
+naming it, because a silently unclassified table would never be reconciled and
+its next added column would break every existing store at `INSERT` time.
 
 Drift is reconciled per object by what that object costs to lose:
 
