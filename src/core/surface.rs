@@ -80,7 +80,7 @@ impl LoadMode {
 /// is the join key into the events spine (`docs/specs/surfaces.md`).
 #[derive(Debug, Clone, PartialEq)]
 pub struct Surface {
-    /// `skill` | `rule` | `mcp_server` | `mcp_tool` | `hook` | `claude_md` | `permission` | `agent`.
+    /// `skill` | `rule` | `mcp_server` | `mcp_tool` | `hook` | `claude_md` | `permission` | `agent` | `command`.
     pub kind: String,
     pub id: String,
     pub scope: Scope,
@@ -107,21 +107,147 @@ pub struct Surface {
     pub description: Option<String>,
 }
 
-/// Whether a surface kind can ever acquire usage events. Absence of events is
-/// only evidence of disuse for usage-measurable kinds; for catalog-only kinds
+/// One surface kind's wedge traits — the kind semantics every predicate and
+/// wedge reads from [`KIND_TRAITS`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct KindTraits {
+    /// The kind can acquire usage events, so absent events are evidence of
+    /// disuse (the `Unused` / `CostlyRare` wedges).
+    measurable: bool,
+    /// The kind declares a description of its own purpose, so two of its
+    /// surfaces can be compared for a shared one (the `Redundant` wedge).
+    describable: bool,
+    /// The kind carries `paths:` globs whose non-matching is evidence
+    /// (the `NeverFires` wedge).
+    globbable: bool,
+}
+
+impl KindTraits {
+    /// The fallback for a kind the table does not know: no wedge may use it.
+    const NONE: KindTraits = KindTraits {
+        measurable: false,
+        describable: false,
+        globbable: false,
+    };
+}
+
+/// Every known surface kind with its wedge traits, in one table: adding a
+/// kind means adding one row here, and every predicate — and every wedge —
+/// answers consistently (`docs/specs/surfaces.md`). An unknown kind falls
+/// back to [`KindTraits::NONE`]: it stays silently outside every wedge,
+/// never mis-accused from partial evidence.
+static KIND_TRAITS: &[(&str, KindTraits)] = &[
+    (
+        "skill",
+        KindTraits {
+            measurable: true,
+            describable: true,
+            globbable: false,
+        },
+    ),
+    (
+        "agent",
+        KindTraits {
+            measurable: true,
+            describable: true,
+            globbable: false,
+        },
+    ),
+    (
+        "command",
+        KindTraits {
+            measurable: false,
+            describable: true,
+            globbable: false,
+        },
+    ),
+    (
+        "mcp_server",
+        KindTraits {
+            measurable: true,
+            describable: false,
+            globbable: false,
+        },
+    ),
+    (
+        "mcp_tool",
+        KindTraits {
+            measurable: true,
+            describable: false,
+            globbable: false,
+        },
+    ),
+    (
+        "permission",
+        KindTraits {
+            measurable: true,
+            describable: false,
+            globbable: false,
+        },
+    ),
+    (
+        "hook",
+        KindTraits {
+            measurable: true,
+            describable: false,
+            globbable: false,
+        },
+    ),
+    (
+        "rule",
+        KindTraits {
+            measurable: false,
+            describable: false,
+            globbable: true,
+        },
+    ),
+    (
+        "claude_md",
+        KindTraits {
+            measurable: false,
+            describable: false,
+            globbable: false,
+        },
+    ),
+];
+
+/// A kind's traits from the table, or [`KindTraits::NONE`] for an unknown one.
+fn kind_traits(kind: &str) -> KindTraits {
+    KIND_TRAITS
+        .iter()
+        .find(|(known, _)| *known == kind)
+        .map_or(KindTraits::NONE, |(_, traits)| *traits)
+}
+
 /// Static-token threshold above which an always-on or rarely-used surface
-/// counts as "heavy" — a tuning knob, not a hard rule. Shared by the briefing's
-/// wedge routing (`core::findings`) and the `waste` view (`cli/mod.rs`).
+/// counts as "heavy" — a tuning knob, not a hard rule. Shared by the
+/// briefing's wedge routing (`core::findings`) and the `waste` view
+/// (`cli/mod.rs`).
 pub const HEAVY_TOKENS: u64 = 800;
 
-/// (rules, CLAUDE.md) it means nothing (`docs/specs/surfaces.md`).
-/// Hooks joined their measurable peers once firing became observable
-/// (PBI 21): a hook with firings is used; one without is a delete candidate.
+/// Whether a surface kind can ever acquire usage events. Absence of events is
+/// only evidence of disuse for usage-measurable kinds; for catalog-only kinds
+/// (rules, CLAUDE.md) it means nothing (`docs/specs/surfaces.md`). Hooks
+/// joined their measurable peers once firing became observable (PBI 21): a
+/// hook with firings is used; one without is a delete candidate.
 pub fn is_usage_measurable(kind: &str) -> bool {
-    matches!(
-        kind,
-        "skill" | "agent" | "mcp_server" | "mcp_tool" | "permission" | "hook"
-    )
+    kind_traits(kind).measurable
+}
+
+/// Whether this kind's surfaces declare a description of their own purpose,
+/// so two of them can be compared for a shared one. Consumed by the
+/// `Redundant` wedge (`cli::views::waste`) as its kind gate: only describable
+/// kinds enter the duplicate comparison, and a surface whose description is
+/// `None` never matches even then.
+pub fn has_described_purpose(kind: &str) -> bool {
+    kind_traits(kind).describable
+}
+
+/// Whether non-matching `paths:` globs are meaningful evidence for this kind.
+/// Consumed by the `NeverFires` wedge (`cli::views::waste`) as its kind gate
+/// selecting which catalog rows the glob matcher may accuse.
+pub fn supports_never_fires(kind: &str) -> bool {
+    kind_traits(kind).globbable
 }
 
 /// An optimization opportunity for a surface (`docs/specs/surfaces.md`).
@@ -419,6 +545,69 @@ mod tests {
         assert!(is_usage_measurable("hook"));
         assert!(!is_usage_measurable("rule"));
         assert!(!is_usage_measurable("claude_md"));
+    }
+
+    #[test]
+    fn every_known_kind_answers_its_traits_from_one_table() {
+        // The wedge gates exactly as the pre-consolidation view filters
+        // answered them: measurable (Unused / CostlyRare routing), describable
+        // (the redundant wedge's kind gate), globbable (the never-fires
+        // wedge's kind gate). `command` is described but not usage-measurable
+        // today; the table preserves that, byte-identical output.
+        let expected: &[(&str, bool, bool, bool)] = &[
+            ("skill", true, true, false),
+            ("agent", true, true, false),
+            ("mcp_server", true, false, false),
+            ("mcp_tool", true, false, false),
+            ("permission", true, false, false),
+            ("hook", true, false, false),
+            ("rule", false, false, true),
+            ("claude_md", false, false, false),
+            ("command", false, true, false),
+        ];
+        for (kind, measurable, describable, globbable) in expected {
+            assert_eq!(is_usage_measurable(kind), *measurable, "measurable: {kind}");
+            assert_eq!(
+                has_described_purpose(kind),
+                *describable,
+                "describable: {kind}"
+            );
+            assert_eq!(supports_never_fires(kind), *globbable, "globbable: {kind}");
+        }
+    }
+
+    #[test]
+    fn the_traits_table_covers_each_known_kind_exactly_once() {
+        // One row per known kind, no aliases: a duplicated row would let two
+        // entries drift apart while every predicate keeps answering.
+        let mut seen: Vec<&str> = KIND_TRAITS.iter().map(|(kind, _)| *kind).collect();
+        seen.sort_unstable();
+        assert_eq!(
+            seen,
+            [
+                "agent",
+                "claude_md",
+                "command",
+                "hook",
+                "mcp_server",
+                "mcp_tool",
+                "permission",
+                "rule",
+                "skill",
+            ]
+        );
+    }
+
+    #[test]
+    fn an_unknown_kind_is_false_for_every_predicate() {
+        // A kind that slips registration (or a future harness's new label)
+        // stays silently outside every wedge — the pre-table semantics, never
+        // a mis-accusation from partial evidence.
+        for kind in ["", "future_thing", "Skill"] {
+            assert!(!is_usage_measurable(kind), "measurable: {kind}");
+            assert!(!has_described_purpose(kind), "describable: {kind}");
+            assert!(!supports_never_fires(kind), "globbable: {kind}");
+        }
     }
 
     #[test]

@@ -10,7 +10,8 @@ use crate::core::period::TimeRange;
 use crate::core::scope::ScopeFilter;
 use crate::core::surface::{
     DuplicateCandidate, HEAVY_TOKENS, LoadMode, RuleGlobs, StartupSavings, Wedge, classify_wedge,
-    is_usage_measurable, never_fires, on_demand_tokens, redundant_pairs, startup_savings,
+    has_described_purpose, is_usage_measurable, never_fires, on_demand_tokens, redundant_pairs,
+    startup_savings, supports_never_fires,
 };
 use crate::session::Style;
 use crate::store::Store;
@@ -95,7 +96,7 @@ pub(crate) fn waste(
     let read_targets = store.file_read_targets(window)?;
     let rules: Vec<RuleGlobs> = catalog
         .iter()
-        .filter(|e| e.kind == "rule")
+        .filter(|e| supports_never_fires(&e.kind))
         .filter_map(|e| match LoadMode::from_label(&e.load_mode) {
             Some(LoadMode::PathConditional) if !e.paths.is_empty() => Some(RuleGlobs {
                 id: e.id.clone(),
@@ -134,14 +135,14 @@ pub(crate) fn waste(
         });
     }
 
-    // Redundant (PBI 15): skills/agents/commands whose descriptions overlap
-    // enough to be the same purpose. Each paired surface gets one row naming
-    // its first counterpart — mutual, deterministic, no pair listed twice.
-    // Descriptions come from the catalog (`description` column); surfaces
-    // without one can never match, so MCP schemas and rules stay out.
+    // Redundant (PBI 15): surfaces of kinds that declare a described purpose,
+    // whose descriptions overlap enough to be the same purpose. Each paired
+    // surface gets one row naming its first counterpart — mutual,
+    // deterministic, no pair listed twice. Descriptions come from the catalog
+    // (`description` column); a surface without one can never match.
     let dupes: Vec<DuplicateCandidate> = catalog
         .iter()
-        .filter(|e| matches!(e.kind.as_str(), "skill" | "agent" | "command"))
+        .filter(|e| has_described_purpose(&e.kind))
         .filter_map(|e| {
             e.description.as_deref().map(|d| DuplicateCandidate {
                 id: e.id.as_str(),
