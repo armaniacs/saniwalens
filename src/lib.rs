@@ -11,5 +11,6 @@ pub mod core;
 #[cfg(test)]
 mod scratch;
 pub mod session;
+pub mod session_env;
 pub mod store;
 pub mod time;

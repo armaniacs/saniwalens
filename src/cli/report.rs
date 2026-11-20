@@ -3,8 +3,9 @@
 
 use anyhow::Result;
 
+use crate::core::optimize::AdvisorLanguage;
 use crate::core::period::TimeRange;
-use crate::session::Style;
+use crate::session_env::LanguageSource;
 
 use super::{eprint_window, framed, with_window};
 
@@ -340,6 +341,136 @@ fn pad(text: &str, width: usize, align: Align) -> String {
     }
 }
 
+/// The `--verbose`-only decision line (PBI 2026-11-14-02): the resolved
+/// language code and the layer that named it, in one greppable line.
+/// Rendered on stderr by the caller — never into prompts or JSON — so normal
+/// output stays byte-identical with or without `--verbose`.
+pub fn language_decision_line(source: LanguageSource, language: AdvisorLanguage) -> String {
+    format!(
+        "language: {} (decided by {})",
+        language.label(),
+        source.label()
+    )
+}
+
+/// Print [`language_decision_line`] on stderr, dimmed like the other shell
+/// chatter — a no-op unless `verbose`. The shell calls this with its own
+/// flag, so the condition lives in one tested place and the shell grows by
+/// one call line instead of a branch.
+pub fn eprint_language_decision(verbose: bool, source: LanguageSource, language: AdvisorLanguage) {
+    if verbose {
+        eprintln!(
+            "{}",
+            Style::stderr().dim(&language_decision_line(source, language))
+        );
+    }
+}
+
+/// Print a freshness line to stderr — dimmed context normally, highlighted
+/// when it carries a staleness hint the user should act on.
+pub(crate) fn eprint_freshness(line: &str) {
+    let style = Style::stderr();
+    if line.contains("saniwalens analyze") {
+        eprintln!("{}", style.warn(line));
+    } else {
+        eprintln!("{}", style.dim(line));
+    }
+}
+
+/// The `--frozen` freshness header: how old the store is, with a refresh hint
+/// once it is older than a day. This is what lets the user *notice* staleness.
+pub(crate) fn freshness_line(analyzed_at: Option<&str>) -> String {
+    let Some(parsed) = analyzed_at.and_then(crate::time::parse_rfc3339_nanos) else {
+        return "store: freshness unknown (no analyze recorded) — run `saniwalens analyze`"
+            .to_string();
+    };
+    // Whole seconds between now and the stamp, truncated toward zero — the
+    // old `(Utc::now() - parsed).num_seconds()`.
+    let age_secs = ((crate::time::now_nanos() - parsed) / 1_000_000_000) as i64;
+    let hint = if age_secs >= 24 * 3600 {
+        " — run `saniwalens analyze` (or drop --frozen) to refresh"
+    } else {
+        ""
+    };
+    format!(
+        "store: analyzed {} ago (--frozen){hint}",
+        humanize_age(age_secs)
+    )
+}
+
+fn humanize_age(secs: i64) -> String {
+    let secs = secs.max(0);
+    match secs {
+        0..60 => format!("{secs}s"),
+        60..3600 => format!("{}m", secs / 60),
+        3600..86400 => format!("{}h", secs / 3600),
+        _ => format!("{}d", secs / 86400),
+    }
+}
+
+/// ANSI styling for the human formats. Colors turn on only when the target is
+/// a terminal, `NO_COLOR` is unset, and `TERM` is not `dumb` — so pipes,
+/// captures, and `--format markdown|json` always get plain bytes.
+pub(crate) struct Style {
+    on: bool,
+}
+
+impl Style {
+    pub(crate) fn stdout() -> Self {
+        use std::io::IsTerminal;
+        Self {
+            on: use_color(std::io::stdout().is_terminal()),
+        }
+    }
+
+    pub(crate) fn stderr() -> Self {
+        use std::io::IsTerminal;
+        Self {
+            on: use_color(std::io::stderr().is_terminal()),
+        }
+    }
+
+    fn paint(&self, code: &str, text: &str) -> String {
+        if self.on {
+            format!("\x1b[{code}m{text}\x1b[0m")
+        } else {
+            text.to_string()
+        }
+    }
+
+    pub(crate) fn bold(&self, text: &str) -> String {
+        self.paint("1", text)
+    }
+
+    pub(crate) fn dim(&self, text: &str) -> String {
+        self.paint("2", text)
+    }
+
+    /// Section headings (`== … ==`, table headers).
+    pub(crate) fn heading(&self, text: &str) -> String {
+        self.paint("1;36", text)
+    }
+
+    /// Pointers to follow-up commands.
+    pub(crate) fn command(&self, text: &str) -> String {
+        self.paint("36", text)
+    }
+
+    /// Attention: a finding's count, a wedge label, a staleness warning.
+    pub(crate) fn warn(&self, text: &str) -> String {
+        self.paint("33", text)
+    }
+
+    pub(crate) fn good(&self, text: &str) -> String {
+        self.paint("32", text)
+    }
+}
+
+fn use_color(tty: bool) -> bool {
+    tty && std::env::var_os("NO_COLOR").is_none()
+        && std::env::var("TERM").map(|t| t != "dumb").unwrap_or(true)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -470,5 +601,27 @@ mod tests {
                 format!("unknown --format '{value}' (table|json)")
             );
         }
+    }
+
+    #[test]
+    fn language_decision_line_names_source_and_code() {
+        // PBI 2026-11-14-02: the `--verbose`-only line carries the resolved
+        // code and the winning layer in one greppable line.
+        assert_eq!(
+            language_decision_line(LanguageSource::Config, AdvisorLanguage::Ja),
+            "language: ja (decided by config)"
+        );
+        assert_eq!(
+            language_decision_line(LanguageSource::Flag, AdvisorLanguage::En),
+            "language: en (decided by flag)"
+        );
+        assert_eq!(
+            language_decision_line(LanguageSource::Locale, AdvisorLanguage::Ja),
+            "language: ja (decided by locale)"
+        );
+        assert_eq!(
+            language_decision_line(LanguageSource::Default, AdvisorLanguage::En),
+            "language: en (decided by default)"
+        );
     }
 }
