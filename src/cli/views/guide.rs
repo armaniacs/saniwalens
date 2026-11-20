@@ -13,7 +13,7 @@ use crate::store::Store;
 
 use super::super::report::Format;
 use super::super::window::{PeriodArgs, ReadArgs, WindowedDispatch};
-use super::super::{doctor, failures, run_analyze};
+use super::super::{deliver, doctor, failures, run_analyze};
 use super::waste::waste;
 
 /// What `run()` should do with this invocation, decided before clap parses.
@@ -510,15 +510,11 @@ fn persist_config(path: &Path, text: &str, expected: Option<&str>) -> anyhow::Re
             path.display()
         );
     }
-    // Pid + clock + sequence: two guides (or two test threads in one
-    // process) never share a sibling, unlike the old fixed `.toml.tmp` name
-    // (`private_temp_path` in `super::super` is the same idea for temp dirs).
-    static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |elapsed| elapsed.as_nanos());
-    let seq = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    let sibling = format!("{}.{}.{}.toml.tmp", std::process::id(), nanos, seq);
+    // Pid + clock + sequence via the shared stem: two guides (or two test
+    // threads in one process) never share a sibling, unlike the old fixed
+    // `.toml.tmp` name.
+    let stem = deliver::unique_temp_stem();
+    let sibling = format!("{}.{}.{}.toml.tmp", stem.pid, stem.nanos, stem.seq);
     let tmp = path.with_extension(sibling);
     std::fs::write(&tmp, text)?;
     // Unix rename replaces atomically, so no remove-first window exists in

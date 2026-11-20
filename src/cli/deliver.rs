@@ -283,21 +283,44 @@ pub fn deliver(plan: DeliveryPlan<'_>, advisor: &mut impl AdvisorLaunch) -> Resu
     Ok(())
 }
 
+/// The collision-resistance components of every private temp name: the pid,
+/// the clock nanos, and a per-process call sequence. Callers format these
+/// with their own component order, separators, and base so each site's
+/// established name stays byte-identical.
+///
+/// The clock is here to avoid a collision with a leftover file, not to be
+/// unguessable — exclusive creation is what makes guessing the name useless.
+/// The sequence is what makes two calls unique: parallel tests share the
+/// pid and can land on the same clock tick, and without it the loser fails
+/// with `AlreadyExists`.
+pub(crate) struct UniqueTempStem {
+    /// Separates concurrent processes sharing the same directory.
+    pub pid: u32,
+    /// Separates a process from its own leftovers from earlier runs.
+    pub nanos: u128,
+    /// Separates two calls landing on the same clock tick.
+    pub seq: u64,
+}
+
+/// A fresh stem, unique per process and call, for private temp names. The
+/// one place the pid + clock + sequence idiom lives; format locally.
+pub(crate) fn unique_temp_stem() -> UniqueTempStem {
+    static SEQ: AtomicU64 = AtomicU64::new(0);
+    UniqueTempStem {
+        pid: std::process::id(),
+        nanos: std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |elapsed| elapsed.as_nanos()),
+        seq: SEQ.fetch_add(1, Ordering::Relaxed),
+    }
+}
+
 /// A fresh private temp path for `prefix`, unique per process and call.
 pub(crate) fn private_temp_path(prefix: &str, ext: &str) -> PathBuf {
-    // The clock is here to avoid a collision with a leftover file, not to be
-    // unguessable — exclusive creation is what makes guessing the name useless.
-    // The sequence is what makes two calls unique: parallel tests share the
-    // pid and can land on the same clock tick, and without it the loser fails
-    // with `AlreadyExists`.
-    static SEQ: AtomicU64 = AtomicU64::new(0);
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |elapsed| elapsed.as_nanos());
-    let seq = SEQ.fetch_add(1, Ordering::Relaxed);
+    let stem = unique_temp_stem();
     std::env::temp_dir().join(format!(
-        "{prefix}-{}-{nanos:x}-{seq}.{ext}",
-        std::process::id()
+        "{prefix}-{}-{:x}-{}.{}",
+        stem.pid, stem.nanos, stem.seq, ext
     ))
 }
 

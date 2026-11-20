@@ -13,7 +13,6 @@
 use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
 
 use anyhow::{Context, Result};
 
@@ -23,7 +22,7 @@ use crate::core::scope::ScopeFilter;
 use crate::session::{Session, SessionEnv, Style, state_base};
 
 use super::deliver::{
-    BriefingFile, ProcessAdvisor, create_private_dir_all, write_private_tempfile,
+    BriefingFile, ProcessAdvisor, create_private_dir_all, unique_temp_stem, write_private_tempfile,
 };
 use super::headless::{Beat, run_headless};
 use super::{AdvisorLaunch, write_private_file};
@@ -118,16 +117,11 @@ pub fn backups_dir(state_home: Option<&Path>, home: Option<&Path>) -> Result<Pat
     Ok(state_saniwalens_dir(state_home, home)?.join("backups"))
 }
 
-/// A fresh plan file name, unique per process and call like the private temp
-/// paths: the clock guards against a leftover file, the pid and the sequence
-/// against two calls landing on the same tick.
+/// A fresh plan file name, unique per process and call via the shared
+/// [`unique_temp_stem`] stem.
 fn plan_filename() -> String {
-    static SEQ: AtomicU64 = AtomicU64::new(0);
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |elapsed| elapsed.as_nanos());
-    let seq = SEQ.fetch_add(1, Ordering::Relaxed);
-    format!("plan-{nanos:x}-{}-{seq}.md", std::process::id())
+    let stem = unique_temp_stem();
+    format!("plan-{:x}-{}-{}.md", stem.nanos, stem.pid, stem.seq)
 }
 
 /// Write `plan` to a fresh file under `dir`, for the current user only
