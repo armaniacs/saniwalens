@@ -11,6 +11,7 @@
 //! headless spawn and the file writes are I/O.
 
 use std::fs;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -158,6 +159,95 @@ pub fn cleanup_note(dir: &Path) -> String {
     )
 }
 
+/// Hard ceiling, in bytes, for the plan text the `--apply` handoff saves and
+/// for the raw run-log text it reads as the plan's material. Same value as
+/// the briefing's `BRIEFING_MAX_BYTES` (`core::optimize`), whose truncation
+/// shape this mirrors: an unbounded plan file would accumulate in the state
+/// dir (cleanup prunes generations, not sizes), and an unbounded read would
+/// load an arbitrarily verbose advisor's whole stream into memory — the
+/// default 60s timeout usually bounds that, but `--timeout 0` is the explicit
+/// opt-out, so the limit closes by size, not by time.
+pub const PLAN_MAX_BYTES: usize = 64 * 1024;
+
+/// Marker terminating a plan cut at [`PLAN_MAX_BYTES`]. An over-long plan is
+/// truncated to fit the budget with this as its last line, so a cut is always
+/// visible and never mistaken for the advisor's complete plan.
+pub const PLAN_TRUNCATION_MARKER: &str = "\n\n[plan truncated at PLAN_MAX_BYTES]\n";
+
+/// Enforce [`PLAN_MAX_BYTES`] on an extracted plan: text within the cap is
+/// returned unchanged (byte-identical) with `false`; over-long text is cut at
+/// a character boundary with [`PLAN_TRUNCATION_MARKER`] as its last line and
+/// `true`, so the saved plan fits the cap and the cut is marked.
+fn truncate_plan(text: String) -> (String, bool) {
+    if text.len() <= PLAN_MAX_BYTES {
+        return (text, false);
+    }
+    let budget = PLAN_MAX_BYTES.saturating_sub(PLAN_TRUNCATION_MARKER.len());
+    let mut end = budget.min(text.len());
+    while !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    let mut out = text[..end].to_string();
+    out.push_str(PLAN_TRUNCATION_MARKER);
+    (out, true)
+}
+
+/// The stderr line telling the user the plan was cut: the dialog still opens,
+/// but on a truncated plan, so the user must know it is not the advisor's
+/// full text.
+pub fn plan_truncated_note() -> String {
+    format!(
+        "the plan exceeded PLAN_MAX_BYTES ({} bytes): saved truncated to the \
+         first bytes with a truncation marker, and the dialog opens on it",
+        PLAN_MAX_BYTES
+    )
+}
+
+/// The stderr line telling the user the raw run-log read hit the cap: the
+/// plan is extracted from the kept head only, so it may be missing its tail.
+pub fn log_truncated_note() -> String {
+    format!(
+        "the raw run log exceeded PLAN_MAX_BYTES ({} bytes): read truncated \
+         there, so the plan extracted from it may be missing its tail",
+        PLAN_MAX_BYTES
+    )
+}
+
+/// Read at most `cap` bytes of `path`, cut at a character boundary, and
+/// report whether the cut happened. A whole-file `read_to_string` would load
+/// an arbitrarily verbose advisor's stream into memory before the plan cap
+/// could act, so the read stops at the cap first: within the cap the text is
+/// byte-identical to a full read, and invalid UTF-8 fails exactly like
+/// `read_to_string` did.
+fn read_capped(path: &Path, cap: usize) -> Result<(String, bool)> {
+    let file = fs::File::open(path)
+        .with_context(|| format!("read the headless run log {}", path.display()))?;
+    // One byte past the cap separates "exactly the cap" (the whole file, not
+    // cut) from "over the cap" (cut); `take` bounds the buffering either way.
+    let mut bytes = Vec::new();
+    file.take(cap as u64 + 1).read_to_end(&mut bytes)?;
+    let truncated = bytes.len() > cap;
+    if truncated {
+        // Cut on the raw bytes, back to a lead byte (a UTF-8 continuation
+        // byte is 0b10xxxxxx), so the cap never splits a multi-byte
+        // character; the kept prefix is validated afterwards.
+        let mut end = cap;
+        while end > 0 && (bytes[end] & 0xC0) == 0x80 {
+            end -= 1;
+        }
+        bytes.truncate(end);
+    }
+    // Validate only what is kept: invalid UTF-8 fails exactly like the
+    // previous whole-file `read_to_string` did.
+    let text = String::from_utf8(bytes).map_err(|_| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "stream did not contain valid UTF-8",
+        )
+    })?;
+    Ok((text, truncated))
+}
+
 /// Everything `complete_handoff` needs beyond the log text and the advisor.
 pub struct Handoff<'a> {
     /// The renderer the harness seam chose for the headless stream.
@@ -199,6 +289,10 @@ pub fn complete_handoff(
         // in-memory log text, so claiming a removed log would name a file
         // that never existed in this function's scope.
         anyhow::bail!("the advisor produced no readable text, so no plan file was written");
+    }
+    let (plan, plan_truncated) = truncate_plan(plan);
+    if plan_truncated {
+        eprintln!("{}", Style::stderr().warn(&plan_truncated_note()));
     }
     let plan_path = save_plan(handoff.plans, &plan)?;
     let prompt = optimize_mod::apply_prompt(
@@ -253,8 +347,10 @@ pub fn capture_headless_log(
             log_path.display()
         );
     }
-    let text = fs::read_to_string(&log_path)
-        .with_context(|| format!("read the headless run log {}", log_path.display()))?;
+    let (text, log_truncated) = read_capped(&log_path, PLAN_MAX_BYTES)?;
+    if log_truncated {
+        eprintln!("{}", Style::stderr().warn(&log_truncated_note()));
+    }
     // The raw stream may echo secrets; the plan file carries the content from
     // here on, so the log goes now.
     let _ = fs::remove_file(&log_path);
@@ -856,6 +952,180 @@ mod tests {
         assert!(status.success(), "the synthetic exit status: {status}");
         assert!(text.contains(TEXT_LINE), "the raw line reached the text");
         assert!(text.contains(TOOL_LINE), "every raw line is captured");
+        assert!(!log_path.exists(), "the raw log survived its run");
+    }
+
+    // ---- the plan byte cap ----
+
+    #[test]
+    fn truncate_plan_passes_within_cap_text_through_byte_identical() {
+        // BDD: "上限内の plan は従来どおりバイト同一で保存される" — at and
+        // under the cap the text passes through unchanged and unflagged.
+        let under = "x".repeat(PLAN_MAX_BYTES - 1);
+        let (out, truncated) = truncate_plan(under.clone());
+        assert!(!truncated);
+        assert_eq!(out, under);
+        let exact = "x".repeat(PLAN_MAX_BYTES);
+        let (out, truncated) = truncate_plan(exact.clone());
+        assert!(!truncated);
+        assert_eq!(out, exact);
+    }
+
+    #[test]
+    fn truncate_plan_cuts_an_over_cap_plan_to_head_plus_marker() {
+        // BDD: "上限超過の plan は先頭 N + 末尾マーカーで打ち切られる" — one
+        // byte over the cap already cuts, the result fits the cap with the
+        // marker as its last line, and the head is kept whole.
+        let text = "x".repeat(PLAN_MAX_BYTES + 1);
+        let (out, truncated) = truncate_plan(text);
+        assert!(truncated);
+        assert!(out.len() <= PLAN_MAX_BYTES, "{} bytes", out.len());
+        assert!(out.ends_with(PLAN_TRUNCATION_MARKER), "{out:?}");
+        let kept = out.strip_suffix(PLAN_TRUNCATION_MARKER).unwrap();
+        assert_eq!(kept.len(), PLAN_MAX_BYTES - PLAN_TRUNCATION_MARKER.len());
+        assert!(kept.chars().all(|c| c == 'x'));
+    }
+
+    #[test]
+    fn truncate_plan_cuts_on_a_character_boundary() {
+        // UTF-8 境界またぎ: the leading `a` shifts the alignment so the raw
+        // budget lands inside an `あ` (3 bytes); the cut falls back to a whole
+        // character instead of splitting one.
+        let text = format!("a{}", "あ".repeat(PLAN_MAX_BYTES));
+        let (out, truncated) = truncate_plan(text.clone());
+        assert!(truncated);
+        assert!(out.len() <= PLAN_MAX_BYTES, "{} bytes", out.len());
+        assert!(out.ends_with(PLAN_TRUNCATION_MARKER));
+        let kept = out.strip_suffix(PLAN_TRUNCATION_MARKER).unwrap();
+        assert!(text.starts_with(kept), "the head is kept");
+        assert_eq!(kept.len() % 3, 1, "a + whole あ characters: {}", kept.len());
+        assert_eq!(kept.chars().last(), Some('あ'));
+    }
+
+    #[test]
+    fn the_plan_truncation_note_names_the_cap_and_the_cut() {
+        // BDD: "stderr に plan が上限を超えたことが明示される" — stderr is
+        // not capturable in-process, so the wording the handoff prints is
+        // pinned here.
+        let note = plan_truncated_note();
+        assert!(note.contains("PLAN_MAX_BYTES"), "{note}");
+        assert!(note.contains("truncated"), "{note}");
+        assert!(note.contains("marker"), "{note}");
+    }
+
+    #[test]
+    fn the_log_truncation_note_names_the_cap_and_the_read_cut() {
+        // BDD: "打ち切られたことが plan 生成側の表示に引き継がれる" — the
+        // read cut surfaces on the handoff's stderr with the cap named.
+        let note = log_truncated_note();
+        assert!(note.contains("PLAN_MAX_BYTES"), "{note}");
+        assert!(note.contains("truncated"), "{note}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn complete_handoff_caps_an_over_long_plan_and_still_opens_the_dialog() {
+        // BDD: 上限超過の合成入力 → the plan file is the head plus the
+        // marker, and the handoff itself continues to the dialog launch. The
+        // stderr wording is pinned by `the_plan_truncation_note_*` above.
+        let dir = ScratchDir::new("saniwalens-handoff", "plan-cap");
+        let filter = ScopeFilter::All;
+        let copy = opencode_copy();
+        let ctx = handoff(&dir, &filter, &copy);
+        let big = "x".repeat(PLAN_MAX_BYTES);
+        let big_line = format!(
+            r#"{{"type":"text","timestamp":1792904882135,"sessionID":"ses_demo","part":{{"id":"prt_demo","type":"text","text":"{big}"}}}}"#
+        );
+        let log_text = format!("{TOOL_LINE}\n{TEXT_LINE}\n{big_line}\n");
+        let uncapped = format!("1. Add a file map to AGENTS.md\n{big}");
+        let mut advisor = DialogRecorder {
+            launches: Vec::new(),
+            status: success_status(),
+        };
+
+        let plan_path = complete_handoff(&log_text, &ctx, &mut advisor).unwrap();
+
+        let saved = fs::read_to_string(&plan_path).unwrap();
+        assert!(saved.len() <= PLAN_MAX_BYTES, "{} bytes", saved.len());
+        assert!(saved.ends_with(PLAN_TRUNCATION_MARKER), "the cut is marked");
+        let kept = saved.strip_suffix(PLAN_TRUNCATION_MARKER).unwrap();
+        assert!(uncapped.starts_with(kept), "the head is kept");
+        assert!(kept.len() < uncapped.len(), "the tail was cut, not kept");
+        assert_eq!(
+            advisor.launches.len(),
+            1,
+            "the dialog still opens on the truncated plan"
+        );
+        let (_, _, prompt) = &advisor.launches[0];
+        assert!(
+            prompt.contains(&plan_path.display().to_string()),
+            "{prompt}"
+        );
+    }
+
+    #[test]
+    fn read_capped_keeps_a_file_within_the_cap_whole() {
+        // 上限ちょうど: an exact-cap file is the whole file, not a cut.
+        let dir = ScratchDir::new("saniwalens-handoff", "read-cap-exact");
+        let path = dir.join("run.log");
+        fs::write(&path, "x".repeat(PLAN_MAX_BYTES)).unwrap();
+        let (text, truncated) = read_capped(&path, PLAN_MAX_BYTES).unwrap();
+        assert!(!truncated);
+        assert_eq!(text, "x".repeat(PLAN_MAX_BYTES));
+    }
+
+    #[test]
+    fn read_capped_cuts_an_over_cap_file_at_a_character_boundary() {
+        // 1 バイト超過 + UTF-8 境界またぎ: 65536 % 3 == 1, so the raw cap
+        // lands inside an `あ` and the cut must fall back to a whole
+        // character; the tail beyond the cap never reaches the text.
+        let dir = ScratchDir::new("saniwalens-handoff", "read-cap-over");
+        let path = dir.join("run.log");
+        fs::write(&path, "あ".repeat(PLAN_MAX_BYTES / 3 + 2)).unwrap();
+        let (text, truncated) = read_capped(&path, PLAN_MAX_BYTES).unwrap();
+        assert!(truncated);
+        assert!(text.len() <= PLAN_MAX_BYTES, "{} bytes", text.len());
+        assert_eq!(text.len() % 3, 0, "the cut kept whole characters");
+        assert!(text.chars().all(|c| c == 'あ'));
+
+        fs::write(&path, format!("{}TAIL", "x".repeat(PLAN_MAX_BYTES + 5))).unwrap();
+        let (text, truncated) = read_capped(&path, PLAN_MAX_BYTES).unwrap();
+        assert!(truncated);
+        assert_eq!(text.len(), PLAN_MAX_BYTES);
+        assert!(
+            !text.contains("TAIL"),
+            "the tail beyond the cap never arrived"
+        );
+    }
+
+    #[test]
+    fn read_capped_fails_on_invalid_utf8_like_read_to_string() {
+        // Preserved failure mode: junk bytes fail the read exactly as the
+        // previous whole-file `read_to_string` did.
+        let dir = ScratchDir::new("saniwalens-handoff", "read-cap-junk");
+        let path = dir.join("run.log");
+        fs::write(&path, [0xFFu8, 0xFE]).unwrap();
+        let err = read_capped(&path, PLAN_MAX_BYTES).unwrap_err();
+        assert!(format!("{err:#}").contains("valid UTF-8"), "{err:#}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn capture_headless_log_reads_the_run_log_only_up_to_the_cap() {
+        // E2E: a real spawn with a synthetic advisor whose raw log exceeds
+        // PLAN_MAX_BYTES — the read stops at the cap, so the log's tail never
+        // reaches the handoff's plan material, and the capture completes.
+        let line = "a".repeat(300);
+        let script = format!("yes '{line}' | head -n 600; echo TAILMARKER");
+        let (status, log_path, text) =
+            capture_headless_log("/bin/sh", &["-c", &script], "ignored", None, None)
+                .expect("the synthetic advisor streams");
+        assert!(status.success(), "the synthetic exit status: {status}");
+        assert!(text.len() <= PLAN_MAX_BYTES, "{} bytes", text.len());
+        assert!(
+            !text.contains("TAILMARKER"),
+            "the tail beyond the cap never arrived"
+        );
         assert!(!log_path.exists(), "the raw log survived its run");
     }
 }
