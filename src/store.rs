@@ -361,53 +361,10 @@ pub struct CatalogEntry {
     pub description: Option<String>,
 }
 
-/// One friction cell: how often one failure category hit one project.
-/// A named struct rather than a `(project, category, count)` tuple so a
-/// swapped field order fails to compile instead of misrouting friction
-/// (PBI C8: the store <-> findings contract is typed, not commented).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct FrictionCell {
-    pub project: String,
-    pub category: String,
-    pub count: i64,
-}
-
-/// One tool-attribution row: which tool produced a project's failures in a
-/// category. Named for the same reason as [`FrictionCell`].
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ToolBreakdown {
-    pub project: String,
-    pub category: String,
-    pub tool: String,
-    pub count: i64,
-}
-
-/// A normalized project slug as the store reports it: the scope half of a
-/// session root, typed so it cannot be passed where a filesystem root goes.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct ProjectSlug(pub String);
-
-impl ProjectSlug {
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-impl From<String> for ProjectSlug {
-    fn from(slug: String) -> Self {
-        Self(slug)
-    }
-}
-
-/// One known `(root, project)` pair: the directory project-config scanning
-/// walks with the normalized slug its surfaces are scoped to. The untyped
-/// [`Store::session_roots`] keeps its tuple shape for the adapter caller;
-/// this is the briefing reader's typed twin.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SessionRoot {
-    pub root: String,
-    pub project: ProjectSlug,
-}
+// The briefing's row types are owned by the pure core (core::findings), which
+// consumes them; re-exported here so the `crate::store::...` paths of the
+// query methods and their callers stay stable.
+pub use crate::core::findings::{FrictionCell, ProjectSlug, SessionRoot, ToolBreakdown};
 
 /// One session's cost shape: what it spent, how long it ran, and how often
 /// it stumbled. Zero-event and zero-friction sessions read 0, never vanish.
