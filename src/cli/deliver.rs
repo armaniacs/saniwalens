@@ -337,6 +337,27 @@ pub(crate) fn write_private_file(path: &Path, contents: &str) -> Result<()> {
     Ok(())
 }
 
+/// Create `dir` and any missing parents, for the current user only.
+///
+/// `create_dir_all` with owner-only permissions on every directory it creates —
+/// the mode the XDG Base Directory spec prescribes for a directory a program
+/// creates on the user's behalf. Directories that already exist keep theirs.
+/// Like `write_private_file`, this makes cli-owned state artifacts (plans,
+/// backups) born private instead of created under the umask and narrowed
+/// afterwards.
+pub(crate) fn create_private_dir_all(dir: &Path) -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::DirBuilderExt;
+        std::fs::DirBuilder::new()
+            .recursive(true)
+            .mode(0o700)
+            .create(dir)
+    }
+    #[cfg(not(unix))]
+    std::fs::create_dir_all(dir)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

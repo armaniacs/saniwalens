@@ -40,6 +40,34 @@ pub fn env_roots() -> EnvRoots {
     }
 }
 
+/// `$VAR` as a path, the process-env read the pure resolvers deliberately do
+/// not do so they stay hermetic for tests.
+pub(crate) fn xdg_from_env(var: &str) -> Option<PathBuf> {
+    std::env::var_os(var).map(PathBuf::from)
+}
+
+/// The user's home directory, resolved once per run.
+///
+/// `HOME` is preferred, so unix behaves exactly as before; Windows does not set
+/// it, hence `USERPROFILE`. The wrinkle is that a Windows shell like Git Bash
+/// *does* export `HOME` — as a POSIX path (`/c/Users/…`) that a native binary
+/// cannot resolve. Taking it at face value would send every lookup to a
+/// directory that does not exist and report "no transcripts" instead of an
+/// error, so on Windows a candidate has to name a real directory to win. The
+/// check stays off on unix, where a home that does not exist is worth surfacing
+/// as itself rather than silently falling through to another variable.
+pub(crate) fn home_dir() -> Option<&'static str> {
+    static HOME: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
+    HOME.get_or_init(|| {
+        ["HOME", "USERPROFILE"]
+            .into_iter()
+            .filter_map(|key| std::env::var(key).ok())
+            .filter(|value| !value.is_empty())
+            .find(|value| !cfg!(windows) || Path::new(value).is_dir())
+    })
+    .as_deref()
+}
+
 /// The locale variables one invocation falls back to when neither
 /// `--language` nor the config file names a language. Read once at the call
 /// site ([`locale_env`]); resolved purely by [`resolve_locale_language`] —
@@ -530,6 +558,24 @@ pub(crate) fn guard_harness(store: &Store, harness: &Harness, db: &Path) -> Resu
 /// resolution is testable. Each harness resolves to its own file name, so a
 /// store built by one harness is never reinterpreted as another's rows
 /// (`docs/specs/harness.md`).
+/// The absolute base every user-level state dir resolves under: an absolute
+/// `$XDG_STATE_HOME` wins, a relative one is ignored (the XDG spec says a
+/// non-absolute value is invalid), and without an absolute home there is no
+/// answer. Both roots must be absolute: honoring a relative one would
+/// reintroduce a cwd-relative location this default exists to avoid. Shared by
+/// every resolver that owns a directory under it (`store_path`, the handoff
+/// plans/backups dirs), so the rule is written once.
+pub(crate) fn state_base(state_home: Option<&Path>, home: Option<&Path>) -> Result<PathBuf> {
+    Ok(match state_home.filter(|dir| dir.is_absolute()) {
+        Some(dir) => dir.to_path_buf(),
+        None => home
+            .filter(|dir| dir.is_absolute())
+            .context("HOME is not set to an absolute path")?
+            .join(".local")
+            .join("state"),
+    })
+}
+
 fn store_path(
     db: Option<PathBuf>,
     harness: &Harness,
@@ -539,19 +585,9 @@ fn store_path(
     if let Some(db) = db {
         return Ok(db);
     }
-    // Both roots must be absolute, for the same reason: honoring a relative one
-    // would reintroduce the cwd-relative store this default exists to avoid.
-    // (For `XDG_STATE_HOME` the XDG spec says as much — a non-absolute value is
-    // invalid and must be ignored.)
-    let base = match state_home.filter(|dir| dir.is_absolute()) {
-        Some(dir) => dir.to_path_buf(),
-        None => home
-            .filter(|dir| dir.is_absolute())
-            .context("HOME is not set to an absolute path")?
-            .join(".local")
-            .join("state"),
-    };
-    Ok(base.join("saniwalens").join(harness.db_file_name()))
+    Ok(state_base(state_home, home)?
+        .join("saniwalens")
+        .join(harness.db_file_name()))
 }
 
 /// Move a pre-rename store into place. The store outlives the transcripts it

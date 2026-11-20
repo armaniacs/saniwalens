@@ -4,13 +4,13 @@
 
 use anyhow::Result;
 
-use crate::adapter::harness::{Harness, home_dir};
+use crate::adapter::harness::Harness;
 use crate::cli::report::sanitize_cell;
 use crate::core::friction::ErrorCategory;
 use crate::core::optimize as optimize_mod;
 use crate::core::period::TimeRange;
 use crate::core::scope::ScopeFilter;
-use crate::session::Style;
+use crate::session::{Style, home_dir};
 use crate::store::Store;
 
 use super::super::{

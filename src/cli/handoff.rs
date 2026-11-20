@@ -20,10 +20,11 @@ use crate::adapter::harness::{Harness, RunLine, RunLineRenderer, extract_plan_te
 use crate::core::optimize as optimize_mod;
 use crate::core::period::TimeRange;
 use crate::core::scope::ScopeFilter;
-use crate::session::{Session, SessionEnv, Style};
-use crate::store::create_private_dir_all;
+use crate::session::{Session, SessionEnv, Style, state_base};
 
-use super::deliver::{BriefingFile, ProcessAdvisor, write_private_tempfile};
+use super::deliver::{
+    BriefingFile, ProcessAdvisor, create_private_dir_all, write_private_tempfile,
+};
 use super::headless::{Beat, run_headless};
 use super::{AdvisorLaunch, collect_findings, run_analyze, write_private_file};
 
@@ -93,22 +94,13 @@ pub fn check_apply_args(apply: bool, print: bool, verbose: bool, harness: &Harne
 
 /// The state-home side both handoff dirs live under:
 /// `$XDG_STATE_HOME/saniwalens/`, else `~/.local/state/saniwalens/`.
-/// The same XDG rule as the store (`session.rs`): an absolute XDG value wins,
-/// a relative one is ignored, and without an absolute home there is no
-/// answer. Never cwd-relative.
+/// Resolved by session.rs's shared `state_base`, so the XDG rule (absolute
+/// value wins, relative ignored, absolute home required) exists once — never
+/// cwd-relative.
 fn state_saniwalens_dir(state_home: Option<&Path>, home: Option<&Path>) -> Result<PathBuf> {
-    // The store's own rule (`session.rs`): both roots must be absolute, so a
-    // relative root can never put the handoff dirs back under the current
-    // directory.
-    let base = match state_home.filter(|dir| dir.is_absolute()) {
-        Some(dir) => dir.to_path_buf(),
-        None => home
-            .filter(|dir| dir.is_absolute())
-            .context("HOME is not set to an absolute path")?
-            .join(".local")
-            .join("state"),
-    };
-    Ok(base.join("saniwalens"))
+    Ok(state_base(state_home, home)
+        .with_context(|| "resolve the state home for handoff files")?
+        .join("saniwalens"))
 }
 
 /// The plans directory under the user state dir:
@@ -140,8 +132,8 @@ fn plan_filename() -> String {
 
 /// Write `plan` to a fresh file under `dir`, for the current user only
 /// (`0600`, exclusive creation like the briefing temp files). Creates `dir`
-/// when missing with the store's owner-only rule (`0700`, like the store
-/// dir): plan text may echo config secrets. Returns the saved path.
+/// when missing with the owner-only dir rule (`0700`, `create_private_dir_all`):
+/// plan text may echo config secrets. Returns the saved path.
 pub fn save_plan(dir: &Path, plan: &str) -> Result<PathBuf> {
     create_private_dir_all(dir).with_context(|| format!("create plans dir {}", dir.display()))?;
     let path = dir.join(plan_filename());

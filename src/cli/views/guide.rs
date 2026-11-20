@@ -1,12 +1,12 @@
 use std::io::{BufRead, IsTerminal, Write};
 use std::path::Path;
 
-use crate::adapter::harness::{Harness, home_dir};
+use crate::adapter::harness::Harness;
 use crate::core::optimize::{AdvisorLanguage, RunMode};
 use crate::core::period::TimeRange;
 use crate::core::scope::ScopeFilter;
 use crate::session::{
-    Session, SessionEnv, config_file_path, env_roots, process_locale_language,
+    Session, SessionEnv, config_file_path, env_roots, home_dir, process_locale_language,
     resolve_cli_with_language,
 };
 use crate::store::Store;

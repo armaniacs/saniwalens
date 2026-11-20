@@ -770,34 +770,12 @@ impl Harness {
     }
 }
 
-/// The environment read the pure `Harness::*_path` resolvers deliberately do
-/// not do: `$VAR` as a path, so the thin per-harness readers share one
-/// preamble and the resolvers stay hermetic for tests.
-pub(crate) fn xdg_from_env(var: &str) -> Option<PathBuf> {
-    std::env::var_os(var).map(PathBuf::from)
-}
-
-/// The user's home directory, resolved once per run.
-///
-/// `HOME` is preferred, so unix behaves exactly as before; Windows does not set
-/// it, hence `USERPROFILE`. The wrinkle is that a Windows shell like Git Bash
-/// *does* export `HOME` — as a POSIX path (`/c/Users/…`) that a native binary
-/// cannot resolve. Taking it at face value would send every lookup to a
-/// directory that does not exist and report "no transcripts" instead of an
-/// error, so on Windows a candidate has to name a real directory to win. The
-/// check stays off on unix, where a home that does not exist is worth surfacing
-/// as itself rather than silently falling through to another variable.
-pub(crate) fn home_dir() -> Option<&'static str> {
-    static HOME: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
-    HOME.get_or_init(|| {
-        ["HOME", "USERPROFILE"]
-            .into_iter()
-            .filter_map(|key| std::env::var(key).ok())
-            .filter(|value| !value.is_empty())
-            .find(|value| !cfg!(windows) || Path::new(value).is_dir())
-    })
-    .as_deref()
-}
+// Bridge re-export, not a definition: `home_dir`/`xdg_from_env` live in
+// `session.rs` now (they are process-env reads, not harness-format knowledge).
+// This keeps the adapter-internal consumers (`config.rs`, `kilocode.rs`,
+// `opencode.rs`, and this module's own `catalog_surfaces`) compiling until
+// their imports are re-pointed at `crate::session` directly.
+pub(crate) use crate::session::{home_dir, xdg_from_env};
 
 /// A file's `(mtime epoch nanos, size)` — the cheap change detector for
 /// incremental ingest. `None` when the file cannot be stat'ed (it is then
