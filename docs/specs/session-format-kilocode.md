@@ -156,7 +156,9 @@ includes cached tokens. The adapter mirrors the Claude Code and opencode sum
 `ctx_growth`/`ctx_start`/`ctx_peak` keep their meaning. If `tokensIn`
 already includes cache reads this overstates the floor; the `overhead`
 reconciliation (`surfaces.md`) is the honest check, and this paragraph is
-where the assumption is versioned when kilocode documents it.
+where the assumption is versioned when kilocode documents it. The numeric
+fields pass through the same ingestion-boundary clamp as the Claude
+transcript (`session-format.md`, `MAX_REALISTIC_TOKENS`).
 
 ## Project root (the cwd field, then a stated heuristic)
 

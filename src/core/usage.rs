@@ -27,7 +27,9 @@ pub fn output_tokens(records: &[Record]) -> u64 {
             RecordKind::Assistant { out_tokens, .. } => *out_tokens,
             _ => 0,
         })
-        .sum()
+        // Saturating fold: a wrapped total would read as a *smaller* output
+        // (a lie); a saturated one is at least identifiable as an extreme.
+        .fold(0u64, |total, tokens| total.saturating_add(tokens))
 }
 
 /// Attribute subagent costs to the spans that spawned them.
@@ -75,7 +77,7 @@ pub fn attribute_subagents(spans: &mut [Span], runs: &[SubagentRun]) {
         // themselves, so nothing that must balance depends on this.
         let share = run.out_tokens / claimants.len() as u64;
         for index in claimants {
-            spans[index].sub_tokens += share;
+            spans[index].sub_tokens = spans[index].sub_tokens.saturating_add(share);
             spans[index].sub_agent_count += 1;
             spans[index].sub_tokens_estimated |= estimated;
         }
@@ -166,8 +168,8 @@ pub fn bundle_models(rows: Vec<(Option<String>, i64, u64)>) -> Vec<ModelShare> {
             Some(name) => name.to_string(),
         };
         let entry = totals.entry(name).or_default();
-        entry.0 += count;
-        entry.1 += tokens;
+        entry.0 = entry.0.saturating_add(count);
+        entry.1 = entry.1.saturating_add(tokens);
     }
     let mut out: Vec<ModelShare> = totals
         .into_iter()
@@ -402,6 +404,55 @@ mod tests {
             ),
         ];
         assert_eq!(output_tokens(&records), 100);
+    }
+
+    #[test]
+    fn output_tokens_saturate_instead_of_overflowing() {
+        // Two poisoned halves: the total must saturate, not wrap (release) or
+        // panic (debug).
+        let half_max = u64::MAX / 2 + 1; // 2^63
+        let records = [
+            at(
+                1,
+                RecordKind::Assistant {
+                    prompt_size: 0,
+                    out_tokens: half_max,
+                    model: "m".into(),
+                },
+            ),
+            at(
+                2,
+                RecordKind::Assistant {
+                    prompt_size: 0,
+                    out_tokens: half_max,
+                    model: "m".into(),
+                },
+            ),
+        ];
+        assert_eq!(output_tokens(&records), u64::MAX);
+    }
+
+    #[test]
+    fn sub_token_attribution_saturates_instead_of_overflowing() {
+        // A span already carrying a near-max total must not wrap when a run's
+        // share is added on top.
+        let mut spans = vec![span_with("poison", &[(Some("toolu_1"), "p1")])];
+        spans[0].sub_tokens = u64::MAX - 5;
+        attribute_subagents(&mut spans, &[run(Some("toolu_1"), "p1", 100)]);
+        assert_eq!(spans[0].sub_tokens, u64::MAX);
+    }
+
+    #[test]
+    fn bundle_models_saturate_instead_of_overflowing() {
+        // Two poisoned rows for one model: both the i64 count and the u64
+        // token total must saturate, not wrap or panic.
+        let out = bundle_models(vec![
+            (Some("m".to_string()), i64::MAX, u64::MAX),
+            (Some("m".to_string()), 1, 1),
+        ]);
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].count, i64::MAX);
+        assert_eq!(out[0].out_tokens, u64::MAX);
     }
 
     #[test]

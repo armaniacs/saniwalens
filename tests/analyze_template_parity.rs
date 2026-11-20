@@ -142,11 +142,14 @@ fn claude_analyze_pins_stats_catalog_and_meta() {
     assert_eq!(count(&db, "sessions"), "1");
     assert_eq!(
         dump_meta(&db, &root),
-        "key\tvalue\n\
-         analyzer_version\t9\n\
-         config_dir\t<ROOT>\n\
-         harness\tclaude\n\
-         projects_dir\t<ROOT>/projects\n"
+        format!(
+            "key\tvalue\n\
+             analyzer_version\t{}\n\
+             config_dir\t<ROOT>\n\
+             harness\tclaude\n\
+             projects_dir\t<ROOT>/projects\n",
+            saniwalens::adapter::transcript::CLAUDE_ANALYZER_VERSION
+        )
     );
     assert_eq!(
         dump_surfaces(&db, &root),
@@ -250,11 +253,14 @@ fn opencode_analyze_pins_stats_catalog_and_meta() {
     assert_eq!(count(&db, "sessions"), "1");
     assert_eq!(
         dump_meta(&db, &root),
-        "key\tvalue\n\
-         config_dir\t<ROOT>/cfg-home/opencode\n\
-         harness\topencode\n\
-         opencode_analyzer_version\t5\n\
-         projects_dir\t<ROOT>/opencode.db\n"
+        format!(
+            "key\tvalue\n\
+             config_dir\t<ROOT>/cfg-home/opencode\n\
+             harness\topencode\n\
+             opencode_analyzer_version\t{}\n\
+             projects_dir\t<ROOT>/opencode.db\n",
+            saniwalens::adapter::opencode::OPENCODE_ANALYZER_VERSION
+        )
     );
     assert_eq!(
         dump_surfaces(&db, &root),
@@ -328,11 +334,14 @@ fn kilocode_analyze_pins_stats_catalog_and_meta() {
     assert_eq!(count(&db, "sessions"), "1");
     assert_eq!(
         dump_meta(&db, &root),
-        "key\tvalue\n\
-         config_dir\t<ROOT>/cfg-home/kilo\n\
-         harness\tkilocode\n\
-         kilocode_analyzer_version\t5\n\
-         projects_dir\t<ROOT>/tasks\n"
+        format!(
+            "key\tvalue\n\
+             config_dir\t<ROOT>/cfg-home/kilo\n\
+             harness\tkilocode\n\
+             kilocode_analyzer_version\t{}\n\
+             projects_dir\t<ROOT>/tasks\n",
+            saniwalens::adapter::kilocode::KILOCODE_ANALYZER_VERSION
+        )
     );
     assert_eq!(
         dump_surfaces(&db, &root),

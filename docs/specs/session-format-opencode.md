@@ -120,7 +120,8 @@ cache.read + cache.write` — so `ctx_growth`/`ctx_start`/`ctx_peak` keep their
 meaning. If opencode's `input` already includes cache reads this overstates
 the floor; the `overhead` reconciliation (`surfaces.md`) is the honest check,
 and this paragraph is where the assumption is versioned when opencode
-documents it.
+documents it. The numeric fields pass through the same ingestion-boundary
+clamp as the Claude transcript (`session-format.md`, `MAX_REALISTIC_TOKENS`).
 
 ## Subagent linkage (per-run costs)
 

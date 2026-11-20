@@ -15,7 +15,9 @@ use crate::adapter::harness::{
     AnalyzeStats, Harness, ParsedSession, Site, home_dir, load_agents, load_claude_md,
     load_commands, load_skills_deduped, xdg_from_env,
 };
-use crate::adapter::transcript::{ToolError, WorkEvent};
+use crate::adapter::transcript::{
+    ToolError, WorkEvent, sanitize_usage_field, warn_dropped_usage_fields,
+};
 use crate::core::friction::classify_error;
 use crate::core::path::basename;
 use crate::core::span::{
@@ -34,7 +36,7 @@ const UNKNOWN_MODEL: &str = "unknown";
 /// It lives apart from the shared `CLAUDE_ANALYZER_VERSION` (`adapter::transcript`) on
 /// purpose: an opencode-only change must never force every Claude Code user
 /// through a full re-analyze. Stored under its own `meta` key.
-pub const OPENCODE_ANALYZER_VERSION: &str = "5";
+pub const OPENCODE_ANALYZER_VERSION: &str = "6";
 
 /// The `meta` key holding the opencode analysis semantics.
 pub const OPENCODE_ANALYZER_META_KEY: &str = "opencode_analyzer_version";
@@ -80,6 +82,7 @@ pub fn parse_session(messages: &[MessageRow], parts: &[PartRow]) -> Vec<Record> 
     }
 
     let mut records = Vec::new();
+    let mut dropped_usage_fields = 0usize;
     for message in ordered {
         let role = message
             .data
@@ -118,11 +121,14 @@ pub fn parse_session(messages: &[MessageRow], parts: &[PartRow]) -> Vec<Record> 
                     .max()
                     .unwrap_or(message.time_created_ms)
                     .max(message.time_created_ms);
-                records.push(assistant_record(message, turn_end));
+                let (cost, dropped) = assistant_record(message, turn_end);
+                dropped_usage_fields += dropped;
+                records.push(cost);
             }
             _ => {}
         }
     }
+    warn_dropped_usage_fields(dropped_usage_fields);
     records
 }
 
@@ -649,8 +655,11 @@ fn task_runs(
 /// (at most one `step-finish` part echoes them), so parts are never summed.
 /// `prompt_size` mirrors the Claude Code sum — see
 /// `docs/specs/session-format-opencode.md`. Stamped with the turn's end (see
-/// `parse_session`), not the message creation time.
-fn assistant_record(message: &MessageRow<'_>, turn_end_ms: i64) -> Record {
+/// `parse_session`), not the message creation time. Each token field is
+/// boundary-normalized first (`sanitize_usage_field`): the database blob is
+/// untrusted input, and a field over the realistic ceiling reads as 0 (the
+/// second tuple element counts the drops).
+fn assistant_record(message: &MessageRow<'_>, turn_end_ms: i64) -> (Record, usize) {
     let tokens = message.data.get("tokens");
     let number = |key: &str| {
         tokens
@@ -665,11 +674,15 @@ fn assistant_record(message: &MessageRow<'_>, turn_end_ms: i64) -> Record {
             .and_then(Value::as_u64)
             .unwrap_or(0)
     };
-    Record {
+    let (input, d1) = sanitize_usage_field(number("input"));
+    let (cache_read, d2) = sanitize_usage_field(cached("read"));
+    let (cache_write, d3) = sanitize_usage_field(cached("write"));
+    let (output, d4) = sanitize_usage_field(number("output"));
+    let record = Record {
         timestamp_ms: turn_end_ms,
         kind: RecordKind::Assistant {
-            prompt_size: number("input") + cached("read") + cached("write"),
-            out_tokens: number("output"),
+            prompt_size: input.saturating_add(cache_read).saturating_add(cache_write),
+            out_tokens: output,
             model: message
                 .data
                 .get("modelID")
@@ -677,7 +690,8 @@ fn assistant_record(message: &MessageRow<'_>, turn_end_ms: i64) -> Record {
                 .unwrap_or(UNKNOWN_MODEL)
                 .to_string(),
         },
-    }
+    };
+    (record, d1 + d2 + d3 + d4)
 }
 
 /// The subject of a tool call: the first present identifying input field.
@@ -1155,6 +1169,43 @@ mod tests {
             panic!("expected an assistant record, got {:?}", records[0].kind);
         };
         assert_eq!(model, "unknown");
+    }
+
+    #[test]
+    fn a_usage_field_over_the_realistic_limit_reads_as_zero() {
+        // A poisoned message row: fields over the ceiling read as 0 — one per
+        // field, boundary value kept — and the parse never overflows.
+        let data = json!({
+            "role": "assistant",
+            "modelID": "m",
+            "tokens": {
+                "input": 18_446_744_073_709_551_615u64,
+                "output": 18_446_744_073_709_551_614u64,
+                "cache": {"read": 9_223_372_036_854_775_808u64, "write": 1_000_000_000u64},
+            },
+        });
+        let messages = [MessageRow {
+            id: "msg_3",
+            session_id: "ses_1",
+            time_created_ms: 3_000,
+            parent_id: None,
+            data: &data,
+        }];
+
+        let records = parse_session(&messages, &[]);
+
+        let RecordKind::Assistant {
+            prompt_size,
+            out_tokens,
+            ..
+        } = &records[0].kind
+        else {
+            panic!("expected an assistant record, got {:?}", records[0].kind);
+        };
+        // u64::MAX, i64::MAX+1 and the over-limit output drop; the at-limit
+        // cache write stays.
+        assert_eq!(*prompt_size, 1_000_000_000);
+        assert_eq!(*out_tokens, 0);
     }
 
     #[test]

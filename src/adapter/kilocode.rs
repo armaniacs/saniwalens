@@ -19,7 +19,9 @@ use crate::adapter::harness::{
     AnalyzeStats, Harness, ParsedSession, Site, file_fingerprint, home_dir, load_agents,
     load_claude_md, load_commands, load_kilo_instructions, load_skills_deduped, xdg_from_env,
 };
-use crate::adapter::transcript::{ToolError, WorkEvent};
+use crate::adapter::transcript::{
+    ToolError, WorkEvent, sanitize_usage_field, warn_dropped_usage_fields,
+};
 use crate::core::friction::classify_error;
 use crate::core::path::basename;
 use crate::core::span::{DEFAULT_IDLE_GAP_MS, Record, RecordKind, extract_spans, session_start};
@@ -40,7 +42,7 @@ const UNKNOWN_MODEL: &str = "unknown";
 /// lives apart from the shared `CLAUDE_ANALYZER_VERSION` (`adapter::transcript`) on purpose:
 /// a kilocode-only change must never force other harnesses through a full
 /// re-analyze. Stored under its own `meta` key.
-pub const KILOCODE_ANALYZER_VERSION: &str = "5";
+pub const KILOCODE_ANALYZER_VERSION: &str = "6";
 
 /// The `meta` key holding the kilocode analysis semantics.
 pub const KILOCODE_ANALYZER_META_KEY: &str = "kilocode_analyzer_version";
@@ -79,7 +81,10 @@ pub fn parse_session(conversation: &str, ui_messages: &str) -> Vec<Record> {
         .map(Vec::as_slice)
         .unwrap_or(&[]);
 
-    // The token source: one row per request, in `ts` order.
+    // The token source: one row per request, in `ts` order. Each row's token
+    // fields are boundary-normalized (`sanitize_usage_field`): the ui log is
+    // untrusted input, and a field over the realistic ceiling reads as 0.
+    let mut dropped_usage_fields = 0usize;
     let mut starts: Vec<(i64, RequestUsage)> = ui_rows
         .iter()
         .filter_map(|row| {
@@ -87,9 +92,12 @@ pub fn parse_session(conversation: &str, ui_messages: &str) -> Vec<Record> {
                 return None;
             }
             let ts = json_ts(row)?;
-            Some((ts, request_usage(row)))
+            let (usage, dropped) = request_usage(row);
+            dropped_usage_fields += dropped;
+            Some((ts, usage))
         })
         .collect();
+    warn_dropped_usage_fields(dropped_usage_fields);
     starts.sort_by_key(|(ts, _)| *ts);
 
     // The conversation spine: human turns, tool uses, and the assistant
@@ -140,7 +148,10 @@ pub fn parse_session(conversation: &str, ui_messages: &str) -> Vec<Record> {
             stamp,
             1,
             RecordKind::Assistant {
-                prompt_size: usage.tokens_in + usage.cache_reads + usage.cache_writes,
+                prompt_size: usage
+                    .tokens_in
+                    .saturating_add(usage.cache_reads)
+                    .saturating_add(usage.cache_writes),
                 out_tokens: usage.tokens_out,
                 model: UNKNOWN_MODEL.into(),
             },
@@ -175,8 +186,10 @@ fn json_ts(row: &Value) -> Option<i64> {
 }
 
 /// One row's usage payload. `usageMissing=true` means no tokens; a missing or
-/// unparseable payload has no numbers to read, which is zeros either way.
-fn request_usage(row: &Value) -> RequestUsage {
+/// unparseable payload has no numbers to read, which is zeros either way. Each
+/// field is boundary-normalized (`sanitize_usage_field`) — the ui log is
+/// untrusted input, and the second tuple element counts the drops.
+fn request_usage(row: &Value) -> (RequestUsage, usize) {
     let payload = row
         .get("text")
         .and_then(Value::as_str)
@@ -193,22 +206,30 @@ fn request_usage(row: &Value) -> RequestUsage {
         .and_then(|p| p.get("usageMissing"))
         .and_then(Value::as_bool)
         .unwrap_or(false);
-    let (tokens_in, tokens_out, cache_reads, cache_writes) = if usage_missing {
-        (0, 0, 0, 0)
+    let (tokens_in, tokens_out, cache_reads, cache_writes, dropped) = if usage_missing {
+        (0, 0, 0, 0, 0)
     } else {
+        let (tokens_in, d1) = sanitize_usage_field(number("tokensIn"));
+        let (tokens_out, d2) = sanitize_usage_field(number("tokensOut"));
+        let (cache_reads, d3) = sanitize_usage_field(number("cacheReads"));
+        let (cache_writes, d4) = sanitize_usage_field(number("cacheWrites"));
         (
-            number("tokensIn"),
-            number("tokensOut"),
-            number("cacheReads"),
-            number("cacheWrites"),
+            tokens_in,
+            tokens_out,
+            cache_reads,
+            cache_writes,
+            d1 + d2 + d3 + d4,
         )
     };
-    RequestUsage {
-        tokens_in,
-        tokens_out,
-        cache_reads,
-        cache_writes,
-    }
+    (
+        RequestUsage {
+            tokens_in,
+            tokens_out,
+            cache_reads,
+            cache_writes,
+        },
+        dropped,
+    )
 }
 
 /// One failed tool call per `tool_result` flagged `is_error`: its friction
@@ -1392,6 +1413,27 @@ mod tests {
         assert_eq!(prompt_size, 12_000 + 9_000 + 800);
         assert_eq!(out_tokens, 400);
         assert_eq!(model, "unknown");
+    }
+
+    #[test]
+    fn a_usage_field_over_the_realistic_limit_reads_as_zero() {
+        // A poisoned ui_messages row: fields over the ceiling read as 0 — one
+        // per field, boundary value kept — and the parse never overflows.
+        let conversation = conversation(vec![user_text(1000, "task")]);
+        let ui = ui_file(vec![usage_row(
+            1500,
+            18_446_744_073_709_551_615,
+            18_446_744_073_709_551_614,
+            1_000_000_001,
+            1_000_000_000,
+            false,
+        )]);
+        let records = parse_session(&conversation, &ui);
+        let (_, prompt_size, out_tokens, _) = cost_of(&records);
+        // Over-limit tokensIn, tokensOut and cacheReads drop; the at-limit
+        // cacheWrites stays.
+        assert_eq!(prompt_size, 1_000_000_000);
+        assert_eq!(out_tokens, 0);
     }
 
     #[test]

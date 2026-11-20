@@ -188,7 +188,7 @@ fn roll_up(
     let timestamps: Vec<i64> = window.iter().map(|record| record.timestamp_ms).collect();
 
     let mut prompt_sizes = Vec::new();
-    let mut out_tokens = 0;
+    let mut out_tokens: u64 = 0;
     let mut models = Vec::new();
     let mut spawns = Vec::new();
     for record in window {
@@ -199,7 +199,10 @@ fn roll_up(
                 model,
             } => {
                 prompt_sizes.push(*prompt_size);
-                out_tokens += out;
+                // Saturating, not plain: the adapter normalizes untrusted
+                // input, but the core must still never wrap or panic on the
+                // values it is handed (measurement, not arithmetic purity).
+                out_tokens = out_tokens.saturating_add(*out);
                 models.push(model.as_str());
             }
             RecordKind::AgentSpawn {
@@ -463,5 +466,19 @@ mod tests {
         // Only a synthetic assistant record -> no representative model.
         assert_eq!(span.model, None);
         assert_eq!(span.out_tokens, 10);
+    }
+
+    #[test]
+    fn out_tokens_saturate_instead_of_overflowing() {
+        // A poisoned record stream (two halves of u64::MAX): the span total
+        // must saturate, not wrap (release) or panic (debug).
+        let half_max = u64::MAX / 2 + 1; // 2^63
+        let records = [
+            at(0, skill("poison")),
+            at(1, assistant(0, half_max, "m")),
+            at(2, assistant(0, half_max, "m")),
+        ];
+        let span = &extract_spans(&records, DEFAULT_IDLE_GAP_MS)[0];
+        assert_eq!(span.out_tokens, u64::MAX);
     }
 }

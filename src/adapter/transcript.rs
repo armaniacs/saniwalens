@@ -19,6 +19,39 @@ use crate::core::usage::UsageEvent;
 
 const SYNTHETIC_MODEL: &str = "<synthetic>";
 
+/// The realistic per-field ceiling for untrusted usage numbers. Transcripts
+/// are user-machine data — dotfile sync, backup restore, or a harness bug can
+/// put u64::MAX into `~/.claude/projects/**` — and a single field beyond
+/// ~10^9 tokens is two orders of magnitude past any real context window.
+/// Values at or below the ceiling pass through unchanged (normal output stays
+/// byte-identical); values above it read as 0 and count as dropped, so a
+/// poisoned transcript degrades detectably instead of wrapping sums or
+/// breaking the store's INTEGER bind. See `pbi/2026-11-21-02`.
+pub const MAX_REALISTIC_TOKENS: u64 = 1_000_000_000;
+
+/// One untrusted usage field, boundary-normalized: `(value, dropped)` where a
+/// field over [`MAX_REALISTIC_TOKENS`] reads as `0` and reports one drop.
+/// Shared by every harness adapter — the normalization happens only at the
+/// adapter boundary, so the core stays pure over pre-normalized values.
+pub fn sanitize_usage_field(value: u64) -> (u64, usize) {
+    if value > MAX_REALISTIC_TOKENS {
+        (0, 1)
+    } else {
+        (value, 0)
+    }
+}
+
+/// Report usage fields dropped at the adapter boundary, once per parsed
+/// session. Stderr only: report views keep their byte-identical stdout
+/// contract, and the normal path (nothing dropped) prints nothing.
+pub(crate) fn warn_dropped_usage_fields(dropped: usize) {
+    if dropped > 0 {
+        eprintln!(
+            "warning: {dropped} usage field(s) over the realistic limit ({MAX_REALISTIC_TOKENS}) read as 0"
+        );
+    }
+}
+
 /// Parse one transcript's text into domain records, in file order. Two things
 /// are threaded across lines: the current turn's prompt id, stamped onto agent
 /// spawns whose own record does not carry it (the join key to the subagent
@@ -34,21 +67,23 @@ pub const CLAUDE_ANALYZER_META_KEY: &str = "analyzer_version";
 /// that changes no analysis should not force everyone through a full
 /// re-analyze. opencode and kilocode carry their own keys beside their own
 /// mappings (`adapter::opencode`, `adapter::kilocode`).
-pub const CLAUDE_ANALYZER_VERSION: &str = "9";
+pub const CLAUDE_ANALYZER_VERSION: &str = "10";
 
 /// response written as several lines is charged once (`assistant_records`).
 pub fn parse_session(jsonl: &str) -> Vec<Record> {
     let mut current_prompt_id: Option<String> = None;
     let mut reported_output: HashMap<String, u64> = HashMap::new();
     let mut records = Vec::new();
+    let mut dropped_usage_fields = 0usize;
     for line in jsonl.lines() {
-        parse_line(
+        dropped_usage_fields += parse_line(
             line,
             &mut current_prompt_id,
             &mut reported_output,
             &mut records,
         );
     }
+    warn_dropped_usage_fields(dropped_usage_fields);
     records
 }
 
@@ -99,21 +134,21 @@ fn parse_line(
     current_prompt_id: &mut Option<String>,
     reported_output: &mut HashMap<String, u64>,
     out: &mut Vec<Record>,
-) {
+) -> usize {
     let Ok(raw) = serde_json::from_str::<Raw>(line) else {
-        return;
+        return 0;
     };
     if raw.prompt_id.is_some() {
         current_prompt_id.clone_from(&raw.prompt_id);
     }
     let Some(ts) = raw.timestamp.as_deref().and_then(parse_timestamp_ms) else {
-        return;
+        return 0;
     };
 
-    let mut records = match raw.kind.as_deref() {
+    let (mut records, dropped) = match raw.kind.as_deref() {
         Some("assistant") => assistant_records(ts, raw.message.as_ref(), reported_output),
-        Some("user") | Some("system") => prompt_or_invocation(ts, &raw, line),
-        _ => Vec::new(),
+        Some("user") | Some("system") => (prompt_or_invocation(ts, &raw, line), 0),
+        _ => (Vec::new(), 0),
     };
     for record in &mut records {
         if let RecordKind::AgentSpawn { prompt_id, .. } = &mut record.kind {
@@ -121,6 +156,7 @@ fn parse_line(
         }
     }
     out.extend(records);
+    dropped
 }
 
 /// An assistant line yields its accumulated cost, plus a tool-path skill
@@ -143,9 +179,9 @@ fn assistant_records(
     ts: i64,
     message: Option<&RawMessage>,
     reported_output: &mut HashMap<String, u64>,
-) -> Vec<Record> {
+) -> (Vec<Record>, usize) {
     let Some(message) = message else {
-        return Vec::new();
+        return (Vec::new(), 0);
     };
     let mut records = Vec::new();
 
@@ -165,10 +201,15 @@ fn assistant_records(
     }
 
     if let Some(usage) = &message.usage {
-        let prompt_size = usage.input_tokens.unwrap_or(0)
-            + usage.cache_read_input_tokens.unwrap_or(0)
-            + usage.cache_creation_input_tokens.unwrap_or(0);
-        let output = usage.output_tokens.unwrap_or(0);
+        let (input, d1) = sanitize_usage_field(usage.input_tokens.unwrap_or(0));
+        let (cache_read, d2) = sanitize_usage_field(usage.cache_read_input_tokens.unwrap_or(0));
+        let (cache_creation, d3) =
+            sanitize_usage_field(usage.cache_creation_input_tokens.unwrap_or(0));
+        let (output, d4) = sanitize_usage_field(usage.output_tokens.unwrap_or(0));
+        let dropped = d1 + d2 + d3 + d4;
+        let prompt_size = input
+            .saturating_add(cache_read)
+            .saturating_add(cache_creation);
         let out_tokens = match &message.id {
             Some(id) => {
                 let reported = reported_output.entry(id.clone()).or_insert(0);
@@ -189,9 +230,10 @@ fn assistant_records(
                     .unwrap_or_else(|| SYNTHETIC_MODEL.to_string()),
             },
         });
+        return (records, dropped);
     }
 
-    records
+    (records, 0)
 }
 
 /// A user/system line is a slash invocation (when its content *is* a command
@@ -804,6 +846,7 @@ fn extract_command_name(content: &str) -> Option<String> {
 mod tests {
     use super::*;
     use crate::core::span::extract_spans;
+    use crate::core::usage::extract_usage_events;
 
     #[test]
     fn parses_a_slash_invocation_with_its_assistant_cost() {
@@ -1345,5 +1388,100 @@ mod tests {
         assert_eq!(prompt_text_at(&dir.join("gone.jsonl"), 0), None);
         assert_eq!(prompt_text_at(&path, -1), None);
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    // ---- Usage numbers are untrusted input: boundary normalization ----
+
+    #[test]
+    fn usage_field_sanitizer_keeps_the_limit_and_drops_above() {
+        // Boundary: exactly the realistic ceiling is a believable field value
+        // and passes; one token more is poison and reads as 0, counted.
+        assert_eq!(sanitize_usage_field(0), (0, 0));
+        assert_eq!(
+            sanitize_usage_field(MAX_REALISTIC_TOKENS),
+            (MAX_REALISTIC_TOKENS, 0)
+        );
+        assert_eq!(sanitize_usage_field(MAX_REALISTIC_TOKENS + 1), (0, 1));
+        assert_eq!(sanitize_usage_field(u64::MAX), (0, 1));
+    }
+
+    #[test]
+    fn a_usage_field_over_the_realistic_limit_reads_as_zero() {
+        // A poisoned assistant line (dotfile sync / backup restore can carry
+        // u64::MAX into ~/.claude/projects): fields over the ceiling read as 0
+        // — one per field, boundary value kept — and the parse never overflows.
+        let jsonl = concat!(
+            r#"{"type":"user","timestamp":"2026-01-01T00:00:00.000Z","message":{"content":"<command-name>/poison</command-name>"}}"#,
+            "\n",
+            r#"{"type":"assistant","timestamp":"2026-01-01T00:00:01.000Z","message":{"id":"msg_p","model":"m","usage":{"input_tokens":18446744073709551615,"cache_read_input_tokens":9223372036854775808,"cache_creation_input_tokens":1000000000,"output_tokens":18446744073709551614}}}"#,
+        );
+        let records = parse_session(jsonl);
+        let RecordKind::Assistant {
+            prompt_size,
+            out_tokens,
+            ..
+        } = &records[1].kind
+        else {
+            panic!("expected an assistant record, got {:?}", records[1].kind);
+        };
+        // u64::MAX and i64::MAX+1 are dropped; the at-limit cache_creation stays.
+        assert_eq!(*prompt_size, MAX_REALISTIC_TOKENS);
+        assert_eq!(*out_tokens, 0);
+    }
+
+    #[test]
+    fn a_poisoned_assistant_line_counts_its_dropped_fields() {
+        let jsonl = r#"{"type":"assistant","timestamp":"2026-01-01T00:00:01.000Z","message":{"id":"msg_p","usage":{"input_tokens":18446744073709551615,"cache_read_input_tokens":9223372036854775808,"cache_creation_input_tokens":1000000000,"output_tokens":18446744073709551614}}}"#;
+        let raw: Raw = serde_json::from_str(jsonl).unwrap();
+        let mut reported_output = HashMap::new();
+        let (_, dropped) = assistant_records(1_000, raw.message.as_ref(), &mut reported_output);
+        // input_tokens, cache_read, output_tokens over the limit; the at-limit
+        // cache_creation is kept.
+        assert_eq!(dropped, 3);
+    }
+
+    #[test]
+    fn a_poisoned_transcript_ingests_without_interruption() {
+        // The user-story scenario end to end: boundary values near u64::MAX and
+        // over i64::MAX flow through parse → spans → store ingest without
+        // panicking and without a failed INSERT (store.rs untouched — the
+        // adapter clamp is what keeps every bound value inside INTEGER).
+        let jsonl = concat!(
+            r#"{"type":"user","timestamp":"2026-01-01T00:00:00.000Z","message":{"content":"<command-name>/poison</command-name>"}}"#,
+            "\n",
+            r#"{"type":"assistant","timestamp":"2026-01-01T00:00:01.000Z","message":{"id":"msg_p","model":"m","usage":{"input_tokens":18446744073709551615,"cache_read_input_tokens":9223372036854775808,"cache_creation_input_tokens":1000000000,"output_tokens":18446744073709551614}}}"#,
+            "\n",
+            r#"{"type":"assistant","timestamp":"2026-01-01T00:00:02.000Z","message":{"id":"msg_q","model":"m","usage":{"input_tokens":1000000000,"cache_read_input_tokens":1000000000,"cache_creation_input_tokens":1000000000,"output_tokens":1000000000}}}"#,
+        );
+        let records = parse_session(jsonl);
+        let spans = extract_spans(&records, crate::core::span::DEFAULT_IDLE_GAP_MS);
+        let usage = extract_usage_events(&records);
+        assert_eq!(spans.len(), 1);
+        assert_eq!(spans[0].out_tokens, MAX_REALISTIC_TOKENS);
+        assert_eq!(spans[0].ctx_start, MAX_REALISTIC_TOKENS);
+
+        let dir = std::env::temp_dir().join(format!(
+            "saniwalens-poison-ingest-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = dir.join("poison.db");
+        let meta = crate::store::SessionMeta {
+            id: "poison".into(),
+            project: "/tmp/example".into(),
+            slug: "poison".into(),
+            root: "/tmp/example".into(),
+            source_path: "poison.jsonl".into(),
+            sub_tokens: 0,
+            sub_agent_count: 0,
+            start: crate::core::span::session_start(&records),
+        };
+        let batch = crate::store::IngestBatch::new(&meta, &spans, &usage);
+        let result = crate::store::Store::open(&db, crate::store::OpenMode::ReadWrite)
+            .and_then(|mut store| store.ingest(batch));
+        std::fs::remove_dir_all(&dir).ok();
+        result.expect("poisoned transcript must ingest without interruption");
     }
 }

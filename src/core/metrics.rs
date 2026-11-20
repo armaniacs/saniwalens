@@ -17,7 +17,11 @@ pub fn ctx_growth(prompt_sizes: &[u64]) -> u64 {
     prompt_sizes
         .windows(2)
         .map(|pair| pair[1].saturating_sub(pair[0]))
-        .sum()
+        // Saturating fold: even a step series of realistic-magnitude sizes can
+        // in principle sum past u64::MAX, and a wrapped total reads as a
+        // smaller context growth — a lie — while a saturated one reads as the
+        // measurement breaking its own ceiling.
+        .fold(0u64, |total, step| total.saturating_add(step))
 }
 
 /// Wall-clock duration of a span, in seconds.
@@ -75,6 +79,14 @@ mod tests {
     #[test]
     fn all_decreasing_grows_nothing() {
         assert_eq!(ctx_growth(&[500, 400, 300]), 0);
+    }
+
+    #[test]
+    fn ctx_growth_saturates_instead_of_overflowing() {
+        // Two positive steps of 2^63 sum past u64::MAX: the accumulation must
+        // saturate, not wrap (release) or panic (debug).
+        let two_pow_63 = 9_223_372_036_854_775_808;
+        assert_eq!(ctx_growth(&[0, two_pow_63, 0, two_pow_63]), u64::MAX);
     }
 
     #[test]
