@@ -40,4 +40,10 @@ holistic-code-review 4班並列（DRY / SoC / 拡張性 / 堅牢性）の実コ�
 
 ## 継続ラウンド引継ぎ
 
-- `pbi/`直下のCI外部ゲート残（01/07/08/11/26/28の `[ ]` はCI初回実行待ち）およびdeferral済み（06/19）は本ラウンドの対象外。外部確認・実データ入手が再検討トリガー。
+- `pbi/`直下の残はdeferral済み（06/19）のみ。Oct-31 CIバッチ（01/07/08/11/26/28）は実装・検証のうえ全件アーカイブ済み（08のdependabot初回更新PRの外部確認はPR発生時に実施）。外部確認・実データ入手が再検討トリガー。
+
+## アーカイブ履歴（本台帳以降に着地した分）
+
+| PBI | RICE | 結果 |
+|---|---|---|
+| [fix-chrono-to-jiff-migration](archived/2026-11-17-01-fix-chrono-to-jiff-migration.md) | — | chrono（RUSTSEC-2026-0543）を jiff に置換し deny ゲートを回復。出力はバイト同一（PR #41、CHANGELOG 0.6.5、2026-11-19 マージ）。cargo test 772 green |

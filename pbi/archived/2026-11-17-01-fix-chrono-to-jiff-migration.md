@@ -97,5 +97,5 @@ grep -rn "chrono::" src/ | grep -v "^.*://" | grep -v "chrono can express\|chron
 - [x] 全BDDシナリオが自動テストとして実装されパスする
 - [x] `cargo deny check` / `cargo test --locked` / `just check` がすべて Green
 - [x] 新旧バイナリの代表コマンド出力 diff が空
-- [ ] コードレビュー完了
+- [x] コードレビュー完了（PR #41 マージ 2026-11-19 にて確認）
 - [x] ドキュメント更新済み（spec-sync 該当があれば）
