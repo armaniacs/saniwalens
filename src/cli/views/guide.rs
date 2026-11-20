@@ -245,30 +245,71 @@ pub(crate) fn ask_choice<R: BufRead, W: Write>(
     }
 }
 
-/// New file text with `default_harness` set. Line-based edit: everything else
-/// (comments, profiles, blank lines) is preserved verbatim. No Serialize
-/// round-trip ― `FileConfig` is Deserialize-only, and a rewrite would eat
-/// the user's comments.
-pub(crate) fn render_default_harness(existing: Option<&str>, harness: &str) -> String {
-    const HEADER: &str = "# saniwalens defaults (written by the guided TUI).";
-    let line = format!("default_harness = \"{harness}\"");
+/// The comment line a freshly created config starts with. Both save paths
+/// write it only when creating a new file; an existing config is never
+/// touched outside its target key line.
+const HEADER: &str = "# saniwalens defaults (written by the guided TUI).";
+
+/// Where `upsert_toml_line` looks for the key, and where it puts the line
+/// when the key is missing. The two guide save paths share one line-editing
+/// skeleton and differ only in these two decisions, kept explicit at the
+/// call site.
+enum InsertStrategy {
+    /// Top-level key (`default_harness`): the line matches only before the
+    /// first table header, and a missing line is inserted there — before
+    /// the first `[table]`, or at EOF for a table-less config.
+    BeforeFirstTable,
+    /// Section key (`harness` under `[profiles.<name>]`): the line matches
+    /// only inside the section whose header path equals `path`, and a
+    /// missing line is inserted at that section's end (before the next
+    /// table header, or at EOF). A section that never appears is appended
+    /// at EOF as `[{path}]` after one blank line (none on an empty config).
+    SectionEnd { path: String },
+}
+
+/// Line-based TOML upsert shared by both guide save paths: replace the
+/// first line matching `key_matches` inside the strategy's region with
+/// `line`, otherwise insert `line` at the strategy's position. Everything
+/// else — comments, blank lines, other sections, header spelling — is
+/// preserved verbatim, so re-saving an unchanged value leaves the file
+/// byte-identical. No Serialize round-trip: `FileConfig` is
+/// Deserialize-only, and a rewrite would eat the user's comments.
+fn upsert_toml_line(
+    existing: Option<&str>,
+    fresh_file: String,
+    line: String,
+    key_matches: impl Fn(&str) -> bool,
+    strategy: InsertStrategy,
+) -> String {
     let Some(text) = existing else {
-        return format!("{HEADER}\n{line}\n");
+        return fresh_file;
     };
     let mut out: Vec<String> = Vec::new();
     let mut done = false;
-    let mut in_table = false;
+    // Whether the scan sits in the region the key may live in: outside
+    // every table (`BeforeFirstTable`) or inside the target section
+    // (`SectionEnd`).
+    let mut in_region = matches!(strategy, InsertStrategy::BeforeFirstTable);
+    // Where a `SectionEnd` insert lands once the target section closes;
+    // the `BeforeFirstTable` insert is resolved after the scan instead.
+    let mut insert_at: Option<usize> = None;
     for raw in text.lines() {
         let trimmed = raw.trim_start();
         if trimmed.starts_with('[') {
-            in_table = true;
+            // A table header closes the target section, so a missing key
+            // line belongs right before it.
+            if in_region && !done && matches!(strategy, InsertStrategy::SectionEnd { .. }) {
+                insert_at = Some(out.len());
+                done = true;
+            }
+            in_region = match &strategy {
+                InsertStrategy::BeforeFirstTable => false,
+                InsertStrategy::SectionEnd { path } => {
+                    table_header(raw).is_some_and(|table| table == path.as_str())
+                }
+            };
         }
-        let is_target = !done
-            && !in_table
-            && trimmed.starts_with("default_harness")
-            && trimmed["default_harness".len()..]
-                .trim_start()
-                .starts_with('=');
+        let is_target = !done && in_region && key_matches(trimmed);
         out.push(if is_target {
             line.clone()
         } else {
@@ -276,11 +317,30 @@ pub(crate) fn render_default_harness(existing: Option<&str>, harness: &str) -> S
         });
         done = done || is_target;
     }
+    // The target section running to EOF closes there: the same "end of
+    // section" insert as the header-closed case in the loop.
+    if in_region && !done && matches!(strategy, InsertStrategy::SectionEnd { .. }) {
+        insert_at = Some(out.len());
+        done = true;
+    }
     if !done {
-        let pos = out
-            .iter()
-            .position(|l| l.trim_start().starts_with('['))
-            .unwrap_or(out.len());
+        match strategy {
+            InsertStrategy::BeforeFirstTable => {
+                let pos = out
+                    .iter()
+                    .position(|l| l.trim_start().starts_with('['))
+                    .unwrap_or(out.len());
+                out.insert(pos, line);
+            }
+            InsertStrategy::SectionEnd { path } => {
+                if !out.is_empty() {
+                    out.push(String::new());
+                }
+                out.push(format!("[{path}]"));
+                out.push(line);
+            }
+        }
+    } else if let Some(pos) = insert_at {
         out.insert(pos, line);
     }
     let mut rendered = out.join("\n");
@@ -299,55 +359,39 @@ fn table_header(line: &str) -> Option<&str> {
     Some(inner.trim())
 }
 
+/// Whether a trimmed line sets `key` (`key = ...`, any spacing). The
+/// key-match predicate both save paths hand to `upsert_toml_line`.
+fn is_key_line(trimmed: &str, key: &str) -> bool {
+    trimmed.starts_with(key) && trimmed[key.len()..].trim_start().starts_with('=')
+}
+
+/// New file text with `default_harness` set. Line-based edit: everything else
+/// (comments, profiles, blank lines) is preserved verbatim — see
+/// `upsert_toml_line` for the shared contract.
+pub(crate) fn render_default_harness(existing: Option<&str>, harness: &str) -> String {
+    let line = format!("default_harness = \"{harness}\"");
+    upsert_toml_line(
+        existing,
+        format!("{HEADER}\n{line}\n"),
+        line,
+        |trimmed| is_key_line(trimmed, "default_harness"),
+        InsertStrategy::BeforeFirstTable,
+    )
+}
+
 /// New file text with `[profiles.<name>]` carrying `harness`. Same
 /// line-preserving contract as `render_default_harness`.
 pub(crate) fn render_profile(existing: Option<&str>, name: &str, harness: &str) -> String {
-    const HEADER: &str = "# saniwalens defaults (written by the guided TUI).";
-    let header = format!("[profiles.{name}]");
-    let target = format!("profiles.{name}");
     let line = format!("harness = \"{harness}\"");
-    let Some(text) = existing else {
-        return format!("{HEADER}\n{header}\n{line}\n");
-    };
-    let mut out: Vec<String> = Vec::new();
-    let mut in_section = false;
-    let mut done = false;
-    for raw in text.lines() {
-        let trimmed = raw.trim_start();
-        if trimmed.starts_with('[') {
-            // Close the section at the next header; insert the harness line
-            // if the section had none.
-            if in_section && !done {
-                out.push(line.clone());
-                done = true;
-            }
-            in_section = table_header(raw).is_some_and(|path| path == target);
-        }
-        let is_target = in_section
-            && !done
-            && trimmed.starts_with("harness")
-            && trimmed["harness".len()..].trim_start().starts_with('=');
-        out.push(if is_target {
-            line.clone()
-        } else {
-            raw.to_string()
-        });
-        done = done || is_target;
-    }
-    if in_section && !done {
-        out.push(line.clone());
-        done = true;
-    }
-    if !done {
-        if !out.is_empty() {
-            out.push(String::new());
-        }
-        out.push(header);
-        out.push(line);
-    }
-    let mut rendered = out.join("\n");
-    rendered.push('\n');
-    rendered
+    upsert_toml_line(
+        existing,
+        format!("{HEADER}\n[profiles.{name}]\n{line}\n"),
+        line,
+        |trimmed| is_key_line(trimmed, "harness"),
+        InsertStrategy::SectionEnd {
+            path: format!("profiles.{name}"),
+        },
+    )
 }
 
 /// The post-run save conversation: 3-choice (skip / default / profile),
@@ -1320,6 +1364,80 @@ mod tests {
             1,
             "no duplicate table: {out}"
         );
+    }
+
+    #[test]
+    fn default_harness_save_appends_at_end_when_no_table_exists() {
+        // Insert-strategy branch: a table-less config has no header to
+        // insert before, so the key lands at EOF.
+        let existing = "# just a comment\n";
+        assert_eq!(
+            render_default_harness(Some(existing), "claude"),
+            "# just a comment\ndefault_harness = \"claude\"\n"
+        );
+    }
+
+    #[test]
+    fn default_harness_save_ignores_its_key_inside_a_table() {
+        // Insert-strategy branch: `default_harness` inside a table is not
+        // the top-level key; the new line goes before the table and the
+        // in-table line stays verbatim.
+        let existing = "[profiles.work]\ndefault_harness = \"opencode\"\n";
+        assert_eq!(
+            render_default_harness(Some(existing), "claude"),
+            "default_harness = \"claude\"\n[profiles.work]\ndefault_harness = \"opencode\"\n"
+        );
+    }
+
+    #[test]
+    fn profile_save_fills_an_empty_section_before_the_next_header() {
+        // Insert-strategy branch: the section exists but has no harness
+        // line; it ends at the next header, so the line lands right before
+        // it.
+        let existing = "[profiles.work]\n[profiles.home]\nharness = \"claude\"\n";
+        assert_eq!(
+            render_profile(Some(existing), "work", "kilocode"),
+            "[profiles.work]\nharness = \"kilocode\"\n[profiles.home]\nharness = \"claude\"\n"
+        );
+    }
+
+    #[test]
+    fn profile_save_fills_an_empty_section_at_end_of_file() {
+        // Insert-strategy branch: the section runs to EOF, so the missing
+        // harness line closes it there.
+        let existing = "default_harness = \"claude\"\n[profiles.work]\n";
+        assert_eq!(
+            render_profile(Some(existing), "work", "kilocode"),
+            "default_harness = \"claude\"\n[profiles.work]\nharness = \"kilocode\"\n"
+        );
+    }
+
+    #[test]
+    fn profile_save_appends_a_missing_section_at_end_of_file() {
+        // Insert-strategy branch: no [profiles.<name>] anywhere, so a new
+        // section is appended after one blank line.
+        let existing = "default_harness = \"claude\"\n";
+        assert_eq!(
+            render_profile(Some(existing), "work", "kilocode"),
+            "default_harness = \"claude\"\n\n[profiles.work]\nharness = \"kilocode\"\n"
+        );
+    }
+
+    #[test]
+    fn default_harness_save_rerun_on_its_own_output_is_byte_identical() {
+        // BDD: re-saving the same value to an existing config must leave
+        // the file byte-identical (empty diff).
+        let existing =
+            "# keep me\ndefault_harness = \"claude\"\n\n[profiles.work]\nharness = \"opencode\"\n";
+        assert_eq!(render_default_harness(Some(existing), "claude"), existing);
+    }
+
+    #[test]
+    fn profile_save_rerun_on_its_own_output_is_byte_identical() {
+        // BDD: re-saving the same profile value must leave the file
+        // byte-identical (empty diff).
+        let existing = "default_harness = \"claude\"\n[profiles.work]\nharness = \"opencode\"\n";
+        assert_eq!(render_profile(Some(existing), "work", "opencode"), existing);
     }
 
     #[test]
