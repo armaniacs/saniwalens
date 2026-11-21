@@ -89,9 +89,10 @@ pub(crate) fn doctor(
         .filter(|p| filter.includes_project(&p.project))
         .collect();
     // The prose bypasses render()'s sanitize choke point, so every
-    // transcript-derived value it interpolates is sanitized here: a hostile
-    // or hallucinated project name / root must not carry ESC, C1, or BEL
-    // bytes to the terminal.
+    // transcript-derived value it interpolates is sanitized here — the
+    // agent names in doctor_agent_lines included: a hostile or
+    // hallucinated name, path, or root must not carry control chars (ESC,
+    // C0/C1, BEL) or invisible bidi/zero-width format chars to the terminal.
     let display = |p: &optimize_mod::ProjectFindings| {
         sanitize_cell(&if p.root.is_empty() {
             p.project.clone()
@@ -409,7 +410,7 @@ fn doctor_agent_lines(
         .map(|a| {
             format!(
                 "{} {} ({} run{})",
-                a.label(),
+                sanitize_cell(a.label()),
                 fmt_tokens(a.out_tokens),
                 a.runs,
                 if a.runs == 1 { "" } else { "s" }
@@ -631,6 +632,35 @@ mod tests {
         // nothing to list in-band.
         let f = findings_with_agents(3_093_466, 375, vec![]);
         assert!(doctor_agent_lines(&f, "saniwalens usage", TimeRange::ALL).is_empty());
+    }
+
+    #[test]
+    fn doctor_agent_lines_sanitize_the_agent_label() {
+        // The agent type is a raw transcript string (the sidecar's
+        // agentType); it must cross the same sanitize boundary as every
+        // other prose interpolation, keeping the readable data.
+        let f = findings_with_agents(
+            40_000,
+            1,
+            vec![agent(
+                "ev\u{1b}[31m\u{202e}il\u{200b}\u{9b}agent\u{7}",
+                1,
+                40_000,
+            )],
+        );
+        let lines = doctor_agent_lines(&f, "saniwalens usage", TimeRange::ALL);
+        assert!(
+            lines[0].contains("evilagent"),
+            "readable data kept: {}",
+            lines[0]
+        );
+        for line in &lines {
+            assert!(
+                !line.chars().any(|c| c.is_control()
+                    || matches!(c as u32, 0x202a..=0x202e | 0x200b..=0x200f | 0xfeff)),
+                "{line:?}"
+            );
+        }
     }
 
     #[test]

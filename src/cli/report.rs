@@ -258,14 +258,20 @@ fn format_row(cells: &[String], widths: &[usize], aligns: &[Align]) -> String {
         .join("  ")
 }
 
-/// Strip ANSI escape sequences from one data cell. Transcript-derived strings
-/// (agent/skill ids, project/file paths, friction labels) can carry `ESC`
-/// bytes; `render()` is the choke point where they would reach the terminal,
-/// so both the Table and Markdown paths sanitize here, before any width
-/// math. Doctor's prose bypasses `render()` (it is its own text layout), so
-/// it routes its interpolated values through this function directly. Only
-/// ASCII-range bytes are ever removed, so multi-byte UTF-8
-/// (including Japanese) passes through untouched. Handles:
+/// Strip terminal-hostile characters from one data cell: every ESC-led
+/// sequence (CSI, OSC, charset designators, bare `ESC`), every Cc control
+/// char — C0, C1 (U+0080-009F, riding UTF-8 as 0xC2 0x80-0x9F), and DEL —
+/// except the line structure `\n` and tab `\t` that prose layout (and the
+/// markdown `<br>` fold) relies on, and the Cf bidi overrides /
+/// zero-width format chars (U+202A-202E, U+200B-200F, U+FEFF) that display
+/// invisibly. Transcript-derived strings (agent/skill ids, project/file
+/// paths, friction labels) are untrusted; `render()` is the choke point
+/// where they would reach the terminal, so both the Table and Markdown
+/// paths sanitize here, before any width math. Doctor's prose bypasses
+/// `render()` (it is its own text layout), so it routes its interpolated
+/// values through this function directly. Kept chars re-encode verbatim,
+/// so multi-byte text (including Japanese) passes through untouched.
+/// Handles:
 /// - CSI `ESC [ … final` (e.g. `\x1b[2J`, `\x1b[31m`),
 /// - OSC `ESC ] … (BEL | ESC \)` (e.g. `\x1b]0;title\x07`),
 /// - other `ESC` + follower sequences and a trailing bare `ESC`,
@@ -307,8 +313,15 @@ pub(crate) fn sanitize_cell(cell: &str) -> String {
                         }
                     }
                     b'(' | b')' | b'#' => {
-                        // 3-byte sequences (`ESC ( B`, `ESC # 8`, …).
-                        i += 3;
+                        // 3-byte sequences (`ESC ( B`, `ESC # 8`, …). The
+                        // designator is a single byte in a well-formed
+                        // sequence; consuming a whole char keeps the scan on
+                        // a char boundary if a multi-byte char follows.
+                        i += 2;
+                        if i < bytes.len() {
+                            let ch = cell[i..].chars().next().expect("input is valid UTF-8");
+                            i += ch.len_utf8();
+                        }
                     }
                     _ => {
                         // Not a recognized sequence leader: drop only the
@@ -322,15 +335,44 @@ pub(crate) fn sanitize_cell(cell: &str) -> String {
             0x07 => {
                 i += 1; // stray BEL
             }
+            // Line structure is kept: prose layout, and markdown folds `\n`.
+            b'\n' | b'\t' => {
+                out.push(bytes[i]);
+                i += 1;
+            }
+            // Every other C0 (CR included) and DEL: a terminal acts on them —
+            // CR alone rewrites the line head.
+            0x00..=0x06 | 0x08 | 0x0b..=0x1a | 0x1c..=0x1f | 0x7f => {
+                i += 1;
+            }
+            // Multi-byte UTF-8: decode the whole char so C1 and Cf are
+            // recognized as chars while real text survives untouched.
+            _ if bytes[i] >= 0x80 => {
+                let ch = cell[i..].chars().next().expect("input is valid UTF-8");
+                i += ch.len_utf8();
+                if !is_stripped_char(ch) {
+                    let mut buf = [0u8; 4];
+                    out.extend_from_slice(ch.encode_utf8(&mut buf).as_bytes());
+                }
+            }
             _ => {
                 out.push(bytes[i]);
                 i += 1;
             }
         }
     }
-    // Safe: the input was valid UTF-8 and only ASCII-range bytes were removed
-    // (`ESC` never occurs inside a multi-byte UTF-8 sequence).
-    String::from_utf8(out).expect("sanitize removes ASCII bytes only")
+    // Safe: only whole chars were removed and every kept char was re-encoded
+    // verbatim, so `out` is the input's char sequence minus the stripped ones.
+    String::from_utf8(out).expect("sanitize removes whole chars only")
+}
+
+/// A non-ESC char the strip vocabulary removes: any Cc control except the
+/// kept line structure `\n` / `\t`, plus the Cf bidi overrides and
+/// zero-width / direction-marking format chars (`is_control()` misses the
+/// latter — they are Cf, and they misrepresent or spoof the visible text).
+fn is_stripped_char(c: char) -> bool {
+    (c.is_control() && !matches!(c, '\n' | '\t'))
+        || matches!(c as u32, 0x202a..=0x202e | 0x200b..=0x200f | 0xfeff)
 }
 
 fn pad(text: &str, width: usize, align: Align) -> String {
@@ -516,6 +558,50 @@ mod tests {
     }
 
     #[test]
+    fn sanitize_strips_c1_controls_and_del() {
+        // C1 rides UTF-8 (0xC2 0x80-0x9F); U+009B is the 8-bit CSI a terminal
+        // would act on, and DEL is a C0 the byte scan used to keep.
+        assert_eq!(sanitize_cell("a\u{9b}31mb"), "a31mb");
+        assert_eq!(sanitize_cell("a\u{85}b"), "ab");
+        assert_eq!(sanitize_cell("a\u{7f}b"), "ab");
+        for cp in 0x80u32..=0x9f {
+            let c = char::from_u32(cp).expect("C1 block is scalar");
+            assert_eq!(
+                sanitize_cell(&format!("a{c}b")),
+                "ab",
+                "U+{cp:04X} survived"
+            );
+        }
+    }
+
+    #[test]
+    fn sanitize_strips_cr_but_keeps_line_structure() {
+        // CR rewrites the line head; \n and \t are prose layout (and the
+        // markdown <br> fold relies on \n surviving).
+        assert_eq!(sanitize_cell("a\rb"), "ab");
+        assert_eq!(sanitize_cell("\roverwrite"), "overwrite");
+        assert_eq!(sanitize_cell("a\nb"), "a\nb");
+        assert_eq!(sanitize_cell("a\tb"), "a\tb");
+        assert_eq!(sanitize_cell("a\r\nb"), "a\nb");
+    }
+
+    #[test]
+    fn sanitize_strips_bidi_overrides_and_zero_width() {
+        // Cf chars are invisible (`is_control()` misses them): an override
+        // reorders what the user reads, zero-width chars spoof copied text.
+        for cp in [
+            0x202a, 0x202b, 0x202c, 0x202d, 0x202e, 0x200b, 0x200c, 0x200d, 0x200e, 0x200f, 0xfeff,
+        ] {
+            let c = char::from_u32(cp).expect("listed codepoints are scalar");
+            assert_eq!(
+                sanitize_cell(&format!("a{c}b")),
+                "ab",
+                "U+{cp:04X} survived"
+            );
+        }
+    }
+
+    #[test]
     fn sanitize_strips_bare_escapes() {
         // A lone ESC plus its follower, and a trailing ESC with nothing after.
         // Only the ESC byte is dropped; the follower is harmless data.
@@ -559,9 +645,11 @@ mod tests {
     #[test]
     fn markdown_cells_fold_newlines() {
         // One logical row stays one physical line: newlines become `<br>`.
+        // `\r` never survives sanitize_cell, so "a\rb" collapses to "ab" —
+        // the fold only ever sees `\n`.
         assert_eq!(escape_markdown_cell("a\nb"), "a<br>b");
         assert_eq!(escape_markdown_cell("a\r\nb"), "a<br>b");
-        assert_eq!(escape_markdown_cell("a\rb"), "a<br>b");
+        assert_eq!(escape_markdown_cell("a\rb"), "ab");
         assert_eq!(escape_markdown_cell("trail\n"), "trail<br>");
         assert_eq!(escape_markdown_cell("plain"), "plain");
         let row = vec!["a\nb|c".to_string()];
