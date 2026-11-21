@@ -11,7 +11,7 @@ use crate::session::{
 };
 use crate::store::Store;
 
-use super::super::report::Format;
+use super::super::report::{Format, Style};
 use super::super::window::{PeriodArgs, ReadArgs, WindowedDispatch};
 use super::super::{deliver, doctor, failures, run_analyze};
 use super::waste::waste;
@@ -333,11 +333,26 @@ fn upsert_toml_line(
                 out.insert(pos, line);
             }
             InsertStrategy::SectionEnd { path } => {
-                if !out.is_empty() {
-                    out.push(String::new());
+                if out.iter().any(|l| starts_same_named_table(l, &path)) {
+                    // A same-named table starts somewhere the section
+                    // matcher could not align (array-of-tables form,
+                    // exotic spellings). Appending `[{path}]` would define
+                    // the table twice — invalid TOML that breaks every
+                    // later startup's config parse — so refuse the append
+                    // and say so instead of corrupting the file.
+                    eprintln!(
+                        "{}",
+                        Style::stderr().warn(&format!(
+                            "config already defines [{path}]; not appending a duplicate — edit the section by hand"
+                        ))
+                    );
+                } else {
+                    if !out.is_empty() {
+                        out.push(String::new());
+                    }
+                    out.push(format!("[{path}]"));
+                    out.push(line);
                 }
-                out.push(format!("[{path}]"));
-                out.push(line);
             }
         }
     } else if let Some(pos) = insert_at {
@@ -348,15 +363,57 @@ fn upsert_toml_line(
     rendered
 }
 
-/// A `[table]` header's dotted path, tolerant of inner whitespace
-/// (`[ profiles.work ]`). Array-of-tables (`[[x]]`) and malformed lines
-/// are not headers: they still close an open section but never match one.
-fn table_header(line: &str) -> Option<&str> {
-    let inner = line.trim_start().strip_prefix('[')?.strip_suffix(']')?;
-    if inner.starts_with('[') || inner.trim().is_empty() {
+/// A `[table]` header's dotted path, tolerant of the legal spellings a
+/// hand-edited config may carry: inner whitespace (`[ profiles.work ]`),
+/// whitespace around the dots (`[profiles . work]`), a trailing comment
+/// (`[profiles.work] # note`), and trailing whitespace. Array-of-tables
+/// (`[[x]]`), an empty inner, and unterminated lines are not headers: they
+/// still close an open section but never match one.
+///
+/// The scanner reads from `[` to the first `]` and ignores the rest of the
+/// line. This leans on a premise this tool's headers always satisfy: no
+/// string literal can appear inside the bracket span (bare dotted keys
+/// only), so a `#` after `]` is always a comment. A `#` inside a key
+/// line's value is untouched — only header lines are inspected here.
+fn table_header(line: &str) -> Option<String> {
+    let rest = line.trim_start().strip_prefix('[')?;
+    let close = rest.find(']')?;
+    let inner = &rest[..close];
+    if inner.starts_with('[') {
         return None;
     }
-    Some(inner.trim())
+    let name = inner
+        .split('.')
+        .map(str::trim)
+        .collect::<Vec<_>>()
+        .join(".");
+    if name.is_empty() {
+        return None;
+    }
+    Some(name)
+}
+
+/// Whether `line` starts a table named `path` under a lenient reading:
+/// whitespace anywhere inside the brackets or around the dots, and the
+/// array-of-tables `[[path]]` form. Only the append guard uses this — an
+/// exact `table_header` match always routes through in-section
+/// replacement, so a line reaching the guard is a header spelling the
+/// matcher cannot align. Quoting deliberately does not normalize
+/// (`["a.b"]` is a quoted root key, a different table from `[a.b]`).
+fn starts_same_named_table(line: &str, path: &str) -> bool {
+    let Some(rest) = line.trim_start().strip_prefix('[') else {
+        return false;
+    };
+    let rest = rest.strip_prefix('[').unwrap_or(rest);
+    let Some(close) = rest.find(']') else {
+        return false;
+    };
+    let name = rest[..close]
+        .split('.')
+        .map(str::trim)
+        .collect::<Vec<_>>()
+        .join(".");
+    name == path
 }
 
 /// Whether a trimmed line sets `key` (`key = ...`, any spacing). The
@@ -1361,6 +1418,167 @@ mod tests {
             out.matches("[profiles.work]").count() + out.matches("[ profiles.work ]").count(),
             1,
             "no duplicate table: {out}"
+        );
+    }
+
+    #[test]
+    fn table_header_accepts_a_trailing_comment() {
+        // Trailing comments after a table header are legal TOML.
+        assert_eq!(
+            table_header("[profiles.work] # comment").as_deref(),
+            Some("profiles.work")
+        );
+    }
+
+    #[test]
+    fn table_header_accepts_trailing_whitespace() {
+        assert_eq!(
+            table_header("[profiles.work]   ").as_deref(),
+            Some("profiles.work")
+        );
+    }
+
+    #[test]
+    fn table_header_accepts_bare_and_inner_whitespace_headers() {
+        // Pin: the forms the guide itself writes keep resolving.
+        assert_eq!(
+            table_header("[profiles.work]").as_deref(),
+            Some("profiles.work")
+        );
+        assert_eq!(
+            table_header("[ profiles.work ]").as_deref(),
+            Some("profiles.work")
+        );
+    }
+
+    #[test]
+    fn table_header_normalizes_whitespace_around_dots() {
+        // `[profiles . work]` names the same table as `[profiles.work]`,
+        // so its section is replaceable, not a stranger.
+        assert_eq!(
+            table_header("[profiles . work]").as_deref(),
+            Some("profiles.work")
+        );
+    }
+
+    #[test]
+    fn table_header_still_rejects_array_tables_and_broken_inner() {
+        // Pin: `[[x]]` and an empty inner are not table headers, and a
+        // line without a closing `]` is not either.
+        assert_eq!(table_header("[[x]]"), None);
+        assert_eq!(table_header("[]"), None);
+        assert_eq!(table_header("[profiles.work"), None);
+    }
+
+    #[test]
+    fn table_header_ignores_everything_after_the_closing_bracket() {
+        // Simplification premise: the scanner reads `[` up to the first
+        // `]` and ignores the rest — no string literal can appear inside a
+        // header's bracket span, so nothing after `]` can change the name.
+        // (The line shown is not valid TOML anyway.)
+        assert_eq!(
+            table_header("[profiles.work] x = 1").as_deref(),
+            Some("profiles.work")
+        );
+    }
+
+    #[test]
+    fn profile_save_updates_a_trailing_comment_header_in_place() {
+        let existing = "[profiles.work] # comment\nharness = \"opencode\"\n";
+        let out = render_profile(Some(existing), "work", "kilocode");
+        assert!(
+            out.contains("[profiles.work] # comment\nharness = \"kilocode\"\n"),
+            "header and comment verbatim, harness replaced in place: {out}"
+        );
+        assert_eq!(
+            out.matches("[profiles.work]").count(),
+            1,
+            "no duplicate table: {out}"
+        );
+    }
+
+    #[test]
+    fn profile_save_updates_a_trailing_whitespace_header_in_place() {
+        let existing = "[profiles.work]   \nharness = \"opencode\"\n";
+        let out = render_profile(Some(existing), "work", "kilocode");
+        assert!(
+            out.contains("[profiles.work]   \nharness = \"kilocode\"\n"),
+            "harness line replaced inside the section: {out}"
+        );
+        assert_eq!(
+            out.matches("[profiles.work]").count(),
+            1,
+            "no duplicate table: {out}"
+        );
+    }
+
+    #[test]
+    fn profile_save_keeps_a_hash_inside_a_key_value_verbatim() {
+        // Simplification premise, key-line side: only a `#` after a
+        // header's `]` is a comment — a `#` inside a key line's value is
+        // data and the line survives untouched.
+        let existing = "default_harness = \"claude\"\n[profiles.work]\ndb = \"a # b\"\nharness = \"opencode\"\n";
+        let out = render_profile(Some(existing), "work", "kilocode");
+        assert!(out.contains("db = \"a # b\"\n"), "value `#` is data: {out}");
+        assert!(
+            out.contains("harness = \"kilocode\"\n"),
+            "own key still replaced: {out}"
+        );
+    }
+
+    #[test]
+    fn hand_edited_config_round_trips_as_valid_toml() {
+        // Witness for the corruption path: the save dialog reads a
+        // hand-edited config verbatim and writes the render back, and the
+        // next startup hard-errors on any unparseable config — so the
+        // written-back text must parse and carry no duplicate table.
+        let existing = "# hand-edited\n[profiles.work] # work machine\nharness = \"opencode\"\n";
+        let out = render_profile(Some(existing), "work", "kilocode");
+        let file: crate::adapter::config_file::FileConfig =
+            toml::from_str(&out).expect("written-back text parses as TOML");
+        assert_eq!(file.profiles["work"].harness.as_deref(), Some("kilocode"));
+        assert_eq!(
+            out.matches("[profiles.work]").count(),
+            1,
+            "no EOF re-add: {out}"
+        );
+    }
+
+    #[test]
+    fn profile_save_never_appends_a_duplicate_of_an_array_table() {
+        // `[[profiles.work]]` is a legal header the matcher cannot align,
+        // and appending `[profiles.work]` beside it is invalid TOML (a
+        // table cannot share a name with an array of tables). The append
+        // guard refuses instead of writing a file that breaks every later
+        // startup; the config is left byte-identical.
+        let existing = "[[profiles.work]]\nharness = \"opencode\"\n";
+        assert_eq!(render_profile(Some(existing), "work", "kilocode"), existing);
+    }
+
+    #[test]
+    fn profile_save_never_appends_a_duplicate_of_an_unmatchable_header() {
+        // A same-named table spelled in a form the section matcher cannot
+        // align must not turn into an implicit duplicate definition at EOF.
+        let existing = "[[ profiles.work ]]\nharness = \"opencode\"\n";
+        let out = render_profile(Some(existing), "work", "kilocode");
+        assert_eq!(
+            out.matches("[profiles.work]").count() + out.matches("[[ profiles.work ]]").count(),
+            1,
+            "no duplicate table: {out}"
+        );
+    }
+
+    #[test]
+    fn profile_save_appends_normally_beside_a_quoted_key_header() {
+        // Guard precision: `["profiles.work"]` is a quoted root key — a
+        // different table from the dotted `[profiles.work]` — so appending
+        // the real section is correct and the duplicate guard must not
+        // mistake one for the other.
+        let existing = "[\"profiles.work\"]\nharness = \"opencode\"\n";
+        let out = render_profile(Some(existing), "work", "kilocode");
+        assert!(
+            out.contains("\n[profiles.work]\nharness = \"kilocode\"\n"),
+            "{out}"
         );
     }
 
