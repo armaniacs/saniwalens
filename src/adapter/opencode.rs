@@ -1672,6 +1672,69 @@ mod tests {
     }
 
     #[test]
+    fn a_poison_timestamp_pair_spans_without_panicking() {
+        // A synced/corrupted database can carry part times at the i64 ends:
+        // one skill part at i64::MIN and one part at i64::MAX make the
+        // invocation and the turn-cost record an adjacent MIN/MAX pair after
+        // sorting. Analyze must survive it — no debug panic, no release wrap
+        // — and yield a deterministic span: the saturated gap closes the span
+        // at the cost record instead of swallowing the rest of the session.
+        let data = json!({"role": "assistant", "tokens": {"input": 5, "output": 1}});
+        let skill = json!({
+            "type": "tool", "tool": "skill", "callID": "call_1",
+            "state": {"status": "completed", "input": {"name": "git-commit"},
+                      "time": {"start": i64::MIN}},
+        });
+        let cost_part = json!({
+            "type": "text", "text": "done",
+            "state": {"time": {"start": i64::MAX}},
+        });
+        let messages = [MessageRow {
+            id: "msg_2",
+            session_id: "ses_1",
+            time_created_ms: 2_000,
+            parent_id: None,
+            data: &data,
+        }];
+        let parts = [
+            PartRow {
+                id: "prt_1",
+                message_id: "msg_2",
+                session_id: "ses_1",
+                time_created_ms: 1_900,
+                data: &skill,
+            },
+            PartRow {
+                id: "prt_2",
+                message_id: "msg_2",
+                session_id: "ses_1",
+                time_created_ms: 1_950,
+                data: &cost_part,
+            },
+        ];
+
+        let records = parse_session(&messages, &parts);
+
+        assert_eq!(records.len(), 2);
+        assert_eq!(records[0].timestamp_ms, i64::MIN);
+        assert_eq!(records[1].timestamp_ms, i64::MAX);
+        assert!(matches!(
+            records[0].kind,
+            RecordKind::SkillInvocation { .. }
+        ));
+        assert!(matches!(records[1].kind, RecordKind::Assistant { .. }));
+
+        let spans = extract_spans(&records, DEFAULT_IDLE_GAP_MS);
+
+        assert_eq!(spans.len(), 1);
+        let span = &spans[0];
+        assert_eq!(span.skill, "git-commit");
+        assert_eq!(span.started_epoch_ms, i64::MIN);
+        assert!(!span.is_trailing);
+        assert_eq!(span.duration_sec, 0.0);
+    }
+
+    #[test]
     fn a_command_pays_only_its_description_at_startup() {
         let content = "---\ndescription: review the branch diff\n---\n$ARGUMENTS";
         let surface = command_surface("review", "/cfg/command/review.md", content, &Scope::Global);

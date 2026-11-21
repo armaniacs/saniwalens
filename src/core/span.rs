@@ -113,10 +113,20 @@ pub const DEFAULT_IDLE_GAP_MS: i64 = 30 * 60 * 1000;
 pub fn span_end(records: &[Record], start: usize, idle_gap_ms: i64) -> usize {
     for index in (start + 1)..records.len() {
         let record = &records[index];
+        // Saturating, not plain — the same trust boundary as the token sums in
+        // `roll_up`: adapters hand the core raw i64 times (opencode's
+        // `state.time.start` passes the database value straight through), and
+        // a wrapped gap would disguise a huge idle as a tiny difference.
+        // Calendar clamping at the reads was considered and not taken: it
+        // would only be a boundary if all three harnesses applied it alike,
+        // and saturation here already keeps the core deterministic.
         let closes = matches!(
             record.kind,
             RecordKind::HumanTurn | RecordKind::SkillInvocation { .. }
-        ) || record.timestamp_ms - records[index - 1].timestamp_ms > idle_gap_ms;
+        ) || record
+            .timestamp_ms
+            .saturating_sub(records[index - 1].timestamp_ms)
+            > idle_gap_ms;
         if closes {
             return index;
         }
@@ -480,5 +490,38 @@ mod tests {
         ];
         let span = &extract_spans(&records, DEFAULT_IDLE_GAP_MS)[0];
         assert_eq!(span.out_tokens, u64::MAX);
+    }
+
+    #[test]
+    fn a_forward_poison_pair_saturates_positive_and_closes_the_span() {
+        // i64::MIN followed by i64::MAX: the true gap is past the positive
+        // end, so saturating_sub reads it as i64::MAX — an idle gap that
+        // closes the span at the MAX record. Pinned so a future clamp cannot
+        // silently let the span swallow the rest of the session instead.
+        let records = [
+            at(i64::MIN, skill("poison")),
+            at(i64::MAX, assistant(10, 5, "m")),
+        ];
+        assert_eq!(span_end(&records, 0, DEFAULT_IDLE_GAP_MS), 1);
+        let span = &extract_spans(&records, DEFAULT_IDLE_GAP_MS)[0];
+        assert_eq!(span.started_epoch_ms, i64::MIN);
+        assert!(!span.is_trailing);
+        assert_eq!(span.duration_sec, 0.0); // the window holds only the invocation
+    }
+
+    #[test]
+    fn a_reverse_poison_pair_stays_negative_and_leaves_the_span_open() {
+        // i64::MAX followed by i64::MIN: the saturated difference is i64::MIN,
+        // far below the idle threshold, so the span never closes and trails —
+        // the natural saturating semantics. The wrapped release behavior would
+        // instead have read this pair as +1 ms and closed the span on a lie.
+        let records = [
+            at(i64::MAX, skill("poison")),
+            at(i64::MIN, assistant(10, 5, "m")),
+        ];
+        assert_eq!(span_end(&records, 0, DEFAULT_IDLE_GAP_MS), 2);
+        let span = &extract_spans(&records, DEFAULT_IDLE_GAP_MS)[0];
+        assert!(span.is_trailing);
+        assert_eq!(span.duration_sec, i64::MIN as f64 / 1000.0);
     }
 }

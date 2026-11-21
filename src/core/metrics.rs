@@ -28,12 +28,13 @@ pub fn ctx_growth(prompt_sizes: &[u64]) -> u64 {
 ///
 /// `timestamps_ms` is the record timestamps in the span (epoch milliseconds, in
 /// record order — the adapter normalizes Claude Code's UTC ISO-8601 to this).
-/// The duration is the last timestamp minus the first; a span with fewer than
-/// two timestamped records has no measurable duration and is zero. See
-/// `docs/specs/events.md`.
+/// The duration is the last timestamp minus the first, saturating at the i64
+/// ends: adapters do not bound the values, and a wrapped difference would
+/// disguise a huge gap as a tiny one. A span with fewer than two timestamped
+/// records has no measurable duration and is zero. See `docs/specs/events.md`.
 pub fn duration_sec(timestamps_ms: &[i64]) -> f64 {
     match (timestamps_ms.first(), timestamps_ms.last()) {
-        (Some(first), Some(last)) => (last - first) as f64 / 1000.0,
+        (Some(first), Some(last)) => last.saturating_sub(*first) as f64 / 1000.0,
         _ => 0.0,
     }
 }
@@ -109,6 +110,26 @@ mod tests {
     #[test]
     fn sub_second_duration_keeps_fraction() {
         assert_eq!(duration_sec(&[1000, 1500]), 0.5);
+    }
+
+    #[test]
+    fn duration_saturates_a_forward_poison_pair() {
+        // i64::MIN -> i64::MAX: saturates to the positive end, honestly
+        // reading as a beyond-ceiling span instead of wrapping to a tiny one.
+        assert_eq!(
+            duration_sec(&[i64::MIN, i64::MAX]),
+            i64::MAX as f64 / 1000.0
+        );
+    }
+
+    #[test]
+    fn duration_keeps_a_reverse_poison_pair_negative() {
+        // i64::MAX -> i64::MIN: the saturated difference stays on the negative
+        // side; release wrapping would have read this pair as +1 ms.
+        assert_eq!(
+            duration_sec(&[i64::MAX, i64::MIN]),
+            i64::MIN as f64 / 1000.0
+        );
     }
 
     #[test]
