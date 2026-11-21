@@ -86,3 +86,7 @@ adversarial-code-review（fork/main..1121a 差分、4 チャンク × 2 視点�
 | [17-timestamp-gap-arithmetic](archived/2026-11-21-17-fix-timestamp-gap-arithmetic.md) | 中 | span_end と duration_sec を saturating_sub 化（opencode の part ts 素通しの隣接極端ペアで debug panic / release wrap）。span.rs コメントに ts クランプ不採用の裁定を記録。4ccb919 |
 | [19-frozen-read-only-seam](archived/2026-11-21-19-fix-frozen-read-only-seam.md) | 中 | optimize/guide inline の frozen 糸口を ReadOnly seam に切替（PBI 08-12 の閉じ残し）+ frozen 時の fresh 度行。テストを seed 方式へ移行。8641d3b |
 | [20-timeout-direct-deadline](archived/2026-11-21-20-fix-timeout-direct-deadline.md) | 中 | Headless+verbose に deadline 機構を適用、direct は明示 timeout で警告。spec 同期（cli.md timeout 節 + frozen 契約の全体化）込み。c329ab0 |
+| [16-briefing-tool-name-injection](archived/2026-11-21-16-fix-briefing-tool-name-injection.md) | 中 | by tool 行を excerpt と同一の単行化 + 300 字 cap 契約に（store 不変、version bump 不要）。213f58c |
+| [18-corrupt-transcript-resilience](archived/2026-11-21-18-fix-corrupt-transcript-resilience.md) | 中 | 不正 UTF-8 行のスキップ計数、usage 字段の寛容パース（行保持）、drop 計数 3 ハーネス統一。CLAUDE version 11 bump（消滅行の回復）。spec 同期（session-format 3 件）込み。8a4c43c |
+| [22-guide-toml-header-recognition](archived/2026-11-21-22-fix-guide-toml-header-recognition.md) | 中 | table_header の行内コメント/末尾空白対応、同名テーブル二重定義の追記拒否 + 警告。既存 62 pin バイト同一。dde39c0 |
+| [26-migrate-guard-transaction](archived/2026-11-21-26-fix-migrate-guard-transaction.md) | 低 | version guard を BEGIN IMMEDIATE 内に移動、busy_timeout 5s。防御的強化（現行 SCHEMA_VERSION=1 で発生不能）。spec 同期（storage.md）込み。5e94aef |
