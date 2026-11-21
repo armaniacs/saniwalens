@@ -16,7 +16,7 @@ use crate::adapter::harness::{
     load_skills_deduped,
 };
 use crate::adapter::transcript::{
-    ToolError, WorkEvent, sanitize_usage_field, warn_dropped_usage_fields,
+    ToolError, WorkEvent, resolve_usage_field, warn_dropped_usage_fields,
 };
 use crate::core::friction::classify_error;
 use crate::core::path::basename;
@@ -656,29 +656,19 @@ fn task_runs(
 /// (at most one `step-finish` part echoes them), so parts are never summed.
 /// `prompt_size` mirrors the Claude Code sum — see
 /// `docs/specs/session-format-opencode.md`. Stamped with the turn's end (see
-/// `parse_session`), not the message creation time. Each token field is
-/// boundary-normalized first (`sanitize_usage_field`): the database blob is
-/// untrusted input, and a field over the realistic ceiling reads as 0 (the
-/// second tuple element counts the drops).
+/// `parse_session`), not the message creation time. Each token field resolves
+/// through [`resolve_usage_field`] — the database blob is untrusted input, and
+/// a field that is not a non-negative integer (over the realistic ceiling,
+/// negative, fractional) reads as 0 and counts one drop.
 fn assistant_record(message: &MessageRow<'_>, turn_end_ms: i64) -> (Record, usize) {
     let tokens = message.data.get("tokens");
-    let number = |key: &str| {
-        tokens
-            .and_then(|t| t.get(key))
-            .and_then(Value::as_u64)
-            .unwrap_or(0)
-    };
+    let number = |key: &str| resolve_usage_field(tokens.and_then(|t| t.get(key)));
     let cache = tokens.and_then(|t| t.get("cache"));
-    let cached = |key: &str| {
-        cache
-            .and_then(|c| c.get(key))
-            .and_then(Value::as_u64)
-            .unwrap_or(0)
-    };
-    let (input, d1) = sanitize_usage_field(number("input"));
-    let (cache_read, d2) = sanitize_usage_field(cached("read"));
-    let (cache_write, d3) = sanitize_usage_field(cached("write"));
-    let (output, d4) = sanitize_usage_field(number("output"));
+    let cached = |key: &str| resolve_usage_field(cache.and_then(|c| c.get(key)));
+    let (input, d1) = number("input");
+    let (cache_read, d2) = cached("read");
+    let (cache_write, d3) = cached("write");
+    let (output, d4) = number("output");
     let record = Record {
         timestamp_ms: turn_end_ms,
         kind: RecordKind::Assistant {
@@ -1151,6 +1141,43 @@ mod tests {
         assert_eq!(*prompt_size, 1010);
         assert_eq!(*out_tokens, 40);
         assert_eq!(model, "preview/example-model");
+    }
+
+    #[test]
+    fn the_same_wrong_typed_usage_counts_the_same_drops_everywhere() {
+        // The shared 3-harness fixture (negative, fractional, u64::MAX —
+        // see the same-named scenario in adapter::transcript and
+        // adapter::kilocode): every harness reads all three as 0 and counts
+        // exactly three drops. Previously they silently read as 0 with no
+        // drop counted.
+        let data = json!({
+            "role": "assistant",
+            "modelID": "m",
+            "tokens": {
+                "input": -7,
+                "output": 1.5,
+                "cache": {"read": 18_446_744_073_709_551_615u64},
+            },
+        });
+        let message = MessageRow {
+            id: "msg_p",
+            session_id: "ses_1",
+            time_created_ms: 2_000,
+            parent_id: None,
+            data: &data,
+        };
+        let (record, dropped) = assistant_record(&message, 2_000);
+        assert_eq!(dropped, 3);
+        let RecordKind::Assistant {
+            prompt_size,
+            out_tokens,
+            ..
+        } = &record.kind
+        else {
+            panic!("expected an assistant record, got {:?}", record.kind);
+        };
+        assert_eq!(*prompt_size, 0);
+        assert_eq!(*out_tokens, 0);
     }
 
     #[test]

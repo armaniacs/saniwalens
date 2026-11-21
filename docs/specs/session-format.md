@@ -76,7 +76,14 @@ rest; unknown types are skipped.
   hostile transcript cannot overflow the token arithmetic (a wrap would make the
   measured context lie) nor fail the whole analyze at the `INTEGER` bind. A field
   over the ceiling reads as 0 and the run warns once on stderr; fields at or
-  under it are byte-identical to before.
+  under it are byte-identical to before. Type-invalid values (negative, float,
+  out-of-range) follow the same fate: the field reads as 0, the drop is counted,
+  and the line itself keeps its events. A line whose JSONL bytes are not valid
+  UTF-8 is skipped and counted with a stderr warning — a corrupt file degrades
+  the session it lives in instead of failing the whole analyze. These resiliency
+  rules ship with `analyzer_version` 11 for the Claude route (the earlier
+  version left type-invalid lines silently absent, so stores must re-analyze to
+  see the healed rows).
   - **Prompt size** at a request (the full context handed to the model) is
     `input_tokens + cache_read_input_tokens + cache_creation_input_tokens`. It
     is **not monotonic**: at the context limit Claude Code compacts and the next

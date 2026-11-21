@@ -121,7 +121,9 @@ meaning. If opencode's `input` already includes cache reads this overstates
 the floor; the `overhead` reconciliation (`surfaces.md`) is the honest check,
 and this paragraph is where the assumption is versioned when opencode
 documents it. The numeric fields pass through the same ingestion-boundary
-clamp as the Claude transcript (`session-format.md`, `MAX_REALISTIC_TOKENS`).
+clamp as the Claude transcript (`session-format.md`, `MAX_REALISTIC_TOKENS`),
+and type-invalid values (negative, float) read as 0 with the drop counted —
+the drop accounting is identical across all three harnesses.
 
 ## Subagent linkage (per-run costs)
 

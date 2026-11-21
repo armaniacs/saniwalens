@@ -47,8 +47,25 @@ pub fn sanitize_usage_field(value: u64) -> (u64, usize) {
 pub(crate) fn warn_dropped_usage_fields(dropped: usize) {
     if dropped > 0 {
         eprintln!(
-            "warning: {dropped} usage field(s) over the realistic limit ({MAX_REALISTIC_TOKENS}) read as 0"
+            "warning: {dropped} usage field(s) read as 0 (over the realistic limit {MAX_REALISTIC_TOKENS} or not a non-negative integer)"
         );
+    }
+}
+
+/// Resolve one untrusted usage field as received: a present non-negative
+/// integer normalizes through [`sanitize_usage_field`]; a present value that
+/// is not one (negative, fractional, a string) reads as `0` and counts one
+/// drop; absent or `null` reads as `0` as a missing field always has. Shared
+/// by every harness adapter, so a wrong-typed field counts the same way
+/// everywhere and the line it sits on keeps its other records instead of
+/// vanishing behind a failed deserialization.
+pub(crate) fn resolve_usage_field(field: Option<&Value>) -> (u64, usize) {
+    match field {
+        None | Some(Value::Null) => (0, 0),
+        Some(value) => match value.as_u64() {
+            Some(count) => sanitize_usage_field(count),
+            None => (0, 1),
+        },
     }
 }
 
@@ -67,7 +84,7 @@ pub const CLAUDE_ANALYZER_META_KEY: &str = "analyzer_version";
 /// that changes no analysis should not force everyone through a full
 /// re-analyze. opencode and kilocode carry their own keys beside their own
 /// mappings (`adapter::opencode`, `adapter::kilocode`).
-pub const CLAUDE_ANALYZER_VERSION: &str = "10";
+pub const CLAUDE_ANALYZER_VERSION: &str = "11";
 
 /// response written as several lines is charged once (`assistant_records`).
 pub fn parse_session(jsonl: &str) -> Vec<Record> {
@@ -121,12 +138,17 @@ struct RawMessage {
     content: Option<Value>,
 }
 
+/// One usage object as received: each field stays the raw JSON value, so a
+/// wrong-typed one (negative, fractional) cannot fail the whole line's
+/// deserialization — that would silently drop the line's ToolUse and
+/// SkillInvocation records behind the ingest stamp. [`resolve_usage_field`]
+/// interprets each field.
 #[derive(Deserialize)]
 struct RawUsage {
-    input_tokens: Option<u64>,
-    cache_read_input_tokens: Option<u64>,
-    cache_creation_input_tokens: Option<u64>,
-    output_tokens: Option<u64>,
+    input_tokens: Option<Value>,
+    cache_read_input_tokens: Option<Value>,
+    cache_creation_input_tokens: Option<Value>,
+    output_tokens: Option<Value>,
 }
 
 fn parse_line(
@@ -201,11 +223,10 @@ fn assistant_records(
     }
 
     if let Some(usage) = &message.usage {
-        let (input, d1) = sanitize_usage_field(usage.input_tokens.unwrap_or(0));
-        let (cache_read, d2) = sanitize_usage_field(usage.cache_read_input_tokens.unwrap_or(0));
-        let (cache_creation, d3) =
-            sanitize_usage_field(usage.cache_creation_input_tokens.unwrap_or(0));
-        let (output, d4) = sanitize_usage_field(usage.output_tokens.unwrap_or(0));
+        let (input, d1) = resolve_usage_field(usage.input_tokens.as_ref());
+        let (cache_read, d2) = resolve_usage_field(usage.cache_read_input_tokens.as_ref());
+        let (cache_creation, d3) = resolve_usage_field(usage.cache_creation_input_tokens.as_ref());
+        let (output, d4) = resolve_usage_field(usage.output_tokens.as_ref());
         let dropped = d1 + d2 + d3 + d4;
         let prompt_size = input
             .saturating_add(cache_read)
@@ -1483,6 +1504,61 @@ mod tests {
         let (_, dropped) = assistant_records(1_000, raw.message.as_ref(), &mut reported_output);
         // input_tokens, cache_read, output_tokens over the limit; the at-limit
         // cache_creation is kept.
+        assert_eq!(dropped, 3);
+    }
+
+    #[test]
+    fn a_negative_usage_field_reads_as_zero_and_keeps_the_line() {
+        // A type-poisoned field (negative, not just over-limit) must not fail
+        // the line's deserialization — the line's ToolUse records would then
+        // silently vanish behind the ingest stamp. The field reads as 0 and
+        // counts one drop; the line's other records stand.
+        let jsonl = r#"{"type":"assistant","timestamp":"2026-01-01T00:00:01.000Z","message":{"id":"msg_n","model":"m","usage":{"input_tokens":-7,"output_tokens":40},"content":[{"type":"tool_use","name":"Bash","input":{"command":"true"}}]}}"#;
+        let records = parse_session(jsonl);
+        assert_eq!(
+            records.len(),
+            2,
+            "the tool-use and cost records both survive"
+        );
+        assert!(matches!(records[0].kind, RecordKind::ToolUse { .. }));
+
+        let raw: Raw = serde_json::from_str(jsonl).unwrap();
+        let mut reported_output = HashMap::new();
+        let (records, dropped) =
+            assistant_records(1_000, raw.message.as_ref(), &mut reported_output);
+        assert_eq!(dropped, 1);
+        let RecordKind::Assistant { prompt_size, .. } = &records[1].kind else {
+            panic!("expected an assistant record, got {:?}", records[1].kind);
+        };
+        assert_eq!(*prompt_size, 0);
+    }
+
+    #[test]
+    fn a_fractional_usage_field_reads_as_zero_and_keeps_the_line() {
+        // A fractional token count is type-poisoned the same way: 0 + one
+        // drop, and the line lives.
+        let jsonl = r#"{"type":"assistant","timestamp":"2026-01-01T00:00:01.000Z","message":{"id":"msg_f","usage":{"output_tokens":1.5}}}"#;
+        let raw: Raw = serde_json::from_str(jsonl).unwrap();
+        let mut reported_output = HashMap::new();
+        let (records, dropped) =
+            assistant_records(1_000, raw.message.as_ref(), &mut reported_output);
+        assert_eq!(dropped, 1);
+        let RecordKind::Assistant { out_tokens, .. } = &records[0].kind else {
+            panic!("expected an assistant record, got {:?}", records[0].kind);
+        };
+        assert_eq!(*out_tokens, 0);
+    }
+
+    #[test]
+    fn the_same_wrong_typed_usage_counts_the_same_drops_everywhere() {
+        // The shared 3-harness fixture (negative, fractional, u64::MAX —
+        // see the same-named scenario in adapter::opencode and
+        // adapter::kilocode): every harness reads all three as 0 and counts
+        // exactly three drops.
+        let jsonl = r#"{"type":"assistant","timestamp":"2026-01-01T00:00:01.000Z","message":{"id":"msg_x","usage":{"input_tokens":-7,"cache_read_input_tokens":18446744073709551615,"output_tokens":1.5}}}"#;
+        let raw: Raw = serde_json::from_str(jsonl).unwrap();
+        let mut reported_output = HashMap::new();
+        let (_, dropped) = assistant_records(1_000, raw.message.as_ref(), &mut reported_output);
         assert_eq!(dropped, 3);
     }
 

@@ -20,7 +20,7 @@ use crate::adapter::harness::{
     load_commands, load_kilo_instructions, load_skills_deduped,
 };
 use crate::adapter::transcript::{
-    ToolError, WorkEvent, sanitize_usage_field, warn_dropped_usage_fields,
+    ToolError, WorkEvent, resolve_usage_field, warn_dropped_usage_fields,
 };
 use crate::core::friction::classify_error;
 use crate::core::path::basename;
@@ -188,20 +188,15 @@ fn json_ts(row: &Value) -> Option<i64> {
 
 /// One row's usage payload. `usageMissing=true` means no tokens; a missing or
 /// unparseable payload has no numbers to read, which is zeros either way. Each
-/// field is boundary-normalized (`sanitize_usage_field`) — the ui log is
-/// untrusted input, and the second tuple element counts the drops.
+/// field resolves through [`resolve_usage_field`] — the ui log is untrusted
+/// input, and a field that is not a non-negative integer (over the realistic
+/// ceiling, negative, fractional) reads as 0 and counts one drop.
 fn request_usage(row: &Value) -> (RequestUsage, usize) {
     let payload = row
         .get("text")
         .and_then(Value::as_str)
         .and_then(|text| serde_json::from_str::<Value>(text).ok());
-    let number = |key: &str| {
-        payload
-            .as_ref()
-            .and_then(|p| p.get(key))
-            .and_then(Value::as_u64)
-            .unwrap_or(0)
-    };
+    let number = |key: &str| resolve_usage_field(payload.as_ref().and_then(|p| p.get(key)));
     let usage_missing = payload
         .as_ref()
         .and_then(|p| p.get("usageMissing"))
@@ -210,10 +205,10 @@ fn request_usage(row: &Value) -> (RequestUsage, usize) {
     let (tokens_in, tokens_out, cache_reads, cache_writes, dropped) = if usage_missing {
         (0, 0, 0, 0, 0)
     } else {
-        let (tokens_in, d1) = sanitize_usage_field(number("tokensIn"));
-        let (tokens_out, d2) = sanitize_usage_field(number("tokensOut"));
-        let (cache_reads, d3) = sanitize_usage_field(number("cacheReads"));
-        let (cache_writes, d4) = sanitize_usage_field(number("cacheWrites"));
+        let (tokens_in, d1) = number("tokensIn");
+        let (tokens_out, d2) = number("tokensOut");
+        let (cache_reads, d3) = number("cacheReads");
+        let (cache_writes, d4) = number("cacheWrites");
         (
             tokens_in,
             tokens_out,
@@ -749,6 +744,28 @@ pub fn files_in_context(metadata_json: &str) -> Vec<String> {
         })
         .unwrap_or_default()
 }
+/// Read one task's whole-JSON file as text. The files are JSON documents, not
+/// line-oriented, so one invalid UTF-8 byte (dotfile sync, partial write)
+/// cannot be skipped per line — the read degrades lossily instead: an
+/// undecodable byte becomes U+FFFD, the JSON may or may not survive
+/// structurally, and the degradation is warned once, stderr-only with a
+/// silent normal path. A structurally broken file parses as empty downstream,
+/// which is the honest degradation — analyze still completes. A file that
+/// cannot be read at all stays an error.
+fn read_task_json(path: &Path) -> Result<String> {
+    let bytes = fs::read(path).with_context(|| format!("read {}", path.display()))?;
+    match std::str::from_utf8(&bytes) {
+        Ok(text) => Ok(text.to_string()),
+        Err(_) => {
+            eprintln!(
+                "warning: invalid UTF-8 in {} read lossily (undecodable bytes became U+FFFD)",
+                path.display()
+            );
+            Ok(String::from_utf8_lossy(&bytes).into_owned())
+        }
+    }
+}
+
 /// Analyze kilocode task directories into the kilocode store. The file-to-
 /// record mapping is `adapter::kilocode`; this shell reads each task's two
 /// JSON files and ingests each task idempotently. See `docs/specs/harness.md`
@@ -817,10 +834,8 @@ pub fn analyze(input: Option<PathBuf>, db: &Path) -> Result<AnalyzeStats> {
                 .map(|name| name.to_string_lossy().into_owned())
                 .unwrap_or_default();
             let fingerprint_key = format!("kilocode:{task_id}");
-            let conversation = fs::read_to_string(&conversation_path)
-                .with_context(|| format!("read {}", conversation_path.display()))?;
-            let ui_messages = fs::read_to_string(&ui_path)
-                .with_context(|| format!("read {}", ui_path.display()))?;
+            let conversation = read_task_json(&conversation_path)?;
+            let ui_messages = read_task_json(&ui_path)?;
             let records = parse_session(&conversation, &ui_messages);
             let spans = extract_spans(&records, DEFAULT_IDLE_GAP_MS);
             let usage = extract_usage_events(&records);
@@ -908,6 +923,10 @@ mod tests {
             std::thread::current().id()
         ))
     }
+
+    /// Serializes the tests that set `XDG_CONFIG_HOME`: the env read behind
+    /// `kilo_home` has no parallel-reader guard of its own.
+    static XDG_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     #[test]
     fn neutralize_log_text_replaces_control_bytes_with_u_fffd() {
@@ -1435,6 +1454,26 @@ mod tests {
         // cacheWrites stays.
         assert_eq!(prompt_size, 1_000_000_000);
         assert_eq!(out_tokens, 0);
+    }
+
+    #[test]
+    fn the_same_wrong_typed_usage_counts_the_same_drops_everywhere() {
+        // The shared 3-harness fixture (negative, fractional, u64::MAX —
+        // see the same-named scenario in adapter::transcript and
+        // adapter::opencode): every harness reads all three as 0 and counts
+        // exactly three drops. Previously they silently read as 0 with no
+        // drop counted.
+        let row = json!({"ts": 1500, "type": "say", "say": "api_req_started",
+                         "text": json!({"tokensIn": -7, "tokensOut": 1.5,
+                                        "cacheReads": 18_446_744_073_709_551_615u64,
+                                        "usageMissing": false})
+                             .to_string()});
+        let (usage, dropped) = request_usage(&row);
+        assert_eq!(dropped, 3);
+        assert_eq!(
+            (usage.tokens_in, usage.tokens_out, usage.cache_reads),
+            (0, 0, 0)
+        );
     }
 
     #[test]
@@ -2093,8 +2132,9 @@ mod tests {
         // (`pbi/2026-11-08-10-fix-fingerprint-stale-skip.md`): an untouched
         // task stays skipped, while a same-second, same-size edit in one of
         // its two files is re-ingested and the session row reflects the new
-        // content. No other test sets `XDG_CONFIG_HOME`, so the env read has
-        // no parallel reader to race with.
+        // content. The `XDG_LOCK` guard serializes the env read against the
+        // other test that sets `XDG_CONFIG_HOME`.
+        let _guard = XDG_LOCK.lock().unwrap();
         let dir = unique_dir("saniwalens-kilo-incremental-test");
         let _ = std::fs::remove_dir_all(&dir);
         let task = dir.join("tasks").join("task-1");
@@ -2166,6 +2206,105 @@ mod tests {
             let (_, rows) = store.query("SELECT started_at FROM sessions").unwrap();
             assert_eq!(rows, vec![vec!["2023-11-14T22:13:25+00:00".to_string()]]);
         }
+
+        unsafe { std::env::remove_var("XDG_CONFIG_HOME") };
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    // ---- PBI 18: a corrupted task file degrades visibly instead of failing ----
+
+    #[test]
+    fn a_valid_task_file_round_trips_byte_identically() {
+        let dir = unique_dir("saniwalens-kilo-read-test");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("api_conversation_history.json");
+        std::fs::write(&path, r#"[{"role":"user"}]"#).unwrap();
+        assert_eq!(read_task_json(&path).unwrap(), r#"[{"role":"user"}]"#);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn an_invalid_utf8_byte_reads_lossily_without_error() {
+        let dir = unique_dir("saniwalens-kilo-read-lossy-test");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("api_conversation_history.json");
+        let mut poisoned: Vec<u8> = Vec::new();
+        poisoned.extend_from_slice(br#"[{"role":"user","text":"a"#);
+        poisoned.push(0xff);
+        poisoned.extend_from_slice(br#"b"}]"#);
+        std::fs::write(&path, &poisoned).unwrap();
+        // The undecodable byte becomes U+FFFD inside a string value, so the
+        // JSON structure survives; the warning (stderr-only, silent on the
+        // normal path) fires at the read.
+        assert_eq!(
+            read_task_json(&path).unwrap(),
+            "[{\"role\":\"user\",\"text\":\"a\u{FFFD}b\"}]"
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn an_unreadable_task_file_still_errors() {
+        // Only the corrupt-content case degrades; a file that cannot be
+        // read at all stays an error, exactly as before.
+        let path = unique_dir("saniwalens-kilo-read-missing-test").join("gone.json");
+        assert!(read_task_json(&path).is_err());
+    }
+
+    #[test]
+    fn analyze_completes_on_a_task_with_an_invalid_utf8_file() {
+        // One invalid UTF-8 byte (dotfile sync, partial write) must not fail
+        // the read and so stop the whole analyze: the whole-JSON files cannot
+        // skip per line, so the read degrades lossily and the task ingests
+        // like any other — here with an empty record set, since the U+FFFD
+        // replacement breaks the JSON structure. The stamp is still recorded.
+        let _guard = XDG_LOCK.lock().unwrap();
+        let dir = unique_dir("saniwalens-kilo-invalid-utf8-test");
+        let _ = std::fs::remove_dir_all(&dir);
+        let task = dir.join("tasks").join("task-1");
+        std::fs::create_dir_all(&task).unwrap();
+        let conversation_path = task.join("api_conversation_history.json");
+        let ui_path = task.join("ui_messages.json");
+        let mut poisoned: Vec<u8> = Vec::new();
+        poisoned.extend_from_slice(
+            br#"[{"role":"user","ts":1700000000000,"content":[{"type":"text","text":"aaa"}]},"#,
+        );
+        poisoned.push(0xff);
+        poisoned.extend_from_slice(
+            br#"{"role":"assistant","ts":1700000000000,"content":[{"type":"text","text":"ok"}]}]"#,
+        );
+        std::fs::write(&conversation_path, &poisoned).unwrap();
+        std::fs::write(
+            &ui_path,
+            ui_file(vec![usage_row(
+                1_700_000_000_000,
+                12_000,
+                400,
+                9_000,
+                800,
+                false,
+            )]),
+        )
+        .unwrap();
+        unsafe { std::env::set_var("XDG_CONFIG_HOME", dir.join("config-home")) };
+
+        let db = dir.join("store.db");
+        let tasks = dir.join("tasks");
+        let first = analyze(Some(tasks.clone()), &db).unwrap();
+        assert_eq!(
+            (first.sessions, first.skipped),
+            (1, 0),
+            "the lossy read degrades instead of failing the analyze"
+        );
+
+        let second = analyze(Some(tasks.clone()), &db).unwrap();
+        assert_eq!(
+            (second.sessions, second.skipped),
+            (0, 1),
+            "the stamp is recorded normally"
+        );
 
         unsafe { std::env::remove_var("XDG_CONFIG_HOME") };
         std::fs::remove_dir_all(&dir).unwrap();

@@ -159,6 +159,51 @@ fn normalize_root(cwd: &str) -> String {
     cwd.to_string()
 }
 
+/// One main transcript's read: the joined text of the lines that are valid
+/// UTF-8, how many bytes the read consumed (the stamp's size — skipped lines
+/// shrink the text, not the consumed size), and how many lines were skipped.
+struct TranscriptText {
+    text: String,
+    consumed_bytes: usize,
+    skipped_lines: usize,
+}
+
+/// Read a JSONL transcript, skipping lines that are not valid UTF-8: dotfile
+/// sync and partial writes can corrupt one line, and a whole-file
+/// `read_to_string` would fail the parse — a failed candidate is never
+/// stamped, so one bad byte would stop the analyze forever. The count of
+/// skipped lines rides along for [`warn_skipped_invalid_utf8_lines`]. A file
+/// that cannot be read at all stays an error.
+fn read_transcript_text(path: &Path) -> Result<TranscriptText> {
+    let bytes = fs::read(path).with_context(|| format!("read {}", path.display()))?;
+    let mut valid: Vec<&str> = Vec::new();
+    let mut skipped_lines = 0usize;
+    for chunk in bytes.split(|byte| *byte == b'\n') {
+        match std::str::from_utf8(chunk) {
+            Ok(line) => valid.push(line),
+            Err(_) => skipped_lines += 1,
+        }
+    }
+    Ok(TranscriptText {
+        consumed_bytes: bytes.len(),
+        skipped_lines,
+        text: valid.join("\n"),
+    })
+}
+
+/// Report the transcript lines a read had to skip, once per file. Stderr
+/// only: report views keep their byte-identical stdout contract, and the
+/// normal path (nothing skipped) prints nothing — the same contract as
+/// `warn_dropped_usage_fields` (`adapter::transcript`).
+fn warn_skipped_invalid_utf8_lines(path: &Path, skipped: usize) {
+    if skipped > 0 {
+        eprintln!(
+            "warning: skipped {skipped} transcript line(s) with invalid UTF-8 in {}",
+            path.display()
+        );
+    }
+}
+
 pub fn analyze(projects: Option<PathBuf>, db: &Path) -> Result<AnalyzeStats> {
     let projects = projects.map(Ok).unwrap_or_else(default_projects_dir)?;
     let config_dir = claude_home()?;
@@ -180,8 +225,9 @@ pub fn analyze(projects: Option<PathBuf>, db: &Path) -> Result<AnalyzeStats> {
             )
         },
         |transcript: PathBuf, pre| {
-            let text = fs::read_to_string(&transcript)
-                .with_context(|| format!("read {}", transcript.display()))?;
+            let read = read_transcript_text(&transcript)?;
+            warn_skipped_invalid_utf8_lines(&transcript, read.skipped_lines);
+            let text = read.text;
             let denials = count_permission_denials(&text);
             let records = parse_session(&text);
             let mut spans = extract_spans(&records, DEFAULT_IDLE_GAP_MS);
@@ -218,8 +264,10 @@ pub fn analyze(projects: Option<PathBuf>, db: &Path) -> Result<AnalyzeStats> {
                 denials,
                 // Record the size actually consumed, so a tail appended after
                 // the read shows a mismatch next run instead of being skipped
-                // forever.
-                stamp: pre.map(|(mtime, _)| (mtime, text.len() as i64)),
+                // forever. Skipped lines shrink the text, not the consumed
+                // size — a skipped-and-stamped line stays skipped until the
+                // analyzer version moves on.
+                stamp: pre.map(|(mtime, _)| (mtime, read.consumed_bytes as i64)),
                 restat: move || file_fingerprint(&transcript),
             })
         },
@@ -369,6 +417,175 @@ mod tests {
 
         unsafe { std::env::remove_var("CLAUDE_CONFIG_DIR") };
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn analyze_completes_on_a_transcript_with_an_invalid_utf8_line() {
+        // One invalid UTF-8 byte (dotfile sync, partial write) must not fail
+        // the read and so stop the whole analyze — a failed candidate is
+        // never stamped, so the failure would repeat forever. The valid
+        // lines are counted normally and the stamp is recorded, so the
+        // second run skips like any other transcript.
+        let _guard = CONFIG_DIR_LOCK.lock().unwrap();
+        let dir = std::env::temp_dir().join(format!(
+            "saniwalens-claude-invalid-utf8-test-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let projects = dir.join("projects/-tmp-example-proj");
+        std::fs::create_dir_all(&projects).unwrap();
+        let mut poisoned: Vec<u8> = Vec::new();
+        poisoned.extend_from_slice(
+            br#"{"type":"user","cwd":"/tmp/example/proj","timestamp":"2026-01-01T00:00:00.000Z","message":{"content":"<command-name>/git-commit</command-name>"}}"#,
+        );
+        poisoned.push(b'\n');
+        // The corrupted line: a truncated write ending in invalid bytes.
+        poisoned.extend_from_slice(br#"{"type":"assistant","timestamp":"2026-01-01T00:00:0"#);
+        poisoned.extend_from_slice(&[0xff, 0xfe]);
+        poisoned.push(b'\n');
+        poisoned.extend_from_slice(
+            br#"{"type":"assistant","timestamp":"2026-01-01T00:00:03.000Z","message":{"model":"claude-opus-4-7","usage":{"input_tokens":0,"cache_read_input_tokens":250,"cache_creation_input_tokens":0,"output_tokens":60}}}"#,
+        );
+        std::fs::write(
+            projects.join("aaaaaaaa-0000-0000-0000-000000000002.jsonl"),
+            poisoned,
+        )
+        .unwrap();
+        unsafe { std::env::set_var("CLAUDE_CONFIG_DIR", &dir) };
+
+        let db = dir.join("store.db");
+        let first = crate::adapter::harness::Harness::Claude
+            .analyze(None, &db)
+            .unwrap();
+        assert_eq!(
+            (first.sessions, first.skipped),
+            (1, 0),
+            "the corrupted line is skipped; analyze completes"
+        );
+        assert_eq!(first.spans_total, 1, "the valid lines' records are counted");
+
+        let second = crate::adapter::harness::Harness::Claude
+            .analyze(None, &db)
+            .unwrap();
+        assert_eq!(
+            (second.sessions, second.skipped),
+            (0, 1),
+            "the stamp is recorded normally"
+        );
+
+        unsafe { std::env::remove_var("CLAUDE_CONFIG_DIR") };
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // ---- PBI 18: a corrupted line degrades visibly instead of failing ----
+
+    /// One synthetic transcript file — never a real one
+    /// (`.claude/rules/session-data-privacy.md`).
+    fn bytes_fixture(name: &str, contents: &[u8]) -> (PathBuf, PathBuf) {
+        let dir = std::env::temp_dir().join(format!(
+            "saniwalens-claude-read-test-{name}-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("transcript.jsonl");
+        std::fs::write(&path, contents).unwrap();
+        (dir, path)
+    }
+
+    #[test]
+    fn a_valid_file_round_trips_byte_identically() {
+        // The normal path must not change a single byte — the golden
+        // contract rides on the read passing the file through as is.
+        let contents = b"line1\nline2\r\nlast";
+        let (dir, path) = bytes_fixture("clean", contents);
+        let read = read_transcript_text(&path).unwrap();
+        assert_eq!(read.text.as_bytes(), &contents[..]);
+        assert_eq!(read.skipped_lines, 0);
+        assert_eq!(read.consumed_bytes, contents.len());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn an_invalid_utf8_line_between_valid_lines_is_skipped_and_counted() {
+        let mut contents: Vec<u8> = Vec::new();
+        contents.extend_from_slice(b"line1\n");
+        contents.extend_from_slice(&[0xff, 0xfe]);
+        contents.push(b'\n');
+        contents.extend_from_slice(b"line3\n");
+        let (dir, path) = bytes_fixture("middle", &contents);
+        let read = read_transcript_text(&path).unwrap();
+        assert_eq!(read.text, "line1\nline3\n");
+        assert_eq!(read.skipped_lines, 1);
+        // The stamp's size is what the read consumed, not what survived:
+        // a shrunk stamp would re-ingest the poisoned file on every run.
+        assert_eq!(read.consumed_bytes, contents.len());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn an_invalid_utf8_line_at_either_end_is_skipped() {
+        // Head.
+        let mut head: Vec<u8> = Vec::new();
+        head.extend_from_slice(&[0xff]);
+        head.extend_from_slice(b"\nline2\n");
+        let (dir, path) = bytes_fixture("head", &head);
+        let read = read_transcript_text(&path).unwrap();
+        assert_eq!(read.text, "line2\n");
+        assert_eq!(read.skipped_lines, 1);
+        let _ = std::fs::remove_dir_all(&dir);
+
+        // Tail, without a trailing newline: joining the surviving valid
+        // lines keeps exactly the separators the file itself carried.
+        let mut tail: Vec<u8> = Vec::new();
+        tail.extend_from_slice(b"line1\n");
+        tail.extend_from_slice(&[0xff]);
+        let (dir, path) = bytes_fixture("tail", &tail);
+        let read = read_transcript_text(&path).unwrap();
+        assert_eq!(read.text, "line1");
+        assert_eq!(read.skipped_lines, 1);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn several_invalid_utf8_lines_are_counted_individually() {
+        let mut contents: Vec<u8> = Vec::new();
+        contents.extend_from_slice(&[0xff]);
+        contents.push(b'\n');
+        contents.extend_from_slice(b"ok\n");
+        contents.extend_from_slice(&[0xfe]);
+        contents.push(b'\n');
+        contents.extend_from_slice(&[0xc3, 0x28]); // invalid two-byte sequence
+        let (dir, path) = bytes_fixture("several", &contents);
+        let read = read_transcript_text(&path).unwrap();
+        assert_eq!(read.text, "ok");
+        assert_eq!(read.skipped_lines, 3);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_fully_invalid_file_reads_as_empty_text() {
+        let (dir, path) = bytes_fixture("all-bad", &[0xff, 0xfe, 0xff]);
+        let read = read_transcript_text(&path).unwrap();
+        assert_eq!(read.text, "");
+        assert_eq!(read.skipped_lines, 1);
+        assert_eq!(read.consumed_bytes, 3);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn an_unreadable_file_still_errors() {
+        // Only the corrupt-content case degrades; a file that cannot be
+        // read at all stays an error, exactly as before.
+        let path = std::env::temp_dir().join(format!(
+            "saniwalens-claude-read-missing-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let _ = std::fs::remove_file(&path);
+        assert!(read_transcript_text(&path).is_err());
     }
 
     #[test]

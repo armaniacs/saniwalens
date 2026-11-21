@@ -158,7 +158,11 @@ already includes cache reads this overstates the floor; the `overhead`
 reconciliation (`surfaces.md`) is the honest check, and this paragraph is
 where the assumption is versioned when kilocode documents it. The numeric
 fields pass through the same ingestion-boundary clamp as the Claude
-transcript (`session-format.md`, `MAX_REALISTIC_TOKENS`).
+transcript (`session-format.md`, `MAX_REALISTIC_TOKENS`), and type-invalid
+values (negative, float) read as 0 with the drop counted — the drop
+accounting is identical across all three harnesses. A task file whose
+bytes are not valid UTF-8 is read lossily with a single stderr warning
+instead of failing the whole analyze.
 
 ## Project root (the cwd field, then a stated heuristic)
 
