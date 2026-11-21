@@ -398,32 +398,68 @@ pub struct NeverFireHit {
     pub static_tokens: Option<u64>,
 }
 
+/// The never-fires verdict for a catalog's path-conditional rules: the rules
+/// whose globs matched no read target (flag these), plus the rules the
+/// comparison budget could not judge in bounds (no evidence either way —
+/// excluded from the verdict, and named so the caller can warn instead of
+/// guessing).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NeverFiresVerdict {
+    pub hits: Vec<NeverFireHit>,
+    /// Ids of rules whose glob evaluation exceeded the comparison budget
+    /// before resolving.
+    pub unresolved: Vec<String>,
+}
+
 /// Route path-conditional rules with declared globs against the window's read
 /// file targets. A rule whose globs matched no read target never fired
-/// in-window — provided the window observed reads at all. No targets means
-/// no evidence (a quiet window, or a harness that does not report reads),
-/// never a flag: without this guard every rule would light up on an idle
-/// window. Catalog order in, same order out.
-pub fn never_fires(rules: &[RuleGlobs], targets: &[String]) -> Vec<NeverFireHit> {
+/// in-window — provided the window observed reads at all, and provided the
+/// rule's globs could actually be evaluated: a rule whose evaluation exceeds
+/// `budget` comparison steps is **excluded** and named in `unresolved`, never
+/// accused from an unfinished scan (the "no evidence, never an accusation"
+/// direction — the budget runs out as easily on a rule that would have
+/// matched as on one that never fires). No targets means no evidence (a
+/// quiet window, or a harness that does not report reads), never a flag.
+/// Catalog order in, same order out.
+pub fn never_fires(rules: &[RuleGlobs], targets: &[String], budget: u64) -> NeverFiresVerdict {
+    let mut hits = Vec::new();
+    let mut unresolved = Vec::new();
     if targets.is_empty() {
-        return Vec::new();
+        return NeverFiresVerdict { hits, unresolved };
     }
-    rules
-        .iter()
-        .filter(|rule| !rule.globs.is_empty())
-        .filter(|rule| {
-            !targets
-                .iter()
-                .any(|t| crate::core::glob_match::matches_any(&rule.globs, t))
-        })
-        .map(|rule| NeverFireHit {
-            id: rule.id.clone(),
-            scope: rule.scope.clone(),
-            project: rule.project.clone(),
-            globs: rule.globs.clone(),
-            static_tokens: rule.static_tokens,
-        })
-        .collect()
+    for rule in rules {
+        if rule.globs.is_empty() {
+            continue;
+        }
+        let mut budget = crate::core::glob_match::MatchBudget::new(budget);
+        let mut matched = false;
+        let mut judged = true;
+        for target in targets {
+            match crate::core::glob_match::matches_any_budgeted(&rule.globs, target, &mut budget) {
+                Some(true) => {
+                    matched = true;
+                    break;
+                }
+                Some(false) => {}
+                None => {
+                    judged = false;
+                    break;
+                }
+            }
+        }
+        if !judged {
+            unresolved.push(rule.id.clone());
+        } else if !matched {
+            hits.push(NeverFireHit {
+                id: rule.id.clone(),
+                scope: rule.scope.clone(),
+                project: rule.project.clone(),
+                globs: rule.globs.clone(),
+                static_tokens: rule.static_tokens,
+            });
+        }
+    }
+    NeverFiresVerdict { hits, unresolved }
 }
 
 /// The overlap coefficient at or above which two descriptions count as the
@@ -668,28 +704,93 @@ mod tests {
             rule_row("used", &["src/**"]),
             rule_row("idle", &["docs/**"]),
         ];
-        let hits = never_fires(&rules, &["src/main.rs".to_string()]);
-        assert_eq!(hits.len(), 1);
-        assert_eq!(hits[0].id, "idle");
-        assert_eq!(hits[0].globs, vec!["docs/**".to_string()]);
-        assert_eq!(hits[0].static_tokens, Some(1200));
+        let verdict = never_fires(
+            &rules,
+            &["src/main.rs".to_string()],
+            crate::core::glob_match::DEFAULT_MATCH_BUDGET,
+        );
+        assert!(verdict.unresolved.is_empty());
+        assert_eq!(verdict.hits.len(), 1);
+        assert_eq!(verdict.hits[0].id, "idle");
+        assert_eq!(verdict.hits[0].globs, vec!["docs/**".to_string()]);
+        assert_eq!(verdict.hits[0].static_tokens, Some(1200));
     }
 
     #[test]
     fn a_rule_without_globs_or_reads_is_never_flagged() {
         // No declared globs: nothing can claim a target for it.
         let rules = vec![rule_row("globless", &[])];
-        assert!(never_fires(&rules, &["src/main.rs".to_string()]).is_empty());
+        let verdict = never_fires(
+            &rules,
+            &["src/main.rs".to_string()],
+            crate::core::glob_match::DEFAULT_MATCH_BUDGET,
+        );
+        assert!(verdict.hits.is_empty() && verdict.unresolved.is_empty());
         // No read targets at all: a quiet window (or a harness that does not
         // report reads) is no evidence, never a flag.
         let rules = vec![rule_row("idle", &["docs/**"])];
-        assert!(never_fires(&rules, &[]).is_empty());
+        let verdict = never_fires(&rules, &[], crate::core::glob_match::DEFAULT_MATCH_BUDGET);
+        assert!(verdict.hits.is_empty() && verdict.unresolved.is_empty());
     }
 
     #[test]
     fn any_matching_glob_saves_the_rule() {
         let rules = vec![rule_row("multi", &["docs/**", "src/*.rs"])];
-        assert!(never_fires(&rules, &["src/a.rs".to_string()]).is_empty());
+        let verdict = never_fires(
+            &rules,
+            &["src/a.rs".to_string()],
+            crate::core::glob_match::DEFAULT_MATCH_BUDGET,
+        );
+        assert!(verdict.hits.is_empty() && verdict.unresolved.is_empty());
+    }
+
+    #[test]
+    fn a_rule_the_budget_cannot_judge_is_excluded_and_named() {
+        // A hostile `**` chain against a deep target: with a tiny budget the
+        // scan gives up unresolved. The rule is excluded from never-fires —
+        // exhaustion is not evidence — and named so the view can warn.
+        let rules = vec![rule_row(
+            "hostile",
+            &["**/**/**/**/**/**/**/**/**/**/**/**/z"],
+        )];
+        let deep = (0..26)
+            .map(|i| format!("seg{i}"))
+            .collect::<Vec<_>>()
+            .join("/");
+        let targets = vec![deep];
+        let verdict = never_fires(&rules, &targets, 30);
+        assert!(verdict.hits.is_empty(), "exhaustion never accuses");
+        assert_eq!(verdict.unresolved, vec!["hostile".to_string()]);
+        // The default budget resolves the same scan: no match anywhere,
+        // so the rule is a never-fires hit again.
+        let verdict = never_fires(
+            &rules,
+            &targets,
+            crate::core::glob_match::DEFAULT_MATCH_BUDGET,
+        );
+        assert!(verdict.unresolved.is_empty());
+        assert_eq!(verdict.hits.len(), 1);
+        assert_eq!(verdict.hits[0].id, "hostile");
+    }
+
+    #[test]
+    fn a_matching_rule_is_not_accused_when_the_budget_runs_out_first() {
+        // The glob WOULD match the deep target's tail, but the tiny budget
+        // gives up before reaching it. Exhaustion must suppress the flag,
+        // not flip it into a false never-fires.
+        let rules = vec![rule_row(
+            "would-fire",
+            &["**/**/**/**/**/**/**/**/**/**/**/**/seg25"],
+        )];
+        let targets = vec![
+            (0..26)
+                .map(|i| format!("seg{i}"))
+                .collect::<Vec<_>>()
+                .join("/"),
+        ];
+        let verdict = never_fires(&rules, &targets, 30);
+        assert!(verdict.hits.is_empty(), "exhaustion never accuses");
+        assert_eq!(verdict.unresolved, vec!["would-fire".to_string()]);
     }
 
     #[test]

@@ -1136,18 +1136,28 @@ impl Store {
     /// are observed, never attributed: they share the `file_edit` encoding
     /// (basename id, full-path target) but ride their own kind, so thrash
     /// (which reads `file_edit` only) never sees them.
-    pub fn file_read_targets(&self, range: TimeRange) -> Result<Vec<String>> {
+    ///
+    /// Bounded like the briefing readers: at most `limit` targets come back —
+    /// the head prefix of the unbounded result, same `ORDER BY`, with the
+    /// `LIMIT ?` bind via [`range_params`] / [`saturating_limit`]. Over the
+    /// cap the evidence shrinks, and since never-fires flags a rule on "no
+    /// glob matched", a dropped target can only flip a would-be match into a
+    /// false flag — so callers pass a cap well above any realistic window
+    /// (the briefing's fetch-cap convention) and treat saturation as
+    /// degraded evidence, not a narrower window.
+    pub fn file_read_targets(&self, range: TimeRange, limit: usize) -> Result<Vec<String>> {
         let path = encoding_column("file_read", EventRole::FilePath);
         let (filter, binds) = range_clause(range, "e.started_epoch");
         let sql = format!(
             "SELECT DISTINCT e.{path}
              FROM events e JOIN sessions s ON e.session_id = s.id
              WHERE e.kind = 'file_read' AND e.{path} IS NOT NULL{filter}
-             ORDER BY e.{path}"
+             ORDER BY e.{path} LIMIT ?"
         );
+        let params = range_params(&binds, [], limit);
         let mut stmt = self.conn.prepare(&sql)?;
         let rows = stmt
-            .query_map(params_from_iter(binds), |row| row.get(0))?
+            .query_map(params_from_iter(params), |row| row.get(0))?
             .collect::<rusqlite::Result<Vec<_>>>()?;
         Ok(rows)
     }
@@ -2535,6 +2545,40 @@ mod tests {
         let (_, rows, truncated) = store.query_json_limited(q, Some(2)).unwrap();
         assert!(truncated);
         assert_eq!(rows.len(), 2);
+    }
+
+    #[test]
+    fn file_read_targets_saturate_at_the_limit() {
+        // The never-fires evidence fetch is bounded like the briefing
+        // readers: exactly-at-limit is the complete head of the same ordered
+        // stream, one distinct target more is cut, and a duplicate read
+        // still counts once.
+        let mut store = Store::in_memory().unwrap();
+        let s1 = session("s1");
+        let paths: Vec<String> = (0..3).map(|i| format!("/repo/f{i}.txt")).collect();
+        let mut events: Vec<(i64, &str, &str, Option<&str>)> = paths
+            .iter()
+            .map(|p| (1_700_000_000_000, "file_read", "f.txt", Some(p.as_str())))
+            .collect();
+        events.push((
+            1_700_000_000_001,
+            "file_read",
+            "f.txt",
+            Some(paths[0].as_str()),
+        ));
+        store
+            .ingest(IngestBatch::new(&s1, &[], &[]).work_events(&events))
+            .unwrap();
+
+        assert_eq!(
+            store.file_read_targets(TimeRange::ALL, 2).unwrap(),
+            vec!["/repo/f0.txt".to_string(), "/repo/f1.txt".to_string(),]
+        );
+        assert_eq!(store.file_read_targets(TimeRange::ALL, 3).unwrap().len(), 3);
+        assert_eq!(
+            store.file_read_targets(TimeRange::ALL, 100).unwrap().len(),
+            3
+        );
     }
 
     #[test]

@@ -6,6 +6,7 @@
 use anyhow::Result;
 
 use crate::adapter::harness::Harness;
+use crate::core::glob_match::DEFAULT_MATCH_BUDGET;
 use crate::core::period::TimeRange;
 use crate::core::scope::ScopeFilter;
 use crate::core::surface::{
@@ -20,6 +21,15 @@ use super::super::{
     Align, Format, TableSpec, ViewCtx, empty_in_window, in_scope, render_view, savings_cell,
     savings_suggestion, scope_cell,
 };
+
+/// The never-fires evidence fetch cap: distinct read targets matched against
+/// every rule's globs, fetched with the briefing readers' LIMIT convention
+/// (`saturating_limit` / `range_params`). Sized well above a realistic
+/// window; over the cap the evidence is a head cut of the same ordered
+/// stream (see `Store::file_read_targets`), which can only weaken a would-be
+/// match into a false never-fires — a degraded-evidence state, not a
+/// redefinition of the window.
+const READ_TARGETS_LIMIT: usize = 5_000;
 
 pub(crate) fn waste(
     store: &Store,
@@ -92,8 +102,10 @@ pub(crate) fn waste(
     // Never-fires (PBI 04): path-conditional rules whose globs matched
     // nothing read in-window. Rules without declared globs are skipped (the
     // core matcher), and a window with no read targets at all yields no
-    // flags — no evidence, never an accusation.
-    let read_targets = store.file_read_targets(window)?;
+    // flags — no evidence, never an accusation. A rule whose glob evaluation
+    // exceeds the comparison budget is likewise no evidence: it is excluded
+    // and warned about below, never flagged from an unfinished scan.
+    let read_targets = store.file_read_targets(window, READ_TARGETS_LIMIT)?;
     let rules: Vec<RuleGlobs> = catalog
         .iter()
         .filter(|e| supports_never_fires(&e.kind))
@@ -108,7 +120,8 @@ pub(crate) fn waste(
             _ => None,
         })
         .collect();
-    let hits = never_fires(&rules, &read_targets);
+    let verdict = never_fires(&rules, &read_targets, DEFAULT_MATCH_BUDGET);
+    let hits = verdict.hits;
     let hit_ids: std::collections::HashSet<&str> = hits.iter().map(|hit| hit.id.as_str()).collect();
     for rule in &rules {
         if !hit_ids.contains(rule.id.as_str()) {
@@ -200,6 +213,23 @@ pub(crate) fn waste(
                 "warning: {} catalog row(s) with unknown load_mode ({}) excluded from wedge routing",
                 unknown_load_modes.len(),
                 labels.join(", ")
+            ))
+        );
+    }
+
+    // No silent coercion, same posture: a rule whose globs were too costly
+    // to evaluate never reaches the never-fires verdict, so the warning is
+    // the only trace — without it the exclusion would look like evidence.
+    if !verdict.unresolved.is_empty() {
+        let mut ids = verdict.unresolved.clone();
+        ids.sort();
+        ids.dedup();
+        eprintln!(
+            "{}",
+            Style::stderr().warn(&format!(
+                "warning: {} rule(s) with path globs too costly to evaluate ({}) excluded from never-fires detection",
+                verdict.unresolved.len(),
+                ids.join(", ")
             ))
         );
     }
