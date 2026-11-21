@@ -135,16 +135,23 @@ pub fn parse_session(conversation: &str, ui_messages: &str) -> Vec<Record> {
             _ => {} // unknown roles ignored
         }
     }
+    // The window lookup below binary-searches this spine; a future change to
+    // the build order must fail loudly here rather than misattribute costs.
+    debug_assert!(assistant_ts.windows(2).all(|w| w[0] <= w[1]));
 
     // The join: one cost record per request row, stamped at its window's end.
     for (index, (start_ts, usage)) in starts.iter().enumerate() {
         let next_ts = starts.get(index + 1).map(|(ts, _)| *ts).unwrap_or(i64::MAX);
-        let stamp = assistant_ts
-            .iter()
-            .rev() // the window's last assistant message
-            .find(|ts| **ts > *start_ts && **ts < next_ts)
-            .copied()
-            .unwrap_or(*start_ts);
+        // The spine is ascending, so the window's last assistant message is
+        // two partition points away. Bounds stay strict: an assistant
+        // exactly at either window edge belongs to neither window.
+        let lo = assistant_ts.partition_point(|ts| *ts <= *start_ts);
+        let hi = assistant_ts.partition_point(|ts| *ts < next_ts);
+        let stamp = if lo < hi {
+            assistant_ts[hi - 1]
+        } else {
+            *start_ts
+        };
         records.push((
             stamp,
             1,
@@ -1378,6 +1385,14 @@ mod tests {
         }
     }
 
+    fn cost_stamps(records: &[Record]) -> Vec<i64> {
+        records
+            .iter()
+            .filter(|r| matches!(r.kind, RecordKind::Assistant { .. }))
+            .map(|r| r.timestamp_ms)
+            .collect()
+    }
+
     #[test]
     fn a_user_message_with_text_yields_a_human_turn() {
         let conversation = conversation(vec![user_text(1_700_000_000_000, "fix the bug")]);
@@ -1587,6 +1602,121 @@ mod tests {
         let records = parse_session(&conversation, &ui);
         let stamps: Vec<i64> = records.iter().map(|r| r.timestamp_ms).collect();
         assert_eq!(stamps, vec![1000, 3000, 4000, 6000]);
+    }
+
+    #[test]
+    fn an_assistant_on_the_window_start_ts_belongs_to_no_window() {
+        // The window is a strict interval: an assistant stamped exactly at a
+        // start row's ts sits outside that window — and outside the previous
+        // one, whose next_ts it equals — so both rows stamp themselves.
+        let conversation = conversation(vec![assistant_text(3000, "boundary reply")]);
+        let ui = ui_file(vec![
+            usage_row(1000, 10_000, 300, 0, 0, false),
+            usage_row(3000, 11_000, 300, 0, 0, false),
+        ]);
+        let records = parse_session(&conversation, &ui);
+        assert_eq!(cost_stamps(&records), vec![1000, 3000]);
+    }
+
+    #[test]
+    fn an_assistant_on_the_next_row_ts_is_claimed_by_the_following_window_only() {
+        // next_ts closes the window with a strict bound: the assistant at
+        // 3000 stays out of window 1 (its stamp is 2000, not 3000) and
+        // window 2 claims the later one.
+        let conversation = conversation(vec![
+            assistant_text(2000, "mid reply"),
+            assistant_text(3000, "boundary reply"),
+            assistant_text(4000, "next reply"),
+        ]);
+        let ui = ui_file(vec![
+            usage_row(1000, 10_000, 300, 0, 0, false),
+            usage_row(3000, 11_000, 300, 0, 0, false),
+        ]);
+        let records = parse_session(&conversation, &ui);
+        assert_eq!(cost_stamps(&records), vec![2000, 4000]);
+    }
+
+    #[test]
+    fn an_empty_conversation_spine_stamps_every_row_itself() {
+        // No assistant messages at all: each usage row still happened and
+        // falls back to its own ts.
+        let ui = ui_file(vec![
+            usage_row(1500, 10_000, 300, 0, 0, false),
+            usage_row(2500, 11_000, 300, 0, 0, false),
+        ]);
+        let records = parse_session(&conversation(vec![]), &ui);
+        assert_eq!(cost_stamps(&records), vec![1500, 2500]);
+    }
+
+    #[test]
+    fn assistant_messages_all_before_the_rows_fall_back_to_the_row_itself() {
+        let conversation = conversation(vec![assistant_text(500, "early reply")]);
+        let ui = ui_file(vec![
+            usage_row(1000, 10_000, 300, 0, 0, false),
+            usage_row(3000, 11_000, 300, 0, 0, false),
+        ]);
+        let records = parse_session(&conversation, &ui);
+        assert_eq!(cost_stamps(&records), vec![1000, 3000]);
+    }
+
+    #[test]
+    fn assistant_messages_all_after_a_row_leave_that_row_stamping_itself() {
+        // Both assistants sit after the last row: the open last window
+        // claims the later one, while window 1 is empty and stamps itself.
+        let conversation = conversation(vec![
+            assistant_text(5000, "later reply"),
+            assistant_text(9000, "latest reply"),
+        ]);
+        let ui = ui_file(vec![
+            usage_row(1000, 10_000, 300, 0, 0, false),
+            usage_row(3000, 11_000, 300, 0, 0, false),
+        ]);
+        let records = parse_session(&conversation, &ui);
+        assert_eq!(cost_stamps(&records), vec![1000, 9000]);
+    }
+
+    #[test]
+    fn a_skewed_window_scan_stays_bounded_when_the_input_grows_4x() {
+        // Worst case for a reverse linear scan: every start row sits after
+        // every assistant ts, so every window is empty. The scaling pin is
+        // coarse on purpose: n vs 4n wall time must stay far from the
+        // quadratic prediction of 16x (O(S log A) predicts ~4.3x).
+        let elapsed = |total: i64| {
+            let assistants = (1..=total)
+                .map(|ts| {
+                    format!(
+                        r#"{{"role":"assistant","ts":{ts},"content":[{{"type":"text","text":"reply {ts}"}}]}}"#
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join(",");
+            let starts = ((total + 1)..=(total * 2))
+                .map(|ts| {
+                    format!(
+                        r#"{{"ts":{ts},"type":"say","say":"api_req_started","text":"{{\"tokensIn\":1,\"tokensOut\":1,\"cacheReads\":0,\"cacheWrites\":0,\"usageMissing\":false}}"}}"#
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join(",");
+            let conversation = format!("[{assistants}]");
+            let ui = format!("[{starts}]");
+            let mut best = u128::MAX;
+            for _ in 0..3 {
+                let began = std::time::Instant::now();
+                let records = std::hint::black_box(parse_session(&conversation, &ui));
+                let took = began.elapsed().as_micros();
+                assert_eq!(std::hint::black_box(&records).len(), total as usize);
+                best = best.min(took);
+            }
+            best
+        };
+        let n = elapsed(20_000);
+        let four_n = elapsed(80_000);
+        let ratio = four_n as f64 / n.max(1) as f64;
+        assert!(
+            ratio < 10.0,
+            "4n/n elapsed ratio {ratio:.2} approaches the quadratic prediction 16"
+        );
     }
 
     #[test]
