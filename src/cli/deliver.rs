@@ -447,39 +447,18 @@ pub(crate) fn write_private_file(path: &Path, contents: &str) -> Result<()> {
 pub(crate) fn create_private_dir_all(dir: &Path) -> std::io::Result<()> {
     #[cfg(unix)]
     {
-        use std::os::unix::fs::{DirBuilderExt, MetadataExt};
+        use std::os::unix::fs::MetadataExt;
 
         if let Ok(meta) = fs::metadata(dir)
             && meta.is_dir()
-            && let Some(line) = unprivate_dir_warning(dir, meta.mode())
+            && let Some(line) = crate::store::unprivate_dir_warning(dir, meta.mode())
         {
             eprintln!("{}", Style::stderr().warn(&line));
         }
-        std::fs::DirBuilder::new()
-            .recursive(true)
-            .mode(0o700)
-            .create(dir)
+        crate::store::create_private_dir_all(dir)
     }
     #[cfg(not(unix))]
-    std::fs::create_dir_all(dir)
-}
-
-/// The stderr warning for an already-existing directory whose mode still
-/// reaches group/other accounts, or `None` when it is owner-only (or the
-/// path is not there yet, which the caller checks first). The pure half of
-/// [`create_private_dir_all`]'s warning: same-user tests pin it through real
-/// `chmod`ed modes, since staging a genuinely foreign-owned directory would
-/// need root.
-#[cfg(unix)]
-fn unprivate_dir_warning(dir: &Path, mode: u32) -> Option<String> {
-    (mode & 0o077 != 0).then(|| {
-        format!(
-            "warning: directory {} already exists with group/other access bits (mode {:o}) — \
-             private state may be reachable by other local accounts; continuing",
-            dir.display(),
-            mode & 0o777
-        )
-    })
+    crate::store::create_private_dir_all(dir)
 }
 
 #[cfg(test)]
@@ -575,13 +554,16 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn an_existing_owner_only_dir_mode_yields_no_warning() {
-        assert_eq!(unprivate_dir_warning(Path::new("/plans"), 0o040700), None);
+        assert_eq!(
+            crate::store::unprivate_dir_warning(Path::new("/plans"), 0o040700),
+            None
+        );
     }
 
     #[cfg(unix)]
     #[test]
     fn an_existing_group_other_writable_dir_mode_yields_a_warning() {
-        let line = unprivate_dir_warning(Path::new("/plans"), 0o040777).unwrap();
+        let line = crate::store::unprivate_dir_warning(Path::new("/plans"), 0o040777).unwrap();
         assert!(line.starts_with("warning: "));
         assert!(line.contains("/plans"));
         assert!(line.contains("777"));
@@ -590,7 +572,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn an_existing_group_writable_dir_mode_yields_a_warning_too() {
-        assert!(unprivate_dir_warning(Path::new("/plans"), 0o040750).is_some());
+        assert!(crate::store::unprivate_dir_warning(Path::new("/plans"), 0o040750).is_some());
     }
 
     #[cfg(unix)]
@@ -607,7 +589,7 @@ mod tests {
         // "keep theirs" holds — the warning, not a re-mode, is the response,
         // and it is the one the judge derives from the real metadata.
         assert_eq!(dir_mode(&dir.0) & 0o777, 0o777);
-        let line = unprivate_dir_warning(&dir.0, dir_mode(&dir.0)).unwrap();
+        let line = crate::store::unprivate_dir_warning(&dir.0, dir_mode(&dir.0)).unwrap();
         assert!(line.contains(&dir.0.display().to_string()));
     }
 
@@ -619,11 +601,17 @@ mod tests {
         let dir = TempDir::new("plans-fresh");
         create_private_dir_all(&dir.0).unwrap();
         assert_eq!(dir_mode(&dir.0) & 0o777, 0o700);
-        assert_eq!(unprivate_dir_warning(&dir.0, dir_mode(&dir.0)), None);
+        assert_eq!(
+            crate::store::unprivate_dir_warning(&dir.0, dir_mode(&dir.0)),
+            None
+        );
 
         fs::set_permissions(&dir.0, fs::Permissions::from_mode(0o700)).unwrap();
         create_private_dir_all(&dir.0).unwrap();
-        assert_eq!(unprivate_dir_warning(&dir.0, dir_mode(&dir.0)), None);
+        assert_eq!(
+            crate::store::unprivate_dir_warning(&dir.0, dir_mode(&dir.0)),
+            None
+        );
     }
 
     // ---- PBI 06: the delivery seam ----

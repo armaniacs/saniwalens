@@ -461,20 +461,14 @@ impl<'a> IngestBatch<'a> {
 /// `create_dir_all` with owner-only permissions on every directory it creates —
 /// the mode the XDG Base Directory spec prescribes for a directory a program
 /// creates on the user's behalf. Directories that already exist keep theirs;
-/// one whose mode is not owner-only is warned about on stderr instead of being
-/// silently built on, because an unexpected mode there means the privacy
-/// premise (this state is only the user's) is already broken.
-fn create_private_dir_all(dir: &std::path::Path) -> std::io::Result<()> {
+/// whether an existing non-owner-only mode warrants a warning is the caller's
+/// call ([`unprivate_dir_warning`]), because the rendering lives in the
+/// caller's layer.
+pub(crate) fn create_private_dir_all(dir: &std::path::Path) -> std::io::Result<()> {
     #[cfg(unix)]
     {
-        use std::os::unix::fs::{DirBuilderExt, MetadataExt};
+        use std::os::unix::fs::DirBuilderExt;
 
-        if let Ok(meta) = std::fs::metadata(dir)
-            && meta.is_dir()
-            && let Some(line) = unprivate_dir_warning(dir, meta.mode())
-        {
-            eprintln!("{line}");
-        }
         std::fs::DirBuilder::new()
             .recursive(true)
             .mode(0o700)
@@ -487,13 +481,12 @@ fn create_private_dir_all(dir: &std::path::Path) -> std::io::Result<()> {
 /// The stderr warning for an already-existing directory whose mode still
 /// reaches group/other accounts, or `None` when it is owner-only (or the
 /// path is not there yet, which the caller checks first). The pure half of
-/// [`create_private_dir_all`]'s warning: same-user tests pin it through real
-/// `chmod`ed modes, since staging a genuinely foreign-owned directory would
-/// need root. A deliberate copy of `cli::deliver`'s helper — the two
-/// `create_private_dir_all`s stay separate (PBI 07 unification leftover),
-/// and the store layer must not depend on the cli layer.
+/// the private-dir warning: same-user tests pin it through real `chmod`ed
+/// modes, since staging a genuinely foreign-owned directory would need root.
+/// `Store::open` and `cli::deliver` both call this and render it in their own
+/// layer's style.
 #[cfg(unix)]
-fn unprivate_dir_warning(dir: &std::path::Path, mode: u32) -> Option<String> {
+pub(crate) fn unprivate_dir_warning(dir: &std::path::Path, mode: u32) -> Option<String> {
     (mode & 0o077 != 0).then(|| {
         format!(
             "warning: directory {} already exists with group/other access bits (mode {:o}) — \
@@ -700,6 +693,17 @@ impl Store {
             OpenMode::ReadWrite => {
                 let path = path.as_ref();
                 if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
+                    #[cfg(unix)]
+                    {
+                        use std::os::unix::fs::MetadataExt;
+
+                        if let Ok(meta) = std::fs::metadata(parent)
+                            && meta.is_dir()
+                            && let Some(line) = unprivate_dir_warning(parent, meta.mode())
+                        {
+                            eprintln!("{line}");
+                        }
+                    }
                     create_private_dir_all(parent)
                         .with_context(|| format!("create store directory {}", parent.display()))?;
                 }
