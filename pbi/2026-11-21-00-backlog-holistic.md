@@ -94,3 +94,6 @@ adversarial-code-review（fork/main..1121a 差分、4 チャンク × 2 視点�
 | [23-kilocode-window-scan-quad](archived/2026-11-21-23-fix-kilocode-window-scan-quad.md) | 中 | 請求窓帰属を partition_point 2 回に置換（旧実装で最悪 283 秒 → O(n log n)）。帰属結果バイト同一（golden + 境界 pin 5 件）。20c5718 |
 | [24-plan-truncation-visibility](archived/2026-11-21-24-fix-plan-truncation-visibility.md) | 中 | 観測フェーズで指摘を実測確認（無印 plan + 末尾欠け）のうえ、capture から plan 組立まで打ち切り flag を運び plan 末尾に marker 追記。spec 同期（cli.md --apply 節）込み。14ad2f0 |
 | [25-private-dir-owner-verification](archived/2026-11-21-25-fix-private-dir-owner-verification.md) | 低 | 既存 dir の group/other ビット検出と chmod 拒否を stderr 警告に（warn, never silently inherit）。正常系バイト同一。spec 同期（storage.md permission 節）込み。bb246c9 |
+| [27-contract-pins-cleanup](archived/2026-11-21-27-refactor-contract-pins-cleanup.md) | 低 | ALL 網羅 pin（discriminant 総当たり）、語彙三方対照 pin、残滓 assert 実名対応、構造 pin 次見出しベース化、AgentCost フィールド一致 pin。裁定 2 件（デッド行は表に残す、file_event doc は実態合わせ）を検討記録に保存。各 pin は mutation で赤を確認。3a7ab27 |
+
+closer ラウンド最終ゲート: cargo fmt --check / cargo clippy --all-targets --all-features -- -D warnings / cargo test（41 suite、1,150 passed）/ cargo build --release、全 green。残余: tests/fingerprint_restat.rs の毒済み復帰の非対称（into_inner 統一）は低優先のフォローアップ（PBI 27 検討記録に記録）。
