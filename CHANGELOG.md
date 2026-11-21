@@ -8,6 +8,52 @@
 バージョンは [Semantic Versioning](https://semver.org/lang/ja/) に従う。
 各節はタグ間差分単位で記録する（ブランチ差分単位ではない）。
 
+## [Unreleased]
+
+### Added
+
+- 性質ベーステスト（proptest）と熱経路ベンチ（criterion）を導入。
+  analyze 100k 行・glob 照合・kilocode 窓帰属の 3 ベンチを常設する。
+
+### Changed
+
+- `optimize --frozen`（ガイド内の frozen 実行も同様）を本当に読み取り
+  専用にした。ストアの作成・chmod・移行は行わず、不在ならエラー、既存
+  なら経過時刻を表示する。
+- `--timeout` を headless の全経路（`--verbose` 込み）に適用した。対話
+  経路は期限を持たない旨を明示警告する。
+- 破損・毒入り transcript への耐性を強化。不正 UTF-8 行はスキップして
+  警告し、型不正の usage は 0 扱いで計数（行は消えない）、usage 数値は
+  フィールドごとに 10^9 で飽和、時刻差分も飽和する。Claude 経路の
+  analyzer version が 11 に上がるため、既存ストアは次回 open 時に
+  再分析される。
+- `waste` の never-fires 判定に照合予算を導入し、read-target 照会に
+  上限（5,000）を設けた。予算が尽きた rule は名指しして警告する。
+- 設計・実装整理（出力不変）。共有 row 型を core へ移管、ハーネス静的
+  事実を `HarnessFacts` に集約、`session` の表示/解決を分離、`optimize`
+  と `--apply` のプロローグを統一、範囲クエリの組立を集約。
+
+### Fixed
+
+- 端末出力の sanitize を完全化。生 C1（U+009B など 8-bit CSI）、
+  bidi/ゼロ幅（U+2066-2069 含む）、CR を除去し、doctor の prose に
+  transcript 由来の agent 名が素通ししていた経路を塞いだ。
+- briefing の `by tool:` 行に transcript の tool 名が改行つきで流れ、
+  指示注入できた経路を単行化で塞いだ。
+- ガイドが手編集 config（行末コメント付きヘッダなど）に対してテーブル
+  重複の不正 TOML を書き、次回起動が失敗する問題を修正。
+- `--apply` の plan がログ打ち切りで尻切れでも marker 無しで保存される
+  問題を修正。
+- kilocode の請求窓帰属を二分探索化し、偏ったタスク（10 万件規模）で
+  analyze が二次時間かかる問題を修正。
+- private ディレクトリやストアが他人所有・group/world 書き込み可でも
+  黙って使い続ける問題を修正（警告を出す）。
+- ストア移行の version guard がトランザクション外で、異版並行時に
+  素通りしうる問題を修正（guard を同一 tx 内へ、busy_timeout 5 秒）。
+- ストア移行の収束対象が `subagent_runs` を列挙から漏らし、宣言への
+  列追加時に既存ストアで INSERT が全滅しうる潜在問題を、未分類テーブル
+  を移行時に失敗させるガードで封じた。
+
 ## [0.6.5] - 2026-11-20
 
 ### Added
