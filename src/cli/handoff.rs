@@ -164,7 +164,11 @@ pub const PLAN_MAX_BYTES: usize = 64 * 1024;
 
 /// Marker terminating a plan cut at [`PLAN_MAX_BYTES`]. An over-long plan is
 /// truncated to fit the budget with this as its last line, so a cut is always
-/// visible and never mistaken for the advisor's complete plan.
+/// visible and never mistaken for the advisor's complete plan. The same
+/// marker closes the other cut side: a plan extracted from a raw log read
+/// only up to [`PLAN_MAX_BYTES`] also gets it appended, because it may be
+/// missing its tail even though it fits the cap. Both cuts firing at once
+/// must not stack it twice.
 pub const PLAN_TRUNCATION_MARKER: &str = "\n\n[plan truncated at PLAN_MAX_BYTES]\n";
 
 /// Enforce [`PLAN_MAX_BYTES`] on an extracted plan: text within the cap is
@@ -259,11 +263,16 @@ pub struct Handoff<'a> {
 
 /// The seam between the headless run and the dialog: turn one kept run log's
 /// text into the saved plan and open the harness's own interactive session on
-/// it. Pure except the plan-file write and the `direct` spawn, so a double
-/// covers every branch without spawning: an empty plan writes nothing and
-/// fails loud, and a failed launch names the kept plan file.
+/// it. `log_truncated` is the capped read's verdict on that log text: when it
+/// says the raw log was cut, the extracted plan may be missing its tail even
+/// though it fits the cap, so the saved plan is marked (never doubly — a
+/// plan-size cut already ends in the marker). Pure except the plan-file write
+/// and the `direct` spawn, so a double covers every branch without spawning:
+/// an empty plan writes nothing and fails loud, and a failed launch names the
+/// kept plan file.
 pub fn complete_handoff(
     log_text: &str,
+    log_truncated: bool,
     handoff: &Handoff<'_>,
     advisor: &mut impl AdvisorLaunch,
 ) -> Result<PathBuf> {
@@ -283,7 +292,13 @@ pub fn complete_handoff(
         // that never existed in this function's scope.
         anyhow::bail!("the advisor produced no readable text, so no plan file was written");
     }
-    let (plan, plan_truncated) = truncate_plan(plan);
+    let (mut plan, plan_truncated) = truncate_plan(plan);
+    if log_truncated && !plan_truncated {
+        // A log-cut plan always fits the cap (its bytes are a subset of the
+        // capped log's), so the plan-size cut never fired: append the marker
+        // here, or the dialog reads a silently incomplete plan.
+        plan.push_str(PLAN_TRUNCATION_MARKER);
+    }
     if plan_truncated {
         eprintln!("{}", Style::stderr().warn(&plan_truncated_note()));
     }
@@ -313,7 +328,9 @@ pub fn complete_handoff(
 }
 
 /// Run the headless advisor with its raw log kept, and hand back the status,
-/// the log path, and the log's text. A success removes the log (the raw
+/// the log path, the log's text, and whether the read was cut at the cap —
+/// the verdict `complete_handoff` marks the plan with, so a log cut stays
+/// visible where the plan is consumed. A success removes the log (the raw
 /// stream may echo secrets; the plan file carries the content from here on);
 /// a failure keeps it and names it in the error, like the normal headless
 /// delivery. The error states that no plan file was written yet.
@@ -323,7 +340,7 @@ pub fn capture_headless_log(
     prompt: &str,
     render: Option<RunLineRenderer>,
     timeout: Option<std::time::Duration>,
-) -> Result<(std::process::ExitStatus, PathBuf, String)> {
+) -> Result<(std::process::ExitStatus, PathBuf, String, bool)> {
     let (status, log_path) = run_headless(
         binary,
         leading,
@@ -347,7 +364,7 @@ pub fn capture_headless_log(
     // The raw stream may echo secrets; the plan file carries the content from
     // here on, so the log goes now.
     let _ = fs::remove_file(&log_path);
-    Ok((status, log_path, text))
+    Ok((status, log_path, text, log_truncated))
 }
 
 /// Run the `--apply` handoff for one resolved session: refresh unless frozen,
@@ -380,7 +397,8 @@ pub fn run_apply(
         optimize_mod::RunMode::Headless,
     );
     let render = sess.harness.run_line_renderer();
-    let (_, _, log_text) = capture_headless_log(binary, leading, &prompt, render, timeout)?;
+    let (_, _, log_text, log_truncated) =
+        capture_headless_log(binary, leading, &prompt, render, timeout)?;
     let handoff = Handoff {
         render,
         plans: &plans,
@@ -390,7 +408,7 @@ pub fn run_apply(
         harness: sess.harness,
     };
     let mut advisor = ProcessAdvisor;
-    let plan_path = complete_handoff(&log_text, &handoff, &mut advisor)?;
+    let plan_path = complete_handoff(&log_text, log_truncated, &handoff, &mut advisor)?;
     println!("{}", saved_note(&plan_path));
     eprintln!("{}", Style::stderr().dim(&cleanup_note(&plans)));
     Ok(())
@@ -711,7 +729,7 @@ mod tests {
             status: success_status(),
         };
 
-        let plan_path = complete_handoff(&log_text, &ctx, &mut advisor).unwrap();
+        let plan_path = complete_handoff(&log_text, false, &ctx, &mut advisor).unwrap();
 
         assert_eq!(
             fs::read_to_string(&plan_path).unwrap(),
@@ -745,7 +763,7 @@ mod tests {
             status: success_status(),
         };
 
-        let err = complete_handoff(TOOL_LINE, &ctx, &mut advisor).unwrap_err();
+        let err = complete_handoff(TOOL_LINE, false, &ctx, &mut advisor).unwrap_err();
 
         let rendered = format!("{err:#}");
         assert!(rendered.contains("no readable text"), "{rendered}");
@@ -776,7 +794,7 @@ mod tests {
             status: failure_status(),
         };
 
-        let err = complete_handoff(TEXT_LINE, &ctx, &mut advisor).unwrap_err();
+        let err = complete_handoff(TEXT_LINE, false, &ctx, &mut advisor).unwrap_err();
 
         let rendered = format!("{err:#}");
         assert!(rendered.contains("kept"), "{rendered}");
@@ -909,7 +927,7 @@ mod tests {
         // The kept log's raw lines come back as text: a synthetic advisor
         // stands in for the harness binary (real spawn, synthetic JSON).
         let script = format!("printf '%s\\n%s\\n' '{TOOL_LINE}' '{TEXT_LINE}'");
-        let (status, log_path, text) = capture_headless_log(
+        let (status, log_path, text, log_truncated) = capture_headless_log(
             "/bin/sh",
             &["-c", &script],
             "ignored",
@@ -918,6 +936,7 @@ mod tests {
         )
         .expect("the synthetic advisor streams");
         assert!(status.success(), "the synthetic exit status: {status}");
+        assert!(!log_truncated, "a tiny log is not cut");
         assert!(text.contains(TEXT_LINE), "the raw line reached the text");
         assert!(text.contains(TOOL_LINE), "every raw line is captured");
         assert!(!log_path.exists(), "the raw log survived its run");
@@ -1011,7 +1030,7 @@ mod tests {
             status: success_status(),
         };
 
-        let plan_path = complete_handoff(&log_text, &ctx, &mut advisor).unwrap();
+        let plan_path = complete_handoff(&log_text, false, &ctx, &mut advisor).unwrap();
 
         let saved = fs::read_to_string(&plan_path).unwrap();
         assert!(saved.len() <= PLAN_MAX_BYTES, "{} bytes", saved.len());
@@ -1085,15 +1104,250 @@ mod tests {
         // reaches the handoff's plan material, and the capture completes.
         let line = "a".repeat(300);
         let script = format!("yes '{line}' | head -n 600; echo TAILMARKER");
-        let (status, log_path, text) =
+        let (status, log_path, text, log_truncated) =
             capture_headless_log("/bin/sh", &["-c", &script], "ignored", None, None)
                 .expect("the synthetic advisor streams");
         assert!(status.success(), "the synthetic exit status: {status}");
+        assert!(log_truncated, "the over-cap log must report its cut");
         assert!(text.len() <= PLAN_MAX_BYTES, "{} bytes", text.len());
         assert!(
             !text.contains("TAILMARKER"),
             "the tail beyond the cap never arrived"
         );
         assert!(!log_path.exists(), "the raw log survived its run");
+    }
+
+    // ---- the log-cut flag: PBI 2026-11-21-24 ----
+    // 観測 (2026-11-21, this branch): with a synthetic >PLAN_MAX_BYTES log the
+    // plan file was saved with NO marker and truncate_plan returned false in
+    // both fixtures (cap mid-Text-line / cap between Text lines) — the
+    // finding held. The flag now travels to the plan assembly, so these tests
+    // pin the visible cut instead.
+
+    /// A synthetic text-event line carrying `text` as its plan prose — the
+    /// real envelope shape, never a harvested line.
+    #[cfg(unix)]
+    fn big_text_line(text: &str) -> String {
+        format!(
+            r#"{{"type":"text","timestamp":1792904882135,"sessionID":"ses_demo","part":{{"id":"prt_demo","type":"text","text":"{text}"}}}}"#
+        )
+    }
+
+    #[test]
+    fn capture_headless_log_returns_whether_the_log_was_cut() {
+        // The propagation's start: the capped read's cut verdict rides in the
+        // capture's return. Exactly the cap is the whole file — not a cut —
+        // and over the cap cuts. (The logged run rewrites each stream line
+        // newline-terminated, so the fixture's lines carry the newline: 8192
+        // lines of 8 bytes are exactly PLAN_MAX_BYTES.)
+        let (_, _, text, cut) = capture_headless_log(
+            "/bin/sh",
+            &["-c", "yes 0123456 | head -n 8192"],
+            "ignored",
+            None,
+            None,
+        )
+        .expect("the synthetic advisor streams");
+        assert_eq!(text.len(), PLAN_MAX_BYTES);
+        assert!(!cut, "an exact-cap log is the whole file, not a cut");
+
+        let (_, _, text, cut) = capture_headless_log(
+            "/bin/sh",
+            &["-c", "yes 0123456 | head -n 8193"],
+            "ignored",
+            None,
+            None,
+        )
+        .expect("the synthetic advisor streams");
+        assert_eq!(text.len(), PLAN_MAX_BYTES);
+        assert!(cut, "over the cap is a cut");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn log_cut_mid_text_line_marks_the_saved_plan() {
+        // BDD: 生ログの打ち切りが plan ファイルに視認可能に引き継がれる —
+        // the cap lands mid-JSON-line (that line renders Silent, so its whole
+        // text vanishes) and a distinctive tail Text line beyond the cap
+        // never arrives; the saved plan must say so instead of reading as
+        // complete. The stderr side is the capture-time note, pinned by
+        // `the_log_truncation_note_*`.
+        let filler = big_text_line(&"x".repeat(400));
+        let tail = big_text_line("9. The tail line that must not be lost");
+        let script = format!(
+            "printf '%s\\n' '{TOOL_LINE}' '{TEXT_LINE}'; \
+             yes '{filler}' | head -n 200; \
+             printf '%s\\n' '{tail}'"
+        );
+        let (status, _, text, log_truncated) =
+            capture_headless_log("/bin/sh", &["-c", &script], "ignored", None, None)
+                .expect("the synthetic advisor streams");
+        assert!(status.success(), "the synthetic exit status: {status}");
+        assert!(log_truncated, "the fixture's log is over the cap");
+        assert!(
+            !text.contains("The tail line that must not be lost"),
+            "the tail beyond the cap never arrived"
+        );
+
+        let dir = ScratchDir::new("saniwalens-handoff", "log-cut-mid-line");
+        let filter = ScopeFilter::All;
+        let copy = opencode_copy();
+        let ctx = handoff(&dir, &filter, &copy);
+        let mut advisor = DialogRecorder {
+            launches: Vec::new(),
+            status: success_status(),
+        };
+
+        let plan_path = complete_handoff(&text, log_truncated, &ctx, &mut advisor).unwrap();
+
+        let saved = fs::read_to_string(&plan_path).unwrap();
+        assert!(
+            !saved.contains("The tail line that must not be lost"),
+            "the tail must not reach the plan"
+        );
+        assert!(
+            saved.contains("1. Add a file map to AGENTS.md"),
+            "the head text is kept"
+        );
+        assert!(
+            saved.ends_with(PLAN_TRUNCATION_MARKER),
+            "the log cut is visible at the plan's end"
+        );
+        assert_eq!(
+            saved.matches(PLAN_TRUNCATION_MARKER).count(),
+            1,
+            "exactly one marker"
+        );
+        assert_eq!(advisor.launches.len(), 1, "the dialog still opens");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn log_cut_between_text_lines_marks_the_saved_plan() {
+        // The second fixture: the cap lands in the tool-noise region, so no
+        // Text line is itself cut; whole Text lines beyond the cap are
+        // silently absent and the plan reads as complete — the quiet case the
+        // marker must expose.
+        let filler = big_text_line(&"x".repeat(400));
+        let script = format!(
+            "printf '%s\\n' '{TOOL_LINE}'; \
+             yes '{filler}' | head -n 120; \
+             yes '{TOOL_LINE}' | head -n 100; \
+             printf '%s\\n' '{TEXT_LINE}'"
+        );
+        let (status, _, text, log_truncated) =
+            capture_headless_log("/bin/sh", &["-c", &script], "ignored", None, None)
+                .expect("the synthetic advisor streams");
+        assert!(status.success(), "the synthetic exit status: {status}");
+        assert!(log_truncated, "the fixture's log is over the cap");
+        assert!(
+            !text.contains("1. Add a file map to AGENTS.md"),
+            "the final Text line beyond the cap never arrived"
+        );
+
+        let dir = ScratchDir::new("saniwalens-handoff", "log-cut-between");
+        let filter = ScopeFilter::All;
+        let copy = opencode_copy();
+        let ctx = handoff(&dir, &filter, &copy);
+        let mut advisor = DialogRecorder {
+            launches: Vec::new(),
+            status: success_status(),
+        };
+
+        let plan_path = complete_handoff(&text, log_truncated, &ctx, &mut advisor).unwrap();
+
+        let saved = fs::read_to_string(&plan_path).unwrap();
+        assert!(
+            saved.ends_with(PLAN_TRUNCATION_MARKER),
+            "the quiet missing tail is visible at the plan's end"
+        );
+        assert!(
+            !saved.contains("1. Add a file map to AGENTS.md"),
+            "the tail is gone but now marked"
+        );
+        assert_eq!(advisor.launches.len(), 1, "the dialog still opens");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn complete_handoff_without_a_log_cut_saves_the_plan_untouched() {
+        // The flag is false on every normal run: the saved plan must be
+        // byte-identical to the extracted text, with no marker — the
+        // no-cut contract, pinned at the completion's own boundary.
+        let dir = ScratchDir::new("saniwalens-handoff", "no-cut");
+        let filter = ScopeFilter::All;
+        let copy = opencode_copy();
+        let ctx = handoff(&dir, &filter, &copy);
+        let mut advisor = DialogRecorder {
+            launches: Vec::new(),
+            status: success_status(),
+        };
+        let log_text = format!("{TOOL_LINE}\n{TEXT_LINE}\n");
+
+        let plan_path =
+            complete_handoff(&log_text, false, &ctx, &mut advisor).expect("a plain plan saves");
+
+        assert_eq!(
+            fs::read_to_string(&plan_path).unwrap(),
+            "1. Add a file map to AGENTS.md"
+        );
+        assert!(
+            !fs::read_to_string(&plan_path)
+                .unwrap()
+                .contains(PLAN_TRUNCATION_MARKER)
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn complete_handoff_never_doubles_the_marker_when_both_cuts_fire() {
+        // A log-cut flag on a plan that also exceeds the cap on its own
+        // (only reachable by a direct call with uncapped text): one marker,
+        // not two.
+        let dir = ScratchDir::new("saniwalens-handoff", "both-cuts");
+        let filter = ScopeFilter::All;
+        let copy = opencode_copy();
+        let ctx = handoff(&dir, &filter, &copy);
+        let mut advisor = DialogRecorder {
+            launches: Vec::new(),
+            status: success_status(),
+        };
+        let big = "x".repeat(PLAN_MAX_BYTES);
+        let big_line = format!(
+            r#"{{"type":"text","timestamp":1792904882135,"sessionID":"ses_demo","part":{{"id":"prt_demo","type":"text","text":"{big}"}}}}"#
+        );
+        let log_text = format!("{TOOL_LINE}\n{TEXT_LINE}\n{big_line}\n");
+
+        let plan_path =
+            complete_handoff(&log_text, true, &ctx, &mut advisor).expect("the dialog opens");
+
+        let saved = fs::read_to_string(&plan_path).unwrap();
+        assert!(saved.ends_with(PLAN_TRUNCATION_MARKER));
+        assert_eq!(
+            saved.matches(PLAN_TRUNCATION_MARKER).count(),
+            1,
+            "the two cuts must not stack two markers"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn complete_handoff_still_refuses_an_empty_plan_with_a_log_cut() {
+        // The empty-plan refusal precedes the marker: a cut log whose kept
+        // head carries no Text still saves nothing and fails loud.
+        let dir = ScratchDir::new("saniwalens-handoff", "cut-empty");
+        let filter = ScopeFilter::All;
+        let copy = opencode_copy();
+        let ctx = handoff(&dir, &filter, &copy);
+        let mut advisor = DialogRecorder {
+            launches: Vec::new(),
+            status: success_status(),
+        };
+
+        let err = complete_handoff(TOOL_LINE, true, &ctx, &mut advisor).unwrap_err();
+
+        let rendered = format!("{err:#}");
+        assert!(rendered.contains("no readable text"), "{rendered}");
+        assert!(advisor.launches.is_empty(), "the dialog never opened");
     }
 }
