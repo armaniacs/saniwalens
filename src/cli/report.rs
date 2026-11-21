@@ -262,9 +262,10 @@ fn format_row(cells: &[String], widths: &[usize], aligns: &[Align]) -> String {
 /// sequence (CSI, OSC, charset designators, bare `ESC`), every Cc control
 /// char — C0, C1 (U+0080-009F, riding UTF-8 as 0xC2 0x80-0x9F), and DEL —
 /// except the line structure `\n` and tab `\t` that prose layout (and the
-/// markdown `<br>` fold) relies on, and the Cf bidi overrides /
-/// zero-width format chars (U+202A-202E, U+200B-200F, U+FEFF) that display
-/// invisibly. Transcript-derived strings (agent/skill ids, project/file
+/// markdown `<br>` fold) relies on, and the Cf bidi overrides / isolates /
+/// zero-width format chars (U+202A-202E, U+2066-2069, U+200B-200F, U+FEFF)
+/// that display invisibly. Transcript-derived strings (agent/skill ids,
+/// project/file
 /// paths, friction labels) are untrusted; `render()` is the choke point
 /// where they would reach the terminal, so both the Table and Markdown
 /// paths sanitize here, before any width math. Doctor's prose bypasses
@@ -367,12 +368,15 @@ pub(crate) fn sanitize_cell(cell: &str) -> String {
 }
 
 /// A non-ESC char the strip vocabulary removes: any Cc control except the
-/// kept line structure `\n` / `\t`, plus the Cf bidi overrides and
+/// kept line structure `\n` / `\t`, plus the Cf bidi overrides / isolates and
 /// zero-width / direction-marking format chars (`is_control()` misses the
 /// latter — they are Cf, and they misrepresent or spoof the visible text).
 fn is_stripped_char(c: char) -> bool {
     (c.is_control() && !matches!(c, '\n' | '\t'))
-        || matches!(c as u32, 0x202a..=0x202e | 0x200b..=0x200f | 0xfeff)
+        || matches!(
+            c as u32,
+            0x202a..=0x202e | 0x2066..=0x2069 | 0x200b..=0x200f | 0xfeff
+        )
 }
 
 fn pad(text: &str, width: usize, align: Align) -> String {
@@ -588,9 +592,11 @@ mod tests {
     #[test]
     fn sanitize_strips_bidi_overrides_and_zero_width() {
         // Cf chars are invisible (`is_control()` misses them): an override
-        // reorders what the user reads, zero-width chars spoof copied text.
+        // reorders what the user reads, isolates scope the reordering, and
+        // zero-width chars spoof copied text.
         for cp in [
-            0x202a, 0x202b, 0x202c, 0x202d, 0x202e, 0x200b, 0x200c, 0x200d, 0x200e, 0x200f, 0xfeff,
+            0x202a, 0x202b, 0x202c, 0x202d, 0x202e, 0x2066, 0x2067, 0x2068, 0x2069, 0x200b, 0x200c,
+            0x200d, 0x200e, 0x200f, 0xfeff,
         ] {
             let c = char::from_u32(cp).expect("listed codepoints are scalar");
             assert_eq!(

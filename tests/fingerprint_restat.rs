@@ -16,6 +16,30 @@ use common::ScratchDir;
 /// The tests below mutate process-wide env vars, so they run serialized.
 static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
+/// Set `var` for the test and restore the previous state on drop — including
+/// on panic, so a failing test never leaves the poisoned value behind for the
+/// other threads sharing this process, and the parent's original value (if
+/// any) survives the suite.
+fn set_env(var: &'static str, value: impl AsRef<std::ffi::OsStr>) -> EnvRestore {
+    let saved = std::env::var_os(var);
+    unsafe { std::env::set_var(var, value.as_ref()) };
+    EnvRestore { var, saved }
+}
+
+struct EnvRestore {
+    var: &'static str,
+    saved: Option<std::ffi::OsString>,
+}
+
+impl Drop for EnvRestore {
+    fn drop(&mut self) {
+        match self.saved.take() {
+            Some(value) => unsafe { std::env::set_var(self.var, value) },
+            None => unsafe { std::env::remove_var(self.var) },
+        }
+    }
+}
+
 fn ingested_count(db: &Path) -> String {
     let store = Store::open(db, OpenMode::ReadOnly).unwrap();
     let (_, rows) = store.query("SELECT COUNT(*) FROM ingested_files").unwrap();
@@ -73,7 +97,7 @@ fn claude_quiet_second_run_stays_skipped() {
     let base =
         std::time::SystemTime::UNIX_EPOCH + std::time::Duration::new(1_700_000_100, 100_000_000);
     set_mtime(&transcript, base);
-    unsafe { std::env::set_var("CLAUDE_CONFIG_DIR", &*root) };
+    let _env = set_env("CLAUDE_CONFIG_DIR", &*root);
 
     let db = root.join("store.db");
     let projects = root.join("projects");
@@ -97,8 +121,6 @@ fn claude_quiet_second_run_stays_skipped() {
     assert_eq!((second.sessions, second.skipped), (0, 1));
     assert_eq!(ingested_count(&db), "1");
     assert_eq!(session_count(&db), "1");
-
-    unsafe { std::env::remove_var("CLAUDE_CONFIG_DIR") };
 }
 
 #[test]
@@ -109,7 +131,7 @@ fn claude_appended_transcript_is_reingested() {
     let base =
         std::time::SystemTime::UNIX_EPOCH + std::time::Duration::new(1_700_000_100, 100_000_000);
     set_mtime(&transcript, base);
-    unsafe { std::env::set_var("CLAUDE_CONFIG_DIR", &*root) };
+    let _env = set_env("CLAUDE_CONFIG_DIR", &*root);
 
     let db = root.join("store.db");
     let projects = root.join("projects");
@@ -128,8 +150,6 @@ fn claude_appended_transcript_is_reingested() {
     // Quiet again: the new stamp holds.
     let third = saniwalens::adapter::claude::analyze(Some(projects), &db).unwrap();
     assert_eq!((third.sessions, third.skipped), (0, 1));
-
-    unsafe { std::env::remove_var("CLAUDE_CONFIG_DIR") };
 }
 
 fn opencode_fixture_db(path: &Path) {
@@ -164,7 +184,7 @@ fn opencode_fixture_db(path: &Path) {
 fn opencode_quiet_second_run_stays_skipped() {
     let _guard = ENV_LOCK.lock().unwrap();
     let root = ScratchDir::new("saniwalens-fp-restat", "opencode-quiet");
-    unsafe { std::env::set_var("XDG_CONFIG_HOME", root.join("cfg-home")) };
+    let _env = set_env("XDG_CONFIG_HOME", root.join("cfg-home"));
     let input = root.join("opencode.db");
     opencode_fixture_db(&input);
 
@@ -177,15 +197,13 @@ fn opencode_quiet_second_run_stays_skipped() {
     let second = saniwalens::adapter::opencode::analyze(Some(input), &db).unwrap();
     assert_eq!((second.sessions, second.skipped), (0, 1));
     assert_eq!(ingested_count(&db), "1");
-
-    unsafe { std::env::remove_var("XDG_CONFIG_HOME") };
 }
 
 #[test]
 fn opencode_appended_session_is_reingested() {
     let _guard = ENV_LOCK.lock().unwrap();
     let root = ScratchDir::new("saniwalens-fp-restat", "opencode-drift");
-    unsafe { std::env::set_var("XDG_CONFIG_HOME", root.join("cfg-home")) };
+    let _env = set_env("XDG_CONFIG_HOME", root.join("cfg-home"));
     let input = root.join("opencode.db");
     opencode_fixture_db(&input);
 
@@ -216,8 +234,6 @@ fn opencode_appended_session_is_reingested() {
     let second = saniwalens::adapter::opencode::analyze(Some(input), &db).unwrap();
     assert_eq!((second.sessions, second.skipped), (1, 0));
     assert_eq!(ingested_count(&db), "1");
-
-    unsafe { std::env::remove_var("XDG_CONFIG_HOME") };
 }
 
 fn kilocode_fixture_tasks(root: &Path) -> std::path::PathBuf {
@@ -237,7 +253,7 @@ fn kilocode_fixture_tasks(root: &Path) -> std::path::PathBuf {
 fn kilocode_quiet_second_run_stays_skipped() {
     let _guard = ENV_LOCK.lock().unwrap();
     let root = ScratchDir::new("saniwalens-fp-restat", "kilocode-quiet");
-    unsafe { std::env::set_var("XDG_CONFIG_HOME", root.join("cfg-home")) };
+    let _env = set_env("XDG_CONFIG_HOME", root.join("cfg-home"));
     let tasks = kilocode_fixture_tasks(&root);
 
     let db = root.join("store.db");
@@ -249,15 +265,13 @@ fn kilocode_quiet_second_run_stays_skipped() {
     let second = saniwalens::adapter::kilocode::analyze(Some(tasks), &db).unwrap();
     assert_eq!((second.sessions, second.skipped), (0, 1));
     assert_eq!(ingested_count(&db), "1");
-
-    unsafe { std::env::remove_var("XDG_CONFIG_HOME") };
 }
 
 #[test]
 fn kilocode_appended_task_is_reingested() {
     let _guard = ENV_LOCK.lock().unwrap();
     let root = ScratchDir::new("saniwalens-fp-restat", "kilocode-drift");
-    unsafe { std::env::set_var("XDG_CONFIG_HOME", root.join("cfg-home")) };
+    let _env = set_env("XDG_CONFIG_HOME", root.join("cfg-home"));
     let tasks = kilocode_fixture_tasks(&root);
 
     let db = root.join("store.db");
@@ -284,6 +298,4 @@ fn kilocode_appended_task_is_reingested() {
     // Quiet again: the new stamp holds.
     let third = saniwalens::adapter::kilocode::analyze(Some(tasks), &db).unwrap();
     assert_eq!((third.sessions, third.skipped), (0, 1));
-
-    unsafe { std::env::remove_var("XDG_CONFIG_HOME") };
 }

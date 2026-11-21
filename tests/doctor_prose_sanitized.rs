@@ -19,11 +19,13 @@ use common::ScratchDir;
 /// One Edit target as a hostile (or hallucinating) harness would record it:
 /// CSI, OSC with a BEL terminator, a bare ESC-follower pair, stray BELs, C1
 /// (U+009B — the 8-bit CSI a terminal would act on), a bidirectional
-/// override, zero-width format chars, and a carriage return. The file never
+/// override, a bidi isolate (U+2069 — the pairing partner of the overrides
+/// that `is_control()` also misses), zero-width format chars, and a carriage
+/// return. The file never
 /// has to exist for any of this to reach prose — the value comes straight
 /// from the transcript's `tool_use.input`.
 fn hostile_path() -> String {
-    "/tmp/example/proj/evil\u{1b}[2J\u{1b}]0;pwn\u{7}\u{9b}\u{202e}weird\u{200b}\u{feff}name\u{1b}M\r with\u{7}  double  spaces.md"
+    "/tmp/example/proj/evil\u{1b}[2J\u{1b}]0;pwn\u{7}\u{9b}\u{202e}\u{2069}weird\u{200b}\u{feff}name\u{1b}M\r with\u{7}  double  spaces.md"
         .to_string()
 }
 
@@ -87,15 +89,21 @@ fn assert_no_control_bytes(stdout: &[u8]) {
     );
 }
 
-/// Bidi overrides and zero-width format chars are invisible to
+/// Bidi overrides / isolates and zero-width format chars are invisible to
 /// `is_control()` (they are Cf, not Cc), so their absence needs its own
-/// assert: an override reorders what the user reads and a zero-width char
-/// spoofs text that is copied out of the report.
+/// assert: an override reorders what the user reads, an isolate scopes the
+/// reordering, and a zero-width char spoofs text that is copied out of the
+/// report.
 fn assert_no_bidi_or_zero_width_chars(stdout: &[u8]) {
     let text = String::from_utf8_lossy(stdout);
     let hostile: Vec<String> = text
         .chars()
-        .filter(|c| matches!(*c as u32, 0x202A..=0x202E | 0x200B..=0x200F | 0xFEFF))
+        .filter(|c| {
+            matches!(
+                *c as u32,
+                0x202A..=0x202E | 0x2066..=0x2069 | 0x200B..=0x200F | 0xFEFF
+            )
+        })
         .map(|c| format!("U+{:04X}", c as u32))
         .collect();
     assert!(
