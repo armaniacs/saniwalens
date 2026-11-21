@@ -221,6 +221,13 @@ owned by another account is left alone, since re-moding it is not this
 process's call and refusing to run over it would break a store legitimately
 created under another user.
 
+Being unable to narrow the store is not swallowed: the PermissionDenied case
+(where a foreign-owned, group/world-readable store is in place) warns on
+stderr and continues, and a directory or store file that already carries
+group/other bits warns the same way. The posture is "warn, never silently
+inherit": the tool does not refuse to run (that would break the legitimate
+cross-user case above), but the privacy degradation is always visible.
+
 ## Surface identity, scope, and the effective join
 
 `surfaces` is keyed `(kind, id, scope, project)` because the same logical

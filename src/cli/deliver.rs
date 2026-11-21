@@ -437,14 +437,24 @@ pub(crate) fn write_private_file(path: &Path, contents: &str) -> Result<()> {
 ///
 /// `create_dir_all` with owner-only permissions on every directory it creates —
 /// the mode the XDG Base Directory spec prescribes for a directory a program
-/// creates on the user's behalf. Directories that already exist keep theirs.
-/// Like `write_private_file`, this makes cli-owned state artifacts (plans,
+/// creates on the user's behalf. Directories that already exist keep theirs;
+/// one whose mode is not owner-only is warned about on stderr instead of being
+/// silently built on, because an unexpected mode there means the privacy
+/// premise (this state is only the user's) is already broken. Like
+/// `write_private_file`, this makes cli-owned state artifacts (plans,
 /// backups) born private instead of created under the umask and narrowed
 /// afterwards.
 pub(crate) fn create_private_dir_all(dir: &Path) -> std::io::Result<()> {
     #[cfg(unix)]
     {
-        use std::os::unix::fs::DirBuilderExt;
+        use std::os::unix::fs::{DirBuilderExt, MetadataExt};
+
+        if let Ok(meta) = fs::metadata(dir)
+            && meta.is_dir()
+            && let Some(line) = unprivate_dir_warning(dir, meta.mode())
+        {
+            eprintln!("{}", Style::stderr().warn(&line));
+        }
         std::fs::DirBuilder::new()
             .recursive(true)
             .mode(0o700)
@@ -452,6 +462,24 @@ pub(crate) fn create_private_dir_all(dir: &Path) -> std::io::Result<()> {
     }
     #[cfg(not(unix))]
     std::fs::create_dir_all(dir)
+}
+
+/// The stderr warning for an already-existing directory whose mode still
+/// reaches group/other accounts, or `None` when it is owner-only (or the
+/// path is not there yet, which the caller checks first). The pure half of
+/// [`create_private_dir_all`]'s warning: same-user tests pin it through real
+/// `chmod`ed modes, since staging a genuinely foreign-owned directory would
+/// need root.
+#[cfg(unix)]
+fn unprivate_dir_warning(dir: &Path, mode: u32) -> Option<String> {
+    (mode & 0o077 != 0).then(|| {
+        format!(
+            "warning: directory {} already exists with group/other access bits (mode {:o}) — \
+             private state may be reachable by other local accounts; continuing",
+            dir.display(),
+            mode & 0o777
+        )
+    })
 }
 
 #[cfg(test)]
@@ -511,6 +539,91 @@ mod tests {
         write_private_file(&path.0, "briefing").unwrap();
         let mode = fs::metadata(&path.0).unwrap().permissions().mode();
         assert_eq!(mode & 0o777, 0o600);
+    }
+
+    // ---- PBI 25: an existing non-private state directory is visible ----
+
+    /// A directory in the temp dir that no other test uses, removed on drop
+    /// so a failure does not leak a directory tree into the runner's temp dir.
+    #[cfg(unix)]
+    struct TempDir(PathBuf);
+
+    #[cfg(unix)]
+    impl TempDir {
+        fn new(tag: &str) -> Self {
+            let path = std::env::temp_dir()
+                .join(format!("saniwalens-test-dir-{}-{tag}", std::process::id()));
+            let _ = fs::remove_dir_all(&path);
+            Self(path)
+        }
+    }
+
+    #[cfg(unix)]
+    impl Drop for TempDir {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    /// The full unix mode (file-type bits included) of `path`.
+    #[cfg(unix)]
+    fn dir_mode(path: &Path) -> u32 {
+        use std::os::unix::fs::PermissionsExt;
+        fs::metadata(path).unwrap().permissions().mode()
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_existing_owner_only_dir_mode_yields_no_warning() {
+        assert_eq!(unprivate_dir_warning(Path::new("/plans"), 0o040700), None);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_existing_group_other_writable_dir_mode_yields_a_warning() {
+        let line = unprivate_dir_warning(Path::new("/plans"), 0o040777).unwrap();
+        assert!(line.starts_with("warning: "));
+        assert!(line.contains("/plans"));
+        assert!(line.contains("777"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_existing_group_writable_dir_mode_yields_a_warning_too() {
+        assert!(unprivate_dir_warning(Path::new("/plans"), 0o040750).is_some());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn create_private_dir_all_proceeds_on_a_chmodded_group_other_writable_dir_and_warns() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = TempDir::new("plans-777");
+        fs::create_dir_all(&dir.0).unwrap();
+        fs::set_permissions(&dir.0, fs::Permissions::from_mode(0o777)).unwrap();
+
+        create_private_dir_all(&dir.0).unwrap();
+
+        // "keep theirs" holds — the warning, not a re-mode, is the response,
+        // and it is the one the judge derives from the real metadata.
+        assert_eq!(dir_mode(&dir.0) & 0o777, 0o777);
+        let line = unprivate_dir_warning(&dir.0, dir_mode(&dir.0)).unwrap();
+        assert!(line.contains(&dir.0.display().to_string()));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_fresh_dir_and_an_existing_owner_only_dir_stay_silent() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = TempDir::new("plans-fresh");
+        create_private_dir_all(&dir.0).unwrap();
+        assert_eq!(dir_mode(&dir.0) & 0o777, 0o700);
+        assert_eq!(unprivate_dir_warning(&dir.0, dir_mode(&dir.0)), None);
+
+        fs::set_permissions(&dir.0, fs::Permissions::from_mode(0o700)).unwrap();
+        create_private_dir_all(&dir.0).unwrap();
+        assert_eq!(unprivate_dir_warning(&dir.0, dir_mode(&dir.0)), None);
     }
 
     // ---- PBI 06: the delivery seam ----

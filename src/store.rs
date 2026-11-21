@@ -468,11 +468,21 @@ impl<'a> IngestBatch<'a> {
 
 /// `create_dir_all` with owner-only permissions on every directory it creates —
 /// the mode the XDG Base Directory spec prescribes for a directory a program
-/// creates on the user's behalf. Directories that already exist keep theirs.
+/// creates on the user's behalf. Directories that already exist keep theirs;
+/// one whose mode is not owner-only is warned about on stderr instead of being
+/// silently built on, because an unexpected mode there means the privacy
+/// premise (this state is only the user's) is already broken.
 fn create_private_dir_all(dir: &std::path::Path) -> std::io::Result<()> {
     #[cfg(unix)]
     {
-        use std::os::unix::fs::DirBuilderExt;
+        use std::os::unix::fs::{DirBuilderExt, MetadataExt};
+
+        if let Ok(meta) = std::fs::metadata(dir)
+            && meta.is_dir()
+            && let Some(line) = unprivate_dir_warning(dir, meta.mode())
+        {
+            eprintln!("{line}");
+        }
         std::fs::DirBuilder::new()
             .recursive(true)
             .mode(0o700)
@@ -480,6 +490,26 @@ fn create_private_dir_all(dir: &std::path::Path) -> std::io::Result<()> {
     }
     #[cfg(not(unix))]
     std::fs::create_dir_all(dir)
+}
+
+/// The stderr warning for an already-existing directory whose mode still
+/// reaches group/other accounts, or `None` when it is owner-only (or the
+/// path is not there yet, which the caller checks first). The pure half of
+/// [`create_private_dir_all`]'s warning: same-user tests pin it through real
+/// `chmod`ed modes, since staging a genuinely foreign-owned directory would
+/// need root. A deliberate copy of `cli::deliver`'s helper — the two
+/// `create_private_dir_all`s stay separate (PBI 07 unification leftover),
+/// and the store layer must not depend on the cli layer.
+#[cfg(unix)]
+fn unprivate_dir_warning(dir: &std::path::Path, mode: u32) -> Option<String> {
+    (mode & 0o077 != 0).then(|| {
+        format!(
+            "warning: directory {} already exists with group/other access bits (mode {:o}) — \
+             private state may be reachable by other local accounts; continuing",
+            dir.display(),
+            mode & 0o777
+        )
+    })
 }
 
 /// Make sure the store file is readable only by its owner: create it `0600`
@@ -495,7 +525,10 @@ fn create_private_dir_all(dir: &std::path::Path) -> std::io::Result<()> {
 /// `--db` at a directory fails at SQLite instead of silently re-moding it, and
 /// a store owned by someone else is left as it is — re-moding it is not this
 /// process's call, and refusing to run over it would break a store legitimately
-/// created under another account.
+/// created under another account. Left as it is, but not silently: a store
+/// with group/other bits and a refused narrowing are both warned about on
+/// stderr — "whatever mode already sits there" is exactly the premise above
+/// broken, and the open proceeds but must not do so invisibly.
 fn ensure_owner_only(path: &std::path::Path) -> Result<()> {
     #[cfg(unix)]
     {
@@ -515,24 +548,71 @@ fn ensure_owner_only(path: &std::path::Path) -> Result<()> {
         let meta = std::fs::metadata(path)
             .with_context(|| format!("read store permissions {}", path.display()))?;
         let mode = meta.permissions().mode();
+        if meta.is_file()
+            && let Some(line) = unprivate_store_file_warning(path, mode)
+        {
+            eprintln!("{line}");
+        }
         if meta.is_file() && mode & 0o077 != 0 {
             // 0600 outright rather than masking the existing mode: masking would
             // carry over a stray execute bit, and could leave the owner without
             // the read/write the store needs to be opened at all.
-            match std::fs::set_permissions(path, Permissions::from_mode(0o600)) {
-                Ok(()) => {}
-                // Not our file to re-mode. Everything else is a real failure.
-                Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {}
-                Err(e) => {
-                    return Err(e)
-                        .with_context(|| format!("restrict store permissions {}", path.display()));
-                }
-            }
+            narrow_store_or_warn(
+                path,
+                std::fs::set_permissions(path, Permissions::from_mode(0o600)),
+            )?;
         }
     }
     #[cfg(not(unix))]
     let _ = path;
     Ok(())
+}
+
+/// The stderr warning for an already-existing store file whose mode still
+/// reaches group/other accounts, or `None` when it is owner-only. Fires
+/// whether or not the narrowing below succeeds — the exposure happened
+/// either way. The pure half of the warning, testable same-user through
+/// real `chmod`ed modes.
+#[cfg(unix)]
+fn unprivate_store_file_warning(path: &std::path::Path, mode: u32) -> Option<String> {
+    (mode & 0o077 != 0).then(|| {
+        format!(
+            "warning: store file {} has group/other access bits (mode {:o}) — \
+             transcript-derived data may be readable by other local accounts",
+            path.display(),
+            mode & 0o777
+        )
+    })
+}
+
+/// The narrowing half of [`ensure_owner_only`]'s existing-file branch: a
+/// refused narrowing — in practice a store owned by another account — warns
+/// and continues, while any other failure stays a real error. Kept as a
+/// value-passing function so the deny branch is testable same-user with a
+/// synthetic denied error; staging a genuinely foreign-owned store file
+/// needs root.
+#[cfg(unix)]
+fn narrow_store_or_warn(path: &std::path::Path, narrowed: std::io::Result<()>) -> Result<()> {
+    match narrowed {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
+            eprintln!("{}", unrestrictable_store_file_warning(path));
+            Ok(())
+        }
+        Err(e) => Err(e).with_context(|| format!("restrict store permissions {}", path.display())),
+    }
+}
+
+/// The stderr warning for a store file this process was not allowed to narrow
+/// to `0600` — in practice one owned by another account, whose mode (and
+/// contents) stay whatever they are.
+#[cfg(unix)]
+fn unrestrictable_store_file_warning(path: &std::path::Path) -> String {
+    format!(
+        "warning: store file {} could not be restricted to 0600 (owned by another account?) — \
+         continuing with the mode it has",
+        path.display()
+    )
 }
 
 /// A briefing fetch cap as a SQLite `LIMIT` bind: saturates instead of
@@ -2463,6 +2543,85 @@ mod tests {
         let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
         assert_eq!(mode, 0o600);
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    // ---- PBI 25: existing store anomalies are visible ----
+
+    #[cfg(unix)]
+    #[test]
+    fn a_store_file_mode_the_owner_only_posture_allows_yields_no_warning() {
+        let path = std::path::Path::new("/state/saniwalens.db");
+        assert_eq!(unprivate_store_file_warning(path, 0o100600), None);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_group_other_readable_store_file_mode_yields_a_warning() {
+        let path = std::path::Path::new("/state/saniwalens.db");
+        let line = unprivate_store_file_warning(path, 0o100644).unwrap();
+        assert!(line.starts_with("warning: "));
+        assert!(line.contains("saniwalens.db"));
+        assert!(line.contains("644"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_group_writable_store_file_mode_yields_a_warning_too() {
+        let path = std::path::Path::new("/state/saniwalens.db");
+        assert!(unprivate_store_file_warning(path, 0o100660).is_some());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_store_parent_dir_yields_a_warning_only_when_group_other_bits_are_set() {
+        let dir = std::path::Path::new("/state");
+        assert_eq!(unprivate_dir_warning(dir, 0o040700), None);
+        assert!(unprivate_dir_warning(dir, 0o040777).is_some());
+        assert!(unprivate_dir_warning(dir, 0o040750).is_some());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn opening_a_chmodded_group_other_readable_store_warns_and_completes() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = std::env::temp_dir().join(format!("saniwalens-warn-test-{}", std::process::id()));
+        let path = dir.join("saniwalens.db");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        drop(Store::open(&path, OpenMode::ReadWrite).unwrap());
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+
+        // the judge sees the exposure from the same metadata the open reads
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode();
+        assert!(unprivate_store_file_warning(&path, mode).is_some());
+
+        // the open completes, the narrowing still happens, and the next open
+        // is silent again — the warning is once per exposure, not per run
+        drop(Store::open(&path, OpenMode::ReadWrite).unwrap());
+        let narrowed = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(narrowed, 0o600);
+        let after = std::fs::metadata(&path).unwrap().permissions().mode();
+        assert_eq!(unprivate_store_file_warning(&path, after), None);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_refused_narrowing_warns_and_continues_while_real_failures_still_fail() {
+        let path = std::path::Path::new("/state/saniwalens.db");
+
+        let denied = std::io::Error::from(std::io::ErrorKind::PermissionDenied);
+        assert!(narrow_store_or_warn(path, Err(denied)).is_ok());
+
+        let broken = std::io::Error::other("boom");
+        let err = narrow_store_or_warn(path, Err(broken)).unwrap_err();
+        assert!(err.to_string().contains("restrict store permissions"));
+
+        let line = unrestrictable_store_file_warning(path);
+        assert!(line.starts_with("warning: "));
+        assert!(line.contains("saniwalens.db"));
+        assert!(line.contains("0600"));
     }
 
     fn span(skill: &str, out_tokens: u64, ctx_growth: u64, duration_sec: f64) -> Span {
