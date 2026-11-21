@@ -93,3 +93,4 @@ adversarial-code-review（fork/main..1121a 差分、4 チャンク × 2 視点�
 | [21-waste-glob-computation-bound](archived/2026-11-21-21-fix-waste-glob-computation-bound.md) | 中 | ** 展開をメモ化 DP + MatchBudget 化（超過 rule は除外して名指し警告）、target 照会に LIMIT 5000。旧マッチャで 258 秒 → 0.35 秒の e2e 実測。spec 同期（cli.md waste 行）込み。00d20a7 |
 | [23-kilocode-window-scan-quad](archived/2026-11-21-23-fix-kilocode-window-scan-quad.md) | 中 | 請求窓帰属を partition_point 2 回に置換（旧実装で最悪 283 秒 → O(n log n)）。帰属結果バイト同一（golden + 境界 pin 5 件）。20c5718 |
 | [24-plan-truncation-visibility](archived/2026-11-21-24-fix-plan-truncation-visibility.md) | 中 | 観測フェーズで指摘を実測確認（無印 plan + 末尾欠け）のうえ、capture から plan 組立まで打ち切り flag を運び plan 末尾に marker 追記。spec 同期（cli.md --apply 節）込み。14ad2f0 |
+| [25-private-dir-owner-verification](archived/2026-11-21-25-fix-private-dir-owner-verification.md) | 低 | 既存 dir の group/other ビット検出と chmod 拒否を stderr 警告に（warn, never silently inherit）。正常系バイト同一。spec 同期（storage.md permission 節）込み。bb246c9 |
