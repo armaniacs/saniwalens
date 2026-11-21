@@ -47,3 +47,14 @@ rusqlite = { version = "0.32", features = ["bundled"] }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.150"
 toml = "0.8"
+
+[dev-dependencies]
+# Property-based tests for the pure-core invariants (sanitize/truncate
+# idempotence, glob budget determinism, time round-trips): the boundary
+# values these fixtures hand-write are exactly what a generator produces.
+proptest = "1"
+criterion = { version = "0.5", default-features = false }
+
+[[bench]]
+name = "hot_paths"
+harness = false

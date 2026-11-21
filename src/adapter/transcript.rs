@@ -880,6 +880,29 @@ mod tests {
     use super::*;
     use crate::core::span::extract_spans;
     use crate::core::usage::extract_usage_events;
+    use proptest::prelude::*;
+
+    proptest! {
+        #![proptest_config(proptest::test_runner::Config::with_cases(512))]
+
+        /// The excerpt contract over arbitrary input: line-structure
+        /// whitespace collapsed, at most 200 scalars, never split
+        /// mid-character, and idempotent — a second pass changes nothing.
+        /// Known limit (adversarial round, judged low): U+0000 is not
+        /// Unicode whitespace, so the collapse keeps it; terminal paths
+        /// sanitize it downstream and the residue is SQL noise only.
+        #[test]
+        fn clean_truncate_collapses_caps_and_is_idempotent(s in ".*") {
+            let once = clean_truncate(&s);
+            prop_assert!(once.chars().count() <= 200, "over cap: {}", once.chars().count());
+            prop_assert!(
+                !once.chars()
+                    .any(|c| matches!(c, '\n' | '\r' | '\t' | '\u{b}' | '\u{c}')),
+                "line-structure whitespace survived: {once:?}"
+            );
+            prop_assert_eq!(clean_truncate(&once), once, "not idempotent");
+        }
+    }
 
     #[test]
     fn parses_a_slash_invocation_with_its_assistant_cost() {

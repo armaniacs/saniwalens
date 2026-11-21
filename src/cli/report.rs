@@ -520,6 +520,37 @@ fn use_color(tty: bool) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use proptest::prelude::*;
+
+    proptest! {
+        #![proptest_config(proptest::test_runner::Config::with_cases(512))]
+
+        /// The sanitize contract over arbitrary input: idempotent, hostile
+        /// vocabulary gone (Cc minus line structure, Cf bidi/zero-width),
+        /// and multi-byte text re-encoded verbatim.
+        #[test]
+        fn sanitize_cell_is_idempotent_and_drops_hostile_bytes(s in ".*") {
+            let once = sanitize_cell(&s);
+            let once_clone = once.clone();
+            let twice = sanitize_cell(&once);
+            prop_assert_eq!(twice, once_clone);
+
+            for c in once.chars() {
+                prop_assert!(
+                    !(c.is_control() && !matches!(c, '\n' | '\t')
+                        || matches!(
+                            c as u32,
+                            0x202a..=0x202e | 0x2066..=0x2069 | 0x200b..=0x200f | 0xfeff
+                        )),
+                    "hostile char U+{:04X} survived: {once:?}",
+                    c as u32
+                );
+            }
+            // Japanese passes through untouched: the doc's multi-byte promise.
+            let jp = sanitize_cell("使用状況は変わりません");
+            prop_assert_eq!(jp, "使用状況は変わりません");
+        }
+    }
 
     #[test]
     fn the_shared_vocabulary_takes_all_three_values() {
