@@ -8,20 +8,20 @@ holistic-code-improvement スキルによる第2ラウンド。4班並列レビ�
 
 | 順位 | PBI | RICE | 内訳 (R/I/C/E) | 依存・根拠 |
 |------|-----|------|----------------|-----------|
-| 01 | [store-schema-reconcile-guard](2026-11-21-01-fix-store-schema-reconcile-guard.md) | 24.0 | 4/3/100%/0.5 | なし。実害（未分類表の列追加で全ユーザー INSERT 失敗）封じ込め |
-| 02 | [usage-token-clamp](2026-11-21-02-fix-usage-token-clamp.md) | 18.0 | 6/3/100%/1 | なし。store.rs には触れない（05 と排他） |
-| 03 | [surface-kind-predicates](2026-11-21-03-refactor-surface-kind-predicates.md) | 8.0 | 4/1/100%/0.5 | なし |
-| 04 | [advisor-language-vocabulary](2026-11-21-04-refactor-advisor-language-vocabulary.md) | 4.0 | 4/0.5/100%/0.5 | なし。session.rs は 13 より先 |
-| 05 | [core-row-ownership](2026-11-21-05-refactor-core-row-ownership.md) | 10.0 | 5/1/100%/0.5 | 01 の後（store.rs 排他） |
-| 06 | [doctor-prose-sanitize](2026-11-21-06-fix-doctor-prose-sanitize.md) | 16.0 | 4/2/100%/0.5 | 02 の後（transcript.rs 排他） |
-| 07 | [util-layer-placement](2026-11-21-07-refactor-util-layer-placement.md) | 5.0 | 5/1/100%/1 | 04 の後（session.rs 排他）。09 と harness.rs 排他（07 先） |
-| 08 | [store-range-params](2026-11-21-08-refactor-store-range-params.md) | 6.0 | 6/0.5/100%/0.5 | 05 の後（store.rs 排他） |
-| 09 | [harness-facts-assembly](2026-11-21-09-refactor-harness-facts-assembly.md) | 2.4 | 6/1/80%/2 | 07 の後（harness.rs 排他） |
-| 10 | [guide-toml-upsert](2026-11-21-10-refactor-guide-toml-upsert.md) | 3.0 | 3/1/100%/1 | なし（views/guide.rs 内で閉じる） |
-| 11 | [apply-plan-byte-cap](2026-11-21-11-fix-apply-plan-byte-cap.md) | 6.0 | 3/1/100%/0.5 | なし。handoff.rs は 12 と排他（11 先） |
-| 12 | [optimize-apply-prologue](2026-11-21-12-refactor-optimize-apply-prologue.md) | 2.0 | 5/1/80%/2 | 07（session.rs）・11（handoff.rs）の後 |
-| 13 | [session-responsibility-split](2026-11-21-13-refactor-session-responsibility-split.md) | 1.3 | 5/1/80%/3 | 12 の後（session.rs 排他） |
-| 14 | [temp-name-stem](2026-11-21-14-refactor-temp-name-stem.md) | 3.0 | 3/0.5/100%/0.5 | 12 の後（handoff.rs 排他） |
+| 01 | [store-schema-reconcile-guard](archived/2026-11-21-01-fix-store-schema-reconcile-guard.md) | 24.0 | 4/3/100%/0.5 | なし。実害（未分類表の列追加で全ユーザー INSERT 失敗）封じ込め |
+| 02 | [usage-token-clamp](archived/2026-11-21-02-fix-usage-token-clamp.md) | 18.0 | 6/3/100%/1 | なし。store.rs には触れない（05 と排他） |
+| 03 | [surface-kind-predicates](archived/2026-11-21-03-refactor-surface-kind-predicates.md) | 8.0 | 4/1/100%/0.5 | なし |
+| 04 | [advisor-language-vocabulary](archived/2026-11-21-04-refactor-advisor-language-vocabulary.md) | 4.0 | 4/0.5/100%/0.5 | なし。session.rs は 13 より先 |
+| 05 | [core-row-ownership](archived/2026-11-21-05-refactor-core-row-ownership.md) | 10.0 | 5/1/100%/0.5 | 01 の後（store.rs 排他） |
+| 06 | [doctor-prose-sanitize](archived/2026-11-21-06-fix-doctor-prose-sanitize.md) | 16.0 | 4/2/100%/0.5 | 02 の後（transcript.rs 排他） |
+| 07 | [util-layer-placement](archived/2026-11-21-07-refactor-util-layer-placement.md) | 5.0 | 5/1/100%/1 | 04 の後（session.rs 排他）。09 と harness.rs 排他（07 先） |
+| 08 | [store-range-params](archived/2026-11-21-08-refactor-store-range-params.md) | 6.0 | 6/0.5/100%/0.5 | 05 の後（store.rs 排他） |
+| 09 | [harness-facts-assembly](archived/2026-11-21-09-refactor-harness-facts-assembly.md) | 2.4 | 6/1/80%/2 | 07 の後（harness.rs 排他） |
+| 10 | [guide-toml-upsert](archived/2026-11-21-10-refactor-guide-toml-upsert.md) | 3.0 | 3/1/100%/1 | なし（views/guide.rs 内で閉じる） |
+| 11 | [apply-plan-byte-cap](archived/2026-11-21-11-fix-apply-plan-byte-cap.md) | 6.0 | 3/1/100%/0.5 | なし。handoff.rs は 12 と排他（11 先） |
+| 12 | [optimize-apply-prologue](archived/2026-11-21-12-refactor-optimize-apply-prologue.md) | 2.0 | 5/1/80%/2 | 07（session.rs）・11（handoff.rs）の後 |
+| 13 | [session-responsibility-split](archived/2026-11-21-13-refactor-session-responsibility-split.md) | 1.3 | 5/1/80%/3 | 12 の後（session.rs 排他） |
+| 14 | [temp-name-stem](archived/2026-11-21-14-refactor-temp-name-stem.md) | 3.0 | 3/0.5/100%/0.5 | 12 の後（handoff.rs 排他） |
 
 純 RICE 降順からの逸脱はファイル排他（直列化）のみ。同一 RICE 内はリスク軽減効果を優先（C10 > C14、C7 > C13）。バッチ構成（同一ディレクトリ + ファイル排他）:
 
