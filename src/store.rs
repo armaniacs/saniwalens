@@ -11,6 +11,7 @@ use anyhow::{Context, Result};
 use rusqlite::Connection;
 use rusqlite::params_from_iter;
 
+pub use crate::core::optimize::AgentCost;
 use crate::core::period::{TimeRange, WindowPair};
 use crate::core::span::{SessionStart, Source, Span};
 use crate::core::subagent::SubagentRun;
@@ -377,15 +378,6 @@ pub struct SessionRow {
     pub out_tokens: i64,
     pub duration_sec: i64,
     pub friction: i64,
-}
-
-/// What one agent type cost: how many times it ran and the output tokens those
-/// runs wrote. `agent` is `None` for runs whose type could not be read.
-#[derive(Debug, PartialEq, serde::Serialize)]
-pub struct AgentCost {
-    pub agent: Option<String>,
-    pub runs: i64,
-    pub out_tokens: i64,
 }
 
 /// One skill event's cost, with its UTC start, for time bucketing.

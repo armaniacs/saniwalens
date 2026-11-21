@@ -91,8 +91,9 @@ pub struct FrictionCat {
 
 /// One agent type's share of the subagent bill: how often it ran and what its
 /// runs wrote. `agent` is the type's name, or `None` for runs whose type the
-/// transcript did not record.
-#[derive(Debug, Clone, serde::Serialize)]
+/// transcript did not record. The store's briefing query returns this type
+/// directly, so the two layers share one definition.
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub struct AgentCost {
     pub agent: Option<String>,
     pub runs: i64,
@@ -883,43 +884,6 @@ pub fn apply_prompt(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn the_two_agent_cost_types_carry_the_same_field_set() {
-        // store::AgentCost and this module's AgentCost are joined by a
-        // field-by-field conversion in cli/mod.rs: a field added to one
-        // type and not the other compiles cleanly, and the briefing
-        // conversion silently drops it. Serializing both and comparing the
-        // JSON key sets pins the shapes together without hand-writing the
-        // field list a second time. `agent` is `Some` so the comparison
-        // exercises a fully populated value.
-        let store_side = crate::store::AgentCost {
-            agent: Some("Explore".into()),
-            runs: 3,
-            out_tokens: 900,
-        };
-        let optimize_side = AgentCost {
-            agent: Some("Explore".into()),
-            runs: 3,
-            out_tokens: 900,
-        };
-        let keys = |value: serde_json::Value| -> Vec<String> {
-            let mut keys: Vec<String> = value
-                .as_object()
-                .expect("AgentCost serializes to an object")
-                .keys()
-                .cloned()
-                .collect();
-            keys.sort();
-            keys
-        };
-        assert_eq!(
-            keys(serde_json::to_value(&store_side).unwrap()),
-            keys(serde_json::to_value(&optimize_side).unwrap()),
-            "store::AgentCost and optimize::AgentCost drifted — \
-             the briefing conversion drops the difference silently"
-        );
-    }
 
     fn claude_copy() -> HarnessCopy {
         HarnessCopy {

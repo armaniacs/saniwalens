@@ -696,15 +696,7 @@ fn findings_input(store: &Store, window: TimeRange) -> Result<findings::Findings
         prompt_behaviors: store
             .prompt_behavior_counts_briefing(window, findings::BRIEFING_GROUPS_LIMIT)?,
         subagent_totals: store.subagent_totals(window)?,
-        agents: store
-            .subagent_by_agent_briefing(window, findings::BRIEFING_GROUPS_LIMIT)?
-            .into_iter()
-            .map(|row| optimize_mod::AgentCost {
-                agent: row.agent,
-                runs: row.runs,
-                out_tokens: row.out_tokens,
-            })
-            .collect(),
+        agents: store.subagent_by_agent_briefing(window, findings::BRIEFING_GROUPS_LIMIT)?,
         skill_out_tokens: vec![store.skill_out_tokens_sum(window)?],
         always_on_config_tokens: store.always_on_config_tokens()?,
     })
