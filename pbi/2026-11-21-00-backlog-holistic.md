@@ -97,3 +97,5 @@ adversarial-code-review（fork/main..1121a 差分、4 チャンク × 2 視点�
 | [27-contract-pins-cleanup](archived/2026-11-21-27-refactor-contract-pins-cleanup.md) | 低 | ALL 網羅 pin（discriminant 総当たり）、語彙三方対照 pin、残滓 assert 実名対応、構造 pin 次見出しベース化、AgentCost フィールド一致 pin。裁定 2 件（デッド行は表に残す、file_event doc は実態合わせ）を検討記録に保存。各 pin は mutation で赤を確認。3a7ab27 |
 
 closer ラウンド最終ゲート: cargo fmt --check / cargo clippy --all-targets --all-features -- -D warnings / cargo test（41 suite、1,150 passed）/ cargo build --release、全 green。残余: tests/fingerprint_restat.rs の毒済み復帰の非対称（into_inner 統一）は低優先のフォローアップ（PBI 27 検討記録に記録）。
+
+残余フォローアップ（closer 完了後に実施、c2a8daa）: fingerprint_restat の env 操作を set_env Drop guard に統一（panic 時も毒済み残留なし・親環境の本来値を復帰）し、sanitize_cell に bidi isolates（U+2066-2069）除去を追加（fixture/assert も対応）。フルゲート green（41 suite、1,150 passed）。フォローアップ残はなし。
