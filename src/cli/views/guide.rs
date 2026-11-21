@@ -721,18 +721,20 @@ pub(crate) fn terminal_available() -> bool {
         || (std::io::stdin().is_terminal() && std::io::stdout().is_terminal())
 }
 
-/// The guide's inline next-step session: the same resolve-then-open shape as
-/// the normal `optimize` arm (`cli/mod.rs`) — resolve the store path, open it,
-/// then carry the resolved advisor language on the session, so the inline run
-/// renders the same language without naming the flag.
+/// The guide's inline next-step session: frozen by construction — the report
+/// above already refreshed the store — so it resolves without the legacy move
+/// and opens read-only (no create, no chmod, no migrate; an absent store is
+/// an error, never a fresh empty one). The resolved advisor language rides
+/// the session, so the inline run renders the same language without naming
+/// the flag.
 fn guide_session(
     current: &Harness,
     language: AdvisorLanguage,
     config_db: Option<&Path>,
     env: &SessionEnv,
 ) -> anyhow::Result<Session> {
-    let path = Session::resolve_path(current, None, config_db, env)?;
-    let mut sess = Session::open_resolved(current, path)?;
+    let path = Session::resolve_frozen_path(current, None, config_db, env)?;
+    let mut sess = Session::open_frozen(current, path)?;
     sess.language = language;
     Ok(sess)
 }
@@ -1638,14 +1640,54 @@ mod tests {
     }
 
     #[test]
+    fn guide_session_opens_the_store_read_only() {
+        // The inline next step is frozen by construction — the report above
+        // already refreshed the store — so its session must not touch the
+        // store: bytes, mtime, and permissions survive exactly. A ReadWrite
+        // open would enforce owner-only, so a 0644 store catches the chmod.
+        use crate::store::OpenMode;
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir =
+            std::env::temp_dir().join(format!("saniwalens-guide-session-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("s.db");
+        let mut store = Store::open(&path, OpenMode::ReadWrite).unwrap();
+        store.set_meta("harness", Harness::Claude.label()).unwrap();
+        drop(store);
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+        let before_bytes = std::fs::read(&path).unwrap();
+        let before_mtime = std::fs::metadata(&path).unwrap().modified().unwrap();
+        let env = SessionEnv {
+            state_home: Some(&dir),
+            home: None,
+            config_home: None,
+        };
+        let sess = guide_session(&Harness::Claude, AdvisorLanguage::En, Some(&path), &env).unwrap();
+        assert_eq!(sess.db_path, path);
+        assert_eq!(sess.language, AdvisorLanguage::En);
+        assert_eq!(std::fs::read(&path).unwrap(), before_bytes);
+        assert_eq!(
+            std::fs::metadata(&path).unwrap().modified().unwrap(),
+            before_mtime
+        );
+        assert_eq!(
+            std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o644
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn guide_inline_next_step_carries_a_ja_setting_into_the_prompt() {
         // PBI 2026-11-10-08 BDD "ガイドでも ja が効く": with
         // `language = "ja"` resolved, the prompt the guide's inline next step
         // composes must carry the single language sentence. The session is
-        // built through the guide's own seam (`guide_session`), the same
-        // resolve-open-carry shape as the normal `optimize` arm.
+        // built through the guide's own seam (`guide_session`), frozen open.
         use crate::core::optimize::{self as optimize_mod, AdvisorLanguage};
         use crate::session::resolve_cli_with_language;
+        use crate::store::OpenMode;
 
         let dir =
             std::env::temp_dir().join(format!("saniwalens-guide-lang-{}", std::process::id()));
@@ -1656,6 +1698,13 @@ mod tests {
             home: None,
             config_home: None,
         };
+        // The inline next step opens frozen, so the store the report would
+        // have created must exist first — seed an empty one.
+        Store::open(
+            state.join("saniwalens").join("saniwalens.db"),
+            OpenMode::ReadWrite,
+        )
+        .unwrap();
         let resolved = resolve_cli_with_language(None, None, Some("ja"), None, &env).unwrap();
         assert_eq!(resolved.language, AdvisorLanguage::Ja);
         let sess = guide_session(&resolved.harness, resolved.language, None, &env).unwrap();
@@ -1682,6 +1731,7 @@ mod tests {
         // resolved, the guide's inline prompt carries no language sentence.
         use crate::core::optimize::{self as optimize_mod, AdvisorLanguage};
         use crate::session::resolve_cli_with_language;
+        use crate::store::OpenMode;
 
         let dir = std::env::temp_dir().join(format!(
             "saniwalens-guide-lang-unset-{}",
@@ -1694,6 +1744,13 @@ mod tests {
             home: None,
             config_home: None,
         };
+        // The inline next step opens frozen, so the store the report would
+        // have created must exist first — seed an empty one.
+        Store::open(
+            state.join("saniwalens").join("saniwalens.db"),
+            OpenMode::ReadWrite,
+        )
+        .unwrap();
         let resolved = resolve_cli_with_language(None, None, None, None, &env).unwrap();
         assert_eq!(resolved.language, AdvisorLanguage::En);
         let sess = guide_session(&resolved.harness, resolved.language, None, &env).unwrap();

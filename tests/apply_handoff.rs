@@ -89,8 +89,15 @@ fn normal_print_leaves_no_plan_file_behind() {
     // store prints the briefing and creates nothing under `plans/`.
     let home = sandbox("normal-print");
     let db = home.join("s.db");
-    // An empty store is enough: `--frozen` skips the refresh, `--print`
-    // skips every spawn, and the briefing renders its empty sections away.
+    // A seeded empty store is enough: `--frozen` is read-only by contract
+    // (it never creates a store), `--print` skips every spawn, and the
+    // briefing renders its empty sections away.
+    let seed = run_in(&home, &["analyze", "--db", &db.display().to_string()]);
+    assert!(
+        seed.status.success(),
+        "seed analyze failed: {}",
+        String::from_utf8_lossy(&seed.stderr)
+    );
     let out = run_in(
         &home,
         &[

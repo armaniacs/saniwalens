@@ -114,7 +114,8 @@ impl Session {
             // Frozen means no mutation at all: resolve without the legacy
             // move, open read-only (no create, no chmod, no migrate), guard,
             // and print the same freshness line as the analyzing path.
-            let sess = Self::open_frozen(harness, db, config_db, env)?;
+            let path = Self::resolve_frozen_path(harness, db, config_db, env)?;
+            let sess = Self::open_frozen(harness, path)?;
             eprint_freshness(&freshness_line(sess.store.meta("analyzed_at")?.as_deref()));
             return Ok(sess);
         }
@@ -123,21 +124,28 @@ impl Session {
         Ok(sess)
     }
 
-    /// Resolve and open without writing anything: no legacy-store move, no
-    /// directory creation, no owner-only chmod, no migration. Read-only open
-    /// fails on a missing store — frozen never creates one.
-    fn open_frozen(
+    /// Resolve without writing anything: no legacy-store move — frozen must
+    /// not touch the store before the open either. Pure over its inputs; the
+    /// default resolution with the move is [`Session::resolve_path`].
+    pub(crate) fn resolve_frozen_path(
         harness: &Harness,
         db: Option<PathBuf>,
         config_db: Option<&Path>,
         env: &SessionEnv,
-    ) -> Result<Self> {
-        let path = store_path(
+    ) -> Result<PathBuf> {
+        store_path(
             db.or_else(|| config_db.map(Path::to_path_buf)),
             harness,
             env.state_home,
             env.home.map(Path::new),
-        )?;
+        )
+    }
+
+    /// Open an already-resolved path without writing anything: read-only (no
+    /// create, no chmod, no migrate) and guarded, so an absent store is an
+    /// error — frozen never creates one. The frozen counterpart of
+    /// [`Session::open_resolved`].
+    pub(crate) fn open_frozen(harness: &Harness, path: PathBuf) -> Result<Self> {
         let store = Store::open(&path, OpenMode::ReadOnly)
             .with_context(|| format!("open store {} (run `analyze` first?)", path.display()))?;
         guard_harness(&store, harness, &path)?;
@@ -148,6 +156,36 @@ impl Session {
             language: AdvisorLanguage::default(),
             language_source: LanguageSource::Default,
         })
+    }
+
+    /// The optimize family's resolution (`optimize`, `--apply`, the guide's
+    /// inline next step): frozen skips the legacy-store move — nothing may be
+    /// touched before the open either — the default keeps it. Split from the
+    /// open so a caller parses its own flags in between, keeping the failure
+    /// order the pre-Session dispatch had.
+    pub(crate) fn optimize_path(
+        harness: &Harness,
+        db: Option<PathBuf>,
+        config_db: Option<&Path>,
+        frozen: bool,
+        env: &SessionEnv,
+    ) -> Result<PathBuf> {
+        if frozen {
+            Self::resolve_frozen_path(harness, db, config_db, env)
+        } else {
+            Self::resolve_path(harness, db, config_db, env)
+        }
+    }
+
+    /// The optimize family's open on an already-resolved path: frozen opens
+    /// read-only (no create, no chmod, no migrate; an absent store is an
+    /// error), the default opens read-write exactly as before.
+    pub(crate) fn open_optimize(harness: &Harness, path: PathBuf, frozen: bool) -> Result<Self> {
+        if frozen {
+            Self::open_frozen(harness, path)
+        } else {
+            Self::open_resolved(harness, path)
+        }
     }
 
     /// The read-only path for `sql`: resolve and migrate like everything
@@ -322,6 +360,15 @@ pub(crate) fn refreshed_just_now_line(stats: AnalyzeStats, harness: &Harness) ->
         harness.input_unit(),
         stats.skipped
     )
+}
+
+/// The freshness line for a store this run never refreshed: the same line the
+/// frozen read paths print, tolerating a store whose schema predates `meta`
+/// the way `sql` does — a display must not fail the command it decorates.
+pub(crate) fn eprint_frozen_freshness(store: &Store) {
+    if let Ok(analyzed_at) = store.meta("analyzed_at") {
+        eprint_freshness(&freshness_line(analyzed_at.as_deref()));
+    }
 }
 
 #[cfg(test)]
@@ -632,6 +679,159 @@ mod tests {
         let err = Session::open_readonly(&Harness::Claude, Some(dir.join("nope.db")), None, &env)
             .unwrap_err();
         assert!(format!("{err:#}").contains("run `analyze` first?"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // ---- the optimize family's frozen seam (PBI 2026-11-21-19) ----
+    //
+    // `--frozen` means no mutation on every path that takes it, so the
+    // optimize family's resolve+open seam carries the same tripwires the
+    // frozen read views got in PBI 2026-11-08-12: no create, no chmod, no
+    // migrate — and an absent store is an error, never a fresh empty one.
+
+    #[test]
+    fn optimize_frozen_leaves_the_store_untouched() {
+        let dir = example_dir("optimize-frozen-untouched");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = store_with_harness(&dir, "s.db", Some(Harness::Claude.label()));
+        let env = SessionEnv {
+            state_home: Some(&dir),
+            home: None,
+            config_home: None,
+        };
+        let before_bytes = std::fs::read(&path).unwrap();
+        let before_mtime = std::fs::metadata(&path).unwrap().modified().unwrap();
+        let resolved =
+            Session::optimize_path(&Harness::Claude, Some(path.clone()), None, true, &env).unwrap();
+        let sess = Session::open_optimize(&Harness::Claude, resolved, true).unwrap();
+        assert_eq!(sess.db_path, path);
+        assert_eq!(std::fs::read(&path).unwrap(), before_bytes);
+        assert_eq!(
+            std::fs::metadata(&path).unwrap().modified().unwrap(),
+            before_mtime
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn optimize_frozen_does_not_chmod_the_store() {
+        // A ReadWrite open enforces owner-only on the file; a frozen open
+        // must leave the mode exactly as it found it.
+        use std::os::unix::fs::PermissionsExt;
+        let dir = example_dir("optimize-frozen-mode");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = store_with_harness(&dir, "s.db", Some(Harness::Claude.label()));
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+        let sess = Session::open_optimize(&Harness::Claude, path.clone(), true).unwrap();
+        assert_eq!(sess.db_path, path);
+        assert_eq!(
+            std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o644
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn optimize_frozen_on_an_absent_store_creates_nothing() {
+        // `optimize --frozen` on a missing store must stop with the
+        // absent-store error and create no directory and no file — never a
+        // fresh empty store for the advisor to brief from.
+        let dir = example_dir("optimize-frozen-absent");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let env = SessionEnv {
+            state_home: Some(&dir),
+            home: None,
+            config_home: None,
+        };
+        let resolved = Session::optimize_path(&Harness::Claude, None, None, true, &env).unwrap();
+        assert_eq!(resolved, dir.join("saniwalens").join("saniwalens.db"));
+        let err = Session::open_optimize(&Harness::Claude, resolved, true).unwrap_err();
+        assert!(
+            format!("{err:#}").contains("run `analyze` first?"),
+            "{err:#}"
+        );
+        assert!(
+            !dir.join("saniwalens").exists(),
+            "the frozen open created the store directory"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn optimize_frozen_skips_the_legacy_move() {
+        // The frozen resolution must avoid the migrate at the resolve stage
+        // too: a legacy store stays put, and the open fails on the absent
+        // new-name store instead of conjuring one.
+        let dir = example_dir("optimize-frozen-legacy");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("cclens")).unwrap();
+        std::fs::write(dir.join("cclens/cclens.db"), b"rows").unwrap();
+        let env = SessionEnv {
+            state_home: Some(&dir),
+            home: None,
+            config_home: None,
+        };
+        let resolved = Session::optimize_path(&Harness::Claude, None, None, true, &env).unwrap();
+        assert_eq!(resolved, dir.join("saniwalens").join("saniwalens.db"));
+        assert!(Session::open_optimize(&Harness::Claude, resolved, true).is_err());
+        assert_eq!(
+            std::fs::read(dir.join("cclens/cclens.db")).unwrap(),
+            b"rows"
+        );
+        assert!(!dir.join("saniwalens").exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn optimize_frozen_succeeds_on_a_readonly_store() {
+        // No create, no chmod, no migrate, so the frozen open works where
+        // nothing may be written — a read-only filesystem equivalent.
+        use std::os::unix::fs::PermissionsExt;
+        let dir = example_dir("optimize-frozen-readonly");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = store_with_harness(&dir, "s.db", Some(Harness::Claude.label()));
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o444)).unwrap();
+        let sess = Session::open_optimize(&Harness::Claude, path.clone(), true).unwrap();
+        assert_eq!(sess.db_path, path);
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn optimize_frozen_wrong_harness_is_refused() {
+        let dir = example_dir("optimize-frozen-wrong");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = store_with_harness(&dir, "s.db", Some(Harness::Opencode.label()));
+        let err = Session::open_optimize(&Harness::Claude, path, true).unwrap_err();
+        assert!(format!("{err:#}").contains("--harness opencode"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn frozen_freshness_display_tolerates_a_pre_meta_store() {
+        // The optimize family's frozen freshness line chose `sql`'s
+        // tolerance: a store whose schema predates `meta` skips the display
+        // instead of failing the command after a successful open.
+        let dir = example_dir("optimize-frozen-premeta");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("old.db");
+        let conn = rusqlite::Connection::open(&path).unwrap();
+        conn.execute_batch("CREATE TABLE t (x)").unwrap();
+        drop(conn);
+        let store = Store::open(&path, OpenMode::ReadOnly).unwrap();
+        assert!(
+            store.meta("analyzed_at").is_err(),
+            "the fixture holds no meta table"
+        );
+        eprint_frozen_freshness(&store);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

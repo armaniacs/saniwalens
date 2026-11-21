@@ -15,7 +15,7 @@ use crate::core::scope::ScopeFilter;
 use crate::core::subagent::SplitCoverage;
 use crate::core::surface::{StartupSavings, Wedge};
 use crate::session::{
-    AnalyzeStats, Session, SessionEnv, Style, env_roots, eprint_freshness,
+    AnalyzeStats, Session, SessionEnv, Style, env_roots, eprint_freshness, eprint_frozen_freshness,
     eprint_language_decision, freshness_line, guard_harness, home_dir, process_locale_language,
     refreshed_just_now_line, resolve_cli_with_language,
 };
@@ -527,12 +527,11 @@ pub fn run() -> Result<()> {
             // fails fast, and a non-apply run passes straight through, so the
             // order below keeps its exact behavior without `--apply`.
             handoff::check_apply_args(apply, print, verbose, &harness)?;
-            // Resolve (including the legacy-store move) before parsing --scope,
-            // then open after — the pre-Session dispatch's exact order, kept so
-            // double failures report the same error the old binary did.
-            let path = Session::resolve_path(&harness, db, config_db.as_deref(), &env)?;
+            // Resolve (incl. the legacy move; frozen skips it) before --scope
+            // parses — the old dispatch's failure order. Frozen opens read-only.
+            let path = Session::optimize_path(&harness, db, config_db.as_deref(), frozen, &env)?;
             let filter = parse_scope(scope.as_deref())?;
-            let mut sess = Session::open_resolved(&harness, path)?;
+            let mut sess = Session::open_optimize(&harness, path, frozen)?;
             sess.language = language;
             sess.language_source = resolved.language_source;
             let timeout = headless::resolve_timeout(timeout.as_deref())?;
@@ -576,6 +575,8 @@ fn prepare_optimize(
         let stats = run_analyze(&sess.harness, projects, &sess.db_path)?;
         let line = refreshed_just_now_line(stats, &sess.harness);
         eprintln!("{}", Style::stderr().dim(&line));
+    } else {
+        eprint_frozen_freshness(&sess.store);
     }
     // `optimize` takes the whole history — no period flags reach it.
     let findings = collect_findings(&sess.store, TimeRange::ALL)?;

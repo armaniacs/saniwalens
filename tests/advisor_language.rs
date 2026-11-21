@@ -53,9 +53,11 @@ fn write_config(home: &Path, content: &str) {
     std::fs::write(dir.join("config.toml"), content).unwrap();
 }
 
-/// `optimize --print --frozen` on an empty synthetic store: `--frozen` skips
+/// `optimize --print --frozen` on a seeded empty store: `--frozen` skips
 /// the refresh, `--print` skips every spawn, and the briefing renders its
 /// empty sections away — so the prompt shape is asserted, not the analysis.
+/// `--frozen` is read-only by contract and never creates a store, so the
+/// store is seeded the ordinary way first.
 fn print_prompt(home: &Path, extra: &[&str]) -> std::process::Output {
     print_prompt_with_locale(home, extra, &[])
 }
@@ -67,7 +69,38 @@ fn print_prompt_with_locale(
     extra: &[&str],
     locale: &[(&str, &str)],
 ) -> std::process::Output {
+    print_prompt_seed(home, extra, locale, true)
+}
+
+/// Same as [`print_prompt_with_locale`] but without seeding the store: for
+/// tests that pin invariants about what happens before any store work.
+fn print_prompt_unseeded(home: &Path, extra: &[&str]) -> std::process::Output {
+    print_prompt_seed(home, extra, &[], false)
+}
+
+fn print_prompt_seed(
+    home: &Path,
+    extra: &[&str],
+    locale: &[(&str, &str)],
+    seed: bool,
+) -> std::process::Output {
     let db = home.join("s.db");
+    if seed {
+        let seeded = run_in_with_locale(
+            home,
+            &[
+                "analyze",
+                "--db",
+                db.to_str().expect("the sandbox path is UTF-8"),
+            ],
+            &[],
+        );
+        assert!(
+            seeded.status.success(),
+            "seed analyze failed: {}",
+            String::from_utf8_lossy(&seeded.stderr)
+        );
+    }
     let mut args = vec![
         "optimize",
         "--print",
@@ -147,7 +180,7 @@ fn unknown_language_fails_with_the_valid_list() {
     // and the valid list — before any store work.
     let home = sandbox("unknown");
     write_config(&home, "language = \"jp\"\n");
-    let out = print_prompt(&home, &[]);
+    let out = print_prompt_unseeded(&home, &[]);
     assert!(!out.status.success(), "an unknown language was accepted");
     let stderr = String::from_utf8(out.stderr).unwrap();
     assert!(stderr.contains("jp"), "{stderr}");
