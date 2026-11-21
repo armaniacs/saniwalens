@@ -32,6 +32,12 @@
 - 設計・実装整理（出力不変）。共有 row 型を core へ移管、ハーネス静的
   事実を `HarnessFacts` に集約、`session` の表示/解決を分離、`optimize`
   と `--apply` のプロローグを統一、範囲クエリの組立を集約。
+- 引き続きの DRY/KISS 整理（出力不変）。`AgentCost` を core の単一定義
+  に統一（store の briefing クエリが core の型を直接返す）、private
+  ディレクトリ系プリミティブを store の 1 箇所に統一（警告の
+  transport は各層が担う）、5,002 行だった `store.rs` を
+  `store/{schema,migrate,briefing,permission,tests}` へ分割（`pub use`
+  で `crate::store::` の経路は全て維持）。
 
 ### Fixed
 
