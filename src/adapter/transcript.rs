@@ -689,8 +689,15 @@ pub fn extract_work_events(jsonl: &str) -> Vec<WorkEvent> {
 /// at the boundary: whitespace-collapse and the 200-scalar cap — the same
 /// normalization the opencode adapter applies to tool targets. These values
 /// reach the store unchanged and outlive the transcript, and the id's
-/// basename is what a doctor prose line prints, so the cap is applied to each
-/// form separately rather than deriving the basename from a truncated path.
+/// basename is what a doctor prose line prints, so the cap is applied to
+/// each form separately here: the basename comes off the raw path, and a
+/// path long enough to hit the cap still yields its full (re-capped) name.
+/// The opencode and kilocode adapters order this the other way — they cap
+/// the target first and take the basename of the capped text. The
+/// divergence is accepted: stores are per-harness and never cross-joined,
+/// the two forms are identical until the cap binds, and a difference in a
+/// capped id is display-only — so the doc must not claim a single shared
+/// ordering that only this adapter follows.
 fn file_event(epoch_ms: i64, kind: &'static str, raw_path: &str) -> WorkEvent {
     WorkEvent {
         epoch_ms,

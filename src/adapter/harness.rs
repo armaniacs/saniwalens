@@ -849,6 +849,46 @@ mod tests {
     }
 
     #[test]
+    fn all_is_the_exhaustive_variant_list() {
+        // ALL is a plain array — the one harness list no compiler checks —
+        // and it is exactly where a 4th harness silently disappears from
+        // parse(), label_list(), and every `for harness in ALL` test below.
+        // `variant_name` is a wildcard-free match, so the compiler drags a
+        // new variant into this test; the assert then holds ALL to the same
+        // set by discriminant. Adding a variant means extending BOTH the
+        // match and the `every_variant` array — the arm alone is not enough.
+        fn variant_name(harness: &Harness) -> &'static str {
+            match harness {
+                Harness::Claude => "Claude",
+                Harness::Opencode => "Opencode",
+                Harness::Kilocode => "Kilocode",
+            }
+        }
+        let every_variant = [
+            (
+                variant_name(&Harness::Claude),
+                std::mem::discriminant(&Harness::Claude),
+            ),
+            (
+                variant_name(&Harness::Opencode),
+                std::mem::discriminant(&Harness::Opencode),
+            ),
+            (
+                variant_name(&Harness::Kilocode),
+                std::mem::discriminant(&Harness::Kilocode),
+            ),
+        ];
+        let listed: Vec<_> = Harness::ALL.iter().map(std::mem::discriminant).collect();
+        for (name, discriminant) in &every_variant {
+            let count = listed.iter().filter(|entry| *entry == discriminant).count();
+            assert_eq!(
+                count, 1,
+                "{name} must be listed in Harness::ALL exactly once (found {count})"
+            );
+        }
+    }
+
+    #[test]
     fn display_names_name_the_harness() {
         assert_eq!(Harness::Claude.display_name(), "Claude Code");
         assert_eq!(Harness::Opencode.display_name(), "opencode");

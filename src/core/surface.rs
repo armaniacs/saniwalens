@@ -647,6 +647,97 @@ mod tests {
     }
 
     #[test]
+    fn the_vocabulary_agrees_with_what_the_adapters_produce() {
+        // The three vocabularies this crate keeps in step — KIND_TRAITS, the
+        // adapter kind literals, and the usage surface_kind labels — cannot
+        // see each other, so this pin freezes each side and cross-checks:
+        // a kind produced but unregistered (or registered but absent) fails
+        // here instead of falling back to KindTraits::NONE and silently
+        // leaving every wedge.
+        //
+        // `mcp_tool` and `permission` stay in the table as recognized-but-
+        // not-produced vocabulary: zero producers today, so no wedge ever
+        // sees one and the rows cost nothing, while a future producer gets
+        // the right traits immediately. The `unproduced` assert names them,
+        // so the day an adapter produces one, this pin forces the conscious
+        // "no longer a dead row" update.
+        let table: std::collections::BTreeSet<&str> =
+            KIND_TRAITS.iter().map(|(kind, _)| *kind).collect();
+        let produced: std::collections::BTreeSet<&str> = [
+            // The kind literals at the construction sites: config.rs's site
+            // loaders (skill, hook, rule, command, agent, claude_md,
+            // mcp_server) plus opencode.rs's command/agent pair (kilocode
+            // constructs no Sites). A new literal must join this list AND
+            // the table.
+            "skill",
+            "hook",
+            "rule",
+            "command",
+            "agent",
+            "claude_md",
+            "mcp_server",
+        ]
+        .into_iter()
+        .collect();
+        assert!(
+            produced.is_subset(&table),
+            "an adapter-produced kind outside KIND_TRAITS would answer NONE and leave every wedge: {:?}",
+            produced.difference(&table).collect::<Vec<_>>()
+        );
+
+        // The usage side through the real emitters, not a hand copy:
+        // agent spawns and MCP tool use from `extract_usage_events`, hook
+        // firings from `extract_hook_usages`.
+        let records = [
+            crate::core::span::Record {
+                timestamp_ms: 0,
+                kind: crate::core::span::RecordKind::AgentSpawn {
+                    agent: "Explore".into(),
+                    tool_use_id: None,
+                    prompt_id: None,
+                },
+            },
+            crate::core::span::Record {
+                timestamp_ms: 1,
+                kind: crate::core::span::RecordKind::ToolUse {
+                    tool: "mcp__playwright__browser_click".into(),
+                },
+            },
+        ];
+        let hook_jsonl = r#"{"type":"attachment","timestamp":"2026-10-14T20:06:16.756Z","attachment":{"type":"hook_success","hookName":"PreToolUse:Bash","hookEvent":"PreToolUse","toolUseID":"toolu_9"}}"#;
+        let mut usage_kinds: std::collections::BTreeSet<String> =
+            crate::core::usage::extract_usage_events(&records)
+                .into_iter()
+                .map(|event| event.surface_kind)
+                .collect();
+        usage_kinds.extend(
+            crate::adapter::transcript::extract_hook_usages(hook_jsonl)
+                .into_iter()
+                .map(|event| event.surface_kind),
+        );
+        let expected_usage: std::collections::BTreeSet<String> = ["agent", "hook", "mcp_server"]
+            .iter()
+            .map(|kind| kind.to_string())
+            .collect();
+        assert_eq!(
+            usage_kinds, expected_usage,
+            "the usage surface_kind vocabulary drifted"
+        );
+        assert!(
+            usage_kinds.iter().all(|kind| table.contains(kind.as_str())),
+            "a usage surface_kind outside KIND_TRAITS never joins a catalog row: {usage_kinds:?}"
+        );
+
+        // The dead rows, named: table minus produced must be exactly these.
+        let unproduced: Vec<&str> = table.difference(&produced).copied().collect();
+        assert_eq!(
+            unproduced,
+            vec!["mcp_tool", "permission"],
+            "the recognized-but-unproduced rows changed — a producer appeared or a row is gone"
+        );
+    }
+
+    #[test]
     fn an_unused_measurable_surface_is_a_delete_wedge() {
         let wedge = classify_wedge(true, LoadMode::StartupDescription, Some(500), 0, 1000);
         assert_eq!(wedge, Some(Wedge::Unused));

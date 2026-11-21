@@ -28,15 +28,37 @@ fn hostile_path() -> String {
 }
 
 /// The `WHAT TO FIX FIRST` lines out of doctor's text report: the section runs
-/// from its heading to the blank line before the next one.
+/// from its heading to the next section heading — today `COST`, printed at
+/// column 0 while every in-section line (items, sub-lines, the dropped-items
+/// note) is indented. Blank lines inside the section are layout, not a
+/// terminator: the old helper cut at the first empty line, so a blank line
+/// gaining between items silently dropped everything after it from the
+/// extraction while the tests stayed green.
 fn doctor_routed_lines(stdout: &[u8]) -> Vec<String> {
     let text = String::from_utf8_lossy(stdout);
     text.lines()
         .skip_while(|line| !line.contains("WHAT TO FIX FIRST"))
         .skip(1) // the heading itself
-        .take_while(|line| !line.trim().is_empty())
+        .take_while(|line| line.trim().is_empty() || line.starts_with(' '))
         .map(|line| line.trim().to_string())
         .collect()
+}
+
+/// The section's structural floor: non-empty, and every numbered item doctor
+/// printed for the fixture is inside the extraction. A terminator or layout
+/// change that quietly shortens the section fails here, not in coverage.
+fn assert_section_reaches_both_items(lines: &[String]) {
+    let non_empty: Vec<&String> = lines.iter().filter(|line| !line.is_empty()).collect();
+    assert!(
+        !non_empty.is_empty(),
+        "the WHAT TO FIX FIRST extraction is empty: {lines:?}"
+    );
+    for number in ["1.", "2."] {
+        assert!(
+            non_empty.iter().any(|line| line.starts_with(number)),
+            "item {number} fell out of the WHAT TO FIX FIRST extraction: {non_empty:?}"
+        );
+    }
 }
 
 /// The `stuck re-editing` prose line — the one interpolating the thrash
@@ -116,7 +138,9 @@ fn hostile_store(dir: &Path) -> PathBuf {
         let id = path.rsplit_once('/').unwrap().1.to_string();
         // Four edits inside the thrash window make the hostile path a stuck
         // episode; two timeouts give the project friction, so doctor prints
-        // its WHAT TO FIX FIRST section at all.
+        // its WHAT TO FIX FIRST section at all. The Bash mix (3 of 5 `cd`)
+        // adds the cd-convention item as a second one, so the section's
+        // structural pin can hold both items against a silent shrink.
         let edits: Vec<(i64, &str, &str, Option<&str>)> = (0..4)
             .map(|i| {
                 (
@@ -126,6 +150,13 @@ fn hostile_store(dir: &Path) -> PathBuf {
                     Some(path.as_str()),
                 )
             })
+            .chain([
+                (start_ms + 400_000, "bash_cmd", "cd", None),
+                (start_ms + 410_000, "bash_cmd", "cd", None),
+                (start_ms + 420_000, "bash_cmd", "cd", None),
+                (start_ms + 430_000, "bash_cmd", "cargo", None),
+                (start_ms + 440_000, "bash_cmd", "git", None),
+            ])
             .collect();
         let meta = SessionMeta {
             id: "hostile".to_string(),
@@ -219,6 +250,7 @@ fn doctor_never_prints_a_hostile_path_already_inside_the_store() {
     );
     // The trigger reproduced: the stuck line names the hostile file.
     let stuck = stuck_line(&out.stdout).expect("doctor prints the stuck line");
+    assert_section_reaches_both_items(&doctor_routed_lines(&out.stdout));
     // The readable data survives sanitization; the bytes a terminal would
     // act on do not.
     assert!(

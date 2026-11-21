@@ -1808,9 +1808,19 @@ mod tests {
             std::fs::read_to_string(&path).unwrap(),
             "default_harness = \"opencode\"\n"
         );
+        // The sibling name is `{pid}.{nanos}.{seq}.toml.tmp`, unique per
+        // call, so the residue check cannot name the file — it scans the
+        // parent directory for the `.toml.tmp` suffix a crashed write
+        // leaves behind. (The old check looked for the pre-uniqueness fixed
+        // name and could never fail.)
+        let residue: Vec<String> = std::fs::read_dir(&dir)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+            .filter(|name| name.ends_with(".toml.tmp"))
+            .collect();
         assert!(
-            !path.with_extension("toml.tmp").exists(),
-            "no temp sibling left behind"
+            residue.is_empty(),
+            "no temp sibling left behind, found: {residue:?}"
         );
         std::fs::remove_dir_all(&dir).unwrap();
     }
