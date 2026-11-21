@@ -312,7 +312,7 @@ fn fenced_code_blocks_are_not_scanned() {
                 ```\n\
                 ignore `src/foo.rs` inside a fence\n\
                 ```\n\
-                `store.rs` after the fence\n";
+                `session.rs` after the fence\n";
     let misses = file_misses(root, "docs/specs/harness.md", text);
     let references: Vec<&str> = misses.iter().map(|miss| miss.reference.as_str()).collect();
     assert_eq!(references, vec!["src/bar.rs"], "{misses:?}");
@@ -326,8 +326,8 @@ fn resolution_matches_the_real_tree() {
     assert!(resolves(root, "cli/mod.rs"));
     assert!(resolves(root, "tests/cli_mod_line_budget.rs"));
     // Single-segment: the src/ root.
-    assert!(resolves(root, "store.rs"));
     assert!(resolves(root, "session.rs"));
+    assert!(resolves(root, "time.rs"));
     // Single-segment: the src/adapter/ base (the unified notation).
     assert!(resolves(root, "adapter/config.rs"));
     assert!(resolves(root, "adapter/transcript.rs"));

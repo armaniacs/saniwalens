@@ -240,7 +240,7 @@ help generation is out of scope.
   `adapter::transcript::CLAUDE_ANALYZER_META_KEY` / `CLAUDE_ANALYZER_VERSION`,
   `OPENCODE_ANALYZER_*`, `KILOCODE_ANALYZER_*`. The store's invalidation check
   takes the `(key, version)` it is given, so no harness's key lives in
-  `store.rs` and a new harness adds its own without touching the store.
+  `store/mod.rs` and a new harness adds its own without touching the store.
 - The surface catalog rides the same seam: `catalog_surfaces(harness, roots)`
   (`adapter::harness`) is the single traversal ― it resolves that harness's
   config root, builds each `Scope`, owns the symlink-dedup `seen` set, and

@@ -23,7 +23,7 @@ const RULE: &str = ".claude/rules/pure-join-placement.md";
 /// Where the 1st pattern sits now.
 const CORE_TREND: &str = "src/core/trend.rs";
 /// The file the placement rule keeps free of row shaping.
-const STORE: &str = "src/store.rs";
+const STORE: &str = "src/store/mod.rs";
 /// The view that used to import its analysis types from the store.
 const CLI_TREND: &str = "src/cli/views/trend.rs";
 

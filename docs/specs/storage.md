@@ -110,7 +110,7 @@ CREATE TABLE meta (
 -- A clean read view over tool_error events for ad-hoc SQL (the `sql` command).
 -- The friction signal is overloaded onto generic event columns; the view names
 -- it and joins the project so a query need not know the encoding. The view
--- statement is generated from `EVENT_ENCODING` (`store.rs`) ― the table below
+-- statement is generated from `EVENT_ENCODING` (`store/mod.rs`) ― the table below
 -- is the definition, the view is a projection of it.
 CREATE VIEW tool_errors AS
 SELECT e.session_id, s.project,
@@ -124,7 +124,7 @@ WHERE e.kind = 'tool_error';
 
 A declared index is an option handed to SQLite's planner, not behavior: it never
 changes what a query returns, only how rows are reached. Indexes are declared in
-`INDEX_SCHEMA` (`store.rs`; the DDL above mirrors it) and reconciled into every
+`INDEX_SCHEMA` (`store/mod.rs`; the DDL above mirrors it) and reconciled into every
 existing store on the next ReadWrite open, so adding one is non-migrating:
 `SCHEMA_VERSION` does not move. ReadOnly opens (`--frozen`, `sql`) cannot create
 it, so a store not opened read-write since the declaration keeps scanning.
@@ -156,7 +156,7 @@ The generic columns carry kind-specific meanings: `tool_error`'s friction
 category rides in `surface_id`, its excerpt in `source`, the originating tool in
 `model`; `file_edit` keeps the basename in `surface_id` and the full path in
 `target`; a prompt's behavioral class rides in `source`. That mapping is defined
-**once**, in `EVENT_ENCODING` (`store.rs`), and everything derives from it: the
+**once**, in `EVENT_ENCODING` (`store/mod.rs`), and everything derives from it: the
 `tool_errors` view is generated from the table, readers take column names from
 it (`encoding_column`), and the writer's `INSERT` columns for `tool_error` and
 `prompt` are spelled from it. The work-event writer is the one place that fills
@@ -280,7 +280,7 @@ The store outlives its inputs. Claude Code prunes transcripts on its own
 schedule, and once a transcript is gone the rows extracted from it are the only
 record of that session. An upgrade may therefore never resolve schema drift by
 asking for the file to be deleted; `Store::open` migrates in place (`migrate` in
-`store.rs`).
+`store/mod.rs`).
 
 The declared schema is the single source of truth for the target shape: it is
 applied to a scratch in-memory database, read back through
@@ -288,7 +288,7 @@ applied to a scratch in-memory database, read back through
 column to the declaration is the whole of a routine migration; there is no
 parallel list of ALTER statements to keep in step. Every table the declaration
 names must be classified in the migration's convergence lists (`MIGRATED` /
-`REBUILT` in `store.rs`); a declared table missing from both fails the migration
+`REBUILT` in `store/mod.rs`); a declared table missing from both fails the migration
 naming it, because a silently unclassified table would never be reconciled and
 its next added column would break every existing store at `INSERT` time.
 

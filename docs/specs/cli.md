@@ -318,7 +318,7 @@ error, since the comparison window is undefined without a current start.
   `"unused-in-window"`.
 - **Unstamped sessions.** Sessions the writer could not stamp (no observable
   start, empty `started_at`) are excluded from windowed `session_stats` /
-  `subagent_totals` (`store.rs`'s `<> ''` guard) rather than guessed into them;
+  `subagent_totals` (`store/mod.rs`'s `<> ''` guard) rather than guessed into them;
   without the flags they still count.
 - **Index.** Windowed readers that scan `events` go through `started_epoch`.
   The store declares the index that keeps this fast (`storage.md`) and creates

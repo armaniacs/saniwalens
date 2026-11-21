@@ -148,16 +148,16 @@ over rows already fetched from the store is core's, wherever it is called from
   store keeps the query and the row hand-off, never the shaping. The one
   integration test pinning the query-to-join window split
   (`two_window_aggregation_splits_events_between_the_windows`) stays in
-  `store.rs` with the query it tests.
+  `store/mod.rs` with the query it tests.
 - **The first instance** is the trend view's two-window joins (`skill_deltas`,
   `TwoWindow`, `SkillDelta`, `TrendWindowAggregates`, `kind_pairs`), which live
   in `src/core/trend.rs`. The store keeps the windowed queries that hand them
-  rows. The next SQLite-free function that appears in `store.rs` arms the same
+  rows. The next SQLite-free function that appears in `store/mod.rs` arms the same
   move.
 - **The trigger is grep-able, not a parser.** The rule enumerates the symbols,
   and `tests/pure_join_placement.rs` fails when the enumeration and core drift
   apart: it asserts the definitions sit in `src/core/trend.rs` and not in
-  `store.rs`. A join that leaves core or re-enters the store must carry four
+  `store/mod.rs`. A join that leaves core or re-enters the store must carry four
   updates in the same PR: the core row above, the rule's enumeration, the
   ledger's note, and the tripwire's move side. Emptying the tripwire's array or
   leaving a tombstone comment does not count, since an empty array passes

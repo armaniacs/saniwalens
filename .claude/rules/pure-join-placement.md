@@ -1,6 +1,6 @@
 ---
 paths:
-  - "src/store.rs"
+  - "src/store/mod.rs"
   - "src/core/**/*.rs"
   - "docs/specs/architecture.md"
   - "pbi/**/*.md"
@@ -13,7 +13,7 @@ pairing, an ordering, or a delta over in-memory values, with no SQLite in it ―
 is analysis logic, not storage. It belongs in **core** (`src/core/`), wherever
 it is called from today and however few its callers are. This clause was
 missing when the 1st pattern formed: the trend view's two-window joins landed
-in `src/store.rs`, their tests were absorbed there, and the trend view ended
+in `src/store/mod.rs`, their tests were absorbed there, and the trend view ended
 up importing analysis types from the store's namespace ― because nothing in
 `docs/specs/architecture.md` or the spec-sync map decided the attribution.
 The house style is the opposite: `core/findings.rs` takes a store-free
@@ -33,7 +33,7 @@ The house style is the opposite: `core/findings.rs` takes a store-free
   boundary event lands in is storage behavior, not join logic.
 - **Two triggers arm a move**: trigger 1 is a trend metric/view landing; it
   fired at PBI 46 (`1ecda2a` / `3b4349f`) and is spent. Trigger 2 is the next
-  SQLite-free function that appears in `src/store.rs`; the PBI that lands it
+  SQLite-free function that appears in `src/store/mod.rs`; the PBI that lands it
   also moves it (and anything else that slipped in) to core in the same PR.
   PBI 61 (2026-11-02) landed after trigger 1 was missed: it is a follow-up
   remediation, not a co-landing, and no accumulation remains. Landing a join
@@ -61,13 +61,13 @@ The trigger must be findable by grep, so the contract enumerates its symbols:
   view until the move enumerated it.
 - `grep -n "skill_deltas\|TrendWindowAggregates" src/core/trend.rs` finds the
   1st pattern, and this rule's `paths:` frontmatter loads the file when
-  `store.rs` or core is edited, so the write side sees the demand too.
+  `store/mod.rs` or core is edited, so the write side sees the demand too.
 - `tests/pure_join_placement.rs` is the light tripwire: it fails when this
   rule stops naming the symbols, or when the symbols' definitions leave core
-  or re-enter `src/store.rs` without the contract updates.
+  or re-enter `src/store/mod.rs` without the contract updates.
 
 Judged over the alternative: a tripwire that classifies a function as
-"SQLite-free" by parsing `store.rs` needs a Rust AST to be sound, and a
+"SQLite-free" by parsing `store/mod.rs` needs a Rust AST to be sound, and a
 heuristic (a body that never mentions `sql`) false-fires on query helpers. The
 enumeration plus the tripwire covers the review side; the `paths:` frontmatter
 covers the write side.
