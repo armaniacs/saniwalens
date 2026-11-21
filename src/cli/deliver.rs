@@ -135,6 +135,26 @@ pub trait AdvisorLaunch {
         render: Option<RunLineRenderer>,
         timeout: Option<std::time::Duration>,
     ) -> Result<(std::process::ExitStatus, PathBuf)>;
+
+    /// Spawn headless with `--verbose`: the same logged pipe — run log,
+    /// heartbeat, and the kill/reap deadline — with the raw stream relayed
+    /// verbatim to the user's stdout instead of rendered. No renderer rides
+    /// this route: the raw bytes are the display.
+    fn headless_verbose(
+        &mut self,
+        binary: &str,
+        leading: &[&str],
+        prompt: &str,
+        timeout: Option<std::time::Duration>,
+    ) -> Result<(std::process::ExitStatus, PathBuf)> {
+        // A double that never serves the verbose headless route keeps only
+        // the required methods; reaching this default is a route/double
+        // mismatch a test must fix, never a behavior to fall back to (the
+        // old fallback — the direct spawn — is the unbounded bug this route
+        // exists to close).
+        let _ = (binary, leading, prompt, timeout);
+        unimplemented!("this advisor double does not implement the verbose headless route")
+    }
 }
 
 /// The real process side: an inherited-stdio spawn, or `run_headless`'s
@@ -167,6 +187,23 @@ impl AdvisorLaunch for ProcessAdvisor {
             leading,
             prompt,
             render,
+            headless::Beat::default(),
+            timeout,
+            headless::keep_run_log(),
+        )
+    }
+
+    fn headless_verbose(
+        &mut self,
+        binary: &str,
+        leading: &[&str],
+        prompt: &str,
+        timeout: Option<std::time::Duration>,
+    ) -> Result<(std::process::ExitStatus, PathBuf)> {
+        headless::run_headless_streaming(
+            binary,
+            leading,
+            prompt,
             headless::Beat::default(),
             timeout,
             headless::keep_run_log(),
@@ -250,25 +287,46 @@ pub fn deliver(plan: DeliveryPlan<'_>, advisor: &mut impl AdvisorLaunch) -> Resu
         "launch `{binary} {}` — is {harness_name} installed and on PATH?",
         leading.join(" ").trim_end()
     );
-    // Headless harnesses run piped unless --verbose: the raw stream is logged
-    // to a private file; text streams on stdout, verbose keeps the raw stream.
-    // A success removes the run log (`SANIWALENS_KEEP_RUN_LOG=1` keeps it) —
+    // The direct route never applies a deadline — the advisor owns the
+    // terminal for a live session, and killing it on a timer would cut an
+    // active conversation — so an explicit non-zero `--timeout` would be
+    // silently discarded there. The default (absent flag) stays silent:
+    // nothing the user asked for is being dropped. An explicit zero is
+    // already covered by `resolve_timeout`'s own warning, and an explicit
+    // value equal to the default is indistinguishable here and stays silent.
+    if mode == DeliveryMode::Interactive
+        && let Some(warning) = direct_timeout_warning(timeout)
+    {
+        eprintln!("{}", Style::stderr().warn(&warning));
+    }
+    // Headless harnesses run piped with or without --verbose: the raw stream
+    // is logged to a private file either way, and `--verbose` adds the raw
+    // bytes relayed verbatim to stdout instead of the rendered lines. A
+    // success removes the run log (`SANIWALENS_KEEP_RUN_LOG=1` keeps it) —
     // only a failure leaves it behind for the bail below to name.
-    let (result, run_log) = if mode == DeliveryMode::Headless && !verbose {
-        match advisor.headless(binary, leading, &prompt, render, timeout) {
-            Ok((status, log)) => (Ok(status), Some(log)),
-            Err(err) => (Err(err), None),
+    let (result, run_log) = match (mode, verbose) {
+        (DeliveryMode::Headless, false) => {
+            match advisor.headless(binary, leading, &prompt, render, timeout) {
+                Ok((status, log)) => (Ok(status), Some(log)),
+                Err(err) => (Err(err), None),
+            }
         }
-    } else {
-        (advisor.direct(binary, leading, &prompt), None)
+        (DeliveryMode::Headless, true) => {
+            match advisor.headless_verbose(binary, leading, &prompt, timeout) {
+                Ok((status, log)) => (Ok(status), Some(log)),
+                Err(err) => (Err(err), None),
+            }
+        }
+        _ => (advisor.direct(binary, leading, &prompt), None),
     };
 
     // Headless errors already name the raw log and, for a spawn failure, the
-    // launch hint; the interactive path keeps the launch hint as its context.
-    // The briefing guard drops here, after the run: every exit above,
-    // including an early return or a panic unwind, removes the file.
+    // launch hint — quiet and verbose alike; the interactive path keeps the
+    // launch hint as its context. The briefing guard drops here, after the
+    // run: every exit above, including an early return or a panic unwind,
+    // removes the file.
     let status = match (mode, verbose) {
-        (DeliveryMode::Headless, false) => result?,
+        (DeliveryMode::Headless, _) => result?,
         _ => result.with_context(move || launch_note)?,
     };
     if !status.success() {
@@ -281,6 +339,21 @@ pub fn deliver(plan: DeliveryPlan<'_>, advisor: &mut impl AdvisorLaunch) -> Resu
         }
     }
     Ok(())
+}
+
+/// The stderr warning for an explicit non-zero `--timeout` on the direct
+/// (interactive) route, where no deadline applies. `None` when the delivery
+/// must stay silent: no timeout at all, or the default the absent flag
+/// resolves to — an interactive run must not warn about a flag it never
+/// received.
+fn direct_timeout_warning(timeout: Option<std::time::Duration>) -> Option<String> {
+    let limit = timeout?;
+    if limit == headless::DEFAULT_BRIEFING_TIMEOUT {
+        return None;
+    }
+    Some(format!(
+        "--timeout {limit:?} bounds headless runs only: the interactive session runs without a deadline"
+    ))
 }
 
 /// The collision-resistance components of every private temp name: the pid,
@@ -389,6 +462,8 @@ mod tests {
     // import is unused on Windows and `-D warnings` fails the lint job.
     #[cfg(unix)]
     use crate::adapter::harness::Harness;
+    #[cfg(unix)]
+    use std::time::Duration;
 
     /// A path in the temp dir that no other test uses, removed on drop so a
     /// failure does not leak a file into the runner's temp dir.
@@ -447,6 +522,7 @@ mod tests {
     struct RecordingAdvisor {
         direct: Vec<(String, Vec<String>, String)>,
         headless: Vec<(String, Vec<String>, String)>,
+        verbose_headless: Vec<(String, Vec<String>, String, Option<std::time::Duration>)>,
     }
 
     #[cfg(unix)]
@@ -461,6 +537,7 @@ mod tests {
             Self {
                 direct: Vec::new(),
                 headless: Vec::new(),
+                verbose_headless: Vec::new(),
             }
         }
     }
@@ -493,6 +570,22 @@ mod tests {
                 binary.to_string(),
                 leading.iter().map(|s| s.to_string()).collect(),
                 prompt.to_string(),
+            ));
+            Ok((success_status(), PathBuf::from("/tmp/never-opened.log")))
+        }
+
+        fn headless_verbose(
+            &mut self,
+            binary: &str,
+            leading: &[&str],
+            prompt: &str,
+            timeout: Option<std::time::Duration>,
+        ) -> Result<(std::process::ExitStatus, PathBuf)> {
+            self.verbose_headless.push((
+                binary.to_string(),
+                leading.iter().map(|s| s.to_string()).collect(),
+                prompt.to_string(),
+                timeout,
             ));
             Ok((success_status(), PathBuf::from("/tmp/never-opened.log")))
         }
@@ -543,7 +636,7 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn headless_routes_through_the_logged_adapter_unless_verbose() {
+    fn headless_routes_through_the_logged_adapter_with_or_without_verbose() {
         let headless_plan = DeliveryPlan::launch(
             ("opencode", &["run", "--format", "json"]),
             DeliveryMode::Headless,
@@ -559,8 +652,9 @@ mod tests {
         assert_eq!(advisor.headless.len(), 1, "quiet headless logs its stream");
         assert!(advisor.direct.is_empty());
 
-        // `--verbose` inherits stdio for the raw streaming instead
-        // (`docs/specs/harness.md`).
+        // `--verbose` keeps the logged transport — the run log and the
+        // kill/reap deadline stay in force — and relays the raw stream
+        // verbatim instead of rendering it (`docs/specs/harness.md`).
         let verbose_plan = DeliveryPlan::launch(
             ("opencode", &["run", "--format", "json"]),
             DeliveryMode::Headless,
@@ -568,13 +662,82 @@ mod tests {
             "opencode",
             true,
             Harness::Opencode.run_line_renderer(),
-            None,
+            Some(Duration::from_secs(5)),
             |_| "pointer".to_string(),
         );
         let mut advisor = RecordingAdvisor::new();
         deliver(verbose_plan, &mut advisor).unwrap();
-        assert_eq!(advisor.direct.len(), 1);
-        assert!(advisor.headless.is_empty());
+        assert_eq!(
+            advisor.verbose_headless.len(),
+            1,
+            "verbose headless keeps the logged transport"
+        );
+        assert_eq!(
+            advisor.verbose_headless[0].3,
+            Some(Duration::from_secs(5)),
+            "the explicit timeout reaches the verbose route too"
+        );
+        assert!(
+            advisor.direct.is_empty(),
+            "verbose headless is not the unbounded direct spawn"
+        );
+    }
+
+    #[test]
+    fn the_direct_route_warns_only_on_an_explicit_non_default_timeout() {
+        // No flag: the default resolves upstream; warning about a timeout the
+        // user never passed would be noise on every interactive run.
+        assert_eq!(direct_timeout_warning(None), None);
+        assert_eq!(
+            direct_timeout_warning(Some(headless::DEFAULT_BRIEFING_TIMEOUT)),
+            None
+        );
+        // An explicit non-zero value the route cannot honor is named.
+        let warning = direct_timeout_warning(Some(std::time::Duration::from_secs(5)))
+            .expect("an explicit timeout warns on the direct route");
+        assert!(
+            warning.contains("--timeout 5s") && warning.contains("interactive"),
+            "the warning names the value and the route: {warning}"
+        );
+        // An explicit zero never reaches this warning: resolve_timeout maps
+        // it to None, whose existing warning already covers it — no double.
+        assert_eq!(direct_timeout_warning(None), None);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_verbose_headless_route_still_bounds_the_run_with_the_timeout() {
+        // A hung advisor on `--verbose` must hit the same deadline as a quiet
+        // run: the timeout reaches the verbose headless route, which is not
+        // the unbounded direct spawn.
+        let plan = DeliveryPlan::launch(
+            ("opencode", &["run", "--format", "json"]),
+            DeliveryMode::Headless,
+            "briefing".to_string(),
+            "opencode",
+            true,
+            Harness::Opencode.run_line_renderer(),
+            Some(Duration::from_secs(5)),
+            |_| "pointer".to_string(),
+        );
+        let mut advisor = RecordingAdvisor::new();
+
+        deliver(plan, &mut advisor).unwrap();
+
+        assert_eq!(
+            advisor.verbose_headless.len(),
+            1,
+            "verbose headless keeps the logged transport"
+        );
+        assert_eq!(
+            advisor.verbose_headless[0].3,
+            Some(Duration::from_secs(5)),
+            "the explicit timeout reaches the verbose headless route"
+        );
+        assert!(
+            advisor.direct.is_empty(),
+            "verbose headless is not the unbounded direct spawn"
+        );
     }
 
     #[cfg(unix)]

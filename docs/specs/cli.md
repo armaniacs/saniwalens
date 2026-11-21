@@ -116,8 +116,11 @@ A stale store the user cannot notice was a real failure mode, so a read command
 `optimize` always had (`architecture.md`). With `ingested_files` skipping
 unchanged transcripts (`storage.md`), an up-to-date store costs one stat per
 transcript. The refresh reuses the roots recorded in `meta` (`projects_dir`),
-and a missing db is simply created ― "absent db" is an error only for `sql`.
-`--frozen` suppresses the refresh and reads the store as-is.
+and a missing db is simply created ― "absent db" is an error only for `sql` and
+`--frozen`. `--frozen` suppresses the refresh and reads the store as-is through
+the read-only seam (no create, no chmod, no migration): every command that
+accepts `--frozen` opens the store `ReadOnly`, so a frozen run on an absent db
+is a named error, never a silently created empty store.
 
 Every read prints a **one-line freshness header on stderr** (stdout stays clean
 for pipes): what was refreshed, or ― under `--frozen` / `sql` ― how old the
@@ -484,8 +487,11 @@ error; a success removes it (the raw stream may echo secrets) unless
 `SANIWALENS_KEEP_RUN_LOG=1`. The child and heartbeat thread are torn down on
 every exit path (`cli/headless.rs`). `--timeout <DURATION>` (e.g. `30s`, `2m`,
 `500ms`) bounds a headless run: on expiry the child is killed and reaped and
-the error names the raw log. It is off by default so a legitimately long run is
-not cut short.
+the error names the raw log. The bound applies to the streamed quiet route and
+to the `--verbose` route alike; an explicit value is never silently discarded.
+The interactive direct route (which hands the terminal to the agent) carries no
+deadline and warns on stderr when an explicit `--timeout` names it. `--timeout
+0` keeps an unbounded wait, announced by the same warning.
 
 **Prompt shape.** The session **investigates autonomously to a conclusion**: it
 pins down each root cause and proposes a concrete fix instead of handing the

@@ -248,19 +248,6 @@ pub(crate) fn resolve_timeout(value: Option<&str>) -> Result<Option<Duration>> {
     Ok(parsed)
 }
 
-/// Run the headless advisor with its raw output logged: spawn with stdout
-/// piped, write every raw line (and the child's stderr) to a private log, and
-/// surface only what the agent says — text parts on stdout (so a pipe like
-/// `| pbcopy` receives the narration and the plan), one-line progress markers
-/// on stderr. The `render_line` is the harness seam's choice
-/// (`Harness::run_line_renderer`), so this loop names no harness. A heartbeat
-/// covers quiet stretches (a long tool call, model thinking) so the run never
-/// looks hung. Returns the status and the log path: a failure keeps the log
-/// and the caller points at it, while a success removes it (the raw stream
-/// may echo secrets) unless `keep_log` — wired to `SANIWALENS_KEEP_RUN_LOG=1`
-/// — keeps it. The raw event shapes are unversioned upstream, so rendering is
-/// lenient: a line with no recognizable text stays in the log, and a run that
-/// renders nothing readable says so instead of leaving silence.
 /// The context prefix that carries the raw log's path. One constant so the
 /// failure path and the test-side reader cannot drift apart.
 const RAW_LOG_CONTEXT: &str = "raw output";
@@ -284,6 +271,21 @@ fn should_remove_run_log(success: bool, keep: bool) -> bool {
     success && !keep
 }
 
+/// Run the headless advisor with its raw output logged: spawn with stdout
+/// piped, write every raw line (and the child's stderr) to a private log, and
+/// surface only what the agent says — text parts on stdout (so a pipe like
+/// `| pbcopy` receives the narration and the plan), one-line progress markers
+/// on stderr. The `render_line` is the harness seam's choice
+/// (`Harness::run_line_renderer`), so this loop names no harness. A heartbeat
+/// covers quiet stretches (a long tool call, model thinking) so the run never
+/// looks hung. Returns the status and the log path: a failure keeps the log
+/// and the caller points at it, while a success removes it (the raw stream
+/// may echo secrets) unless `keep_log` — wired to `SANIWALENS_KEEP_RUN_LOG=1`
+/// — keeps it. The raw event shapes are unversioned upstream, so rendering is
+/// lenient: a line with no recognizable text stays in the log, and a run that
+/// renders nothing readable says so instead of leaving silence. The
+/// `--verbose` route is [`run_headless_streaming`]: the same transport, raw
+/// relay.
 pub(crate) fn run_headless(
     binary: &str,
     leading: &[&str],
@@ -293,10 +295,76 @@ pub(crate) fn run_headless(
     timeout: Option<Duration>,
     keep_log: bool,
 ) -> Result<(ExitStatus, PathBuf)> {
+    run_logged(
+        binary,
+        leading,
+        prompt,
+        RawSink::Render(render_line),
+        beat,
+        timeout,
+        keep_log,
+    )
+}
+
+/// `run_headless` for `--verbose`: the same logged pipe — run log, heartbeat,
+/// and the kill/reap deadline — with the raw stream relayed verbatim to the
+/// user's stdout instead of rendered. No renderer rides this route: the raw
+/// bytes are the display, so the relay writes exactly what the child wrote
+/// (`read_until`, no line splitting) and stdout stays byte-identical to an
+/// inherited-stdio spawn.
+pub(crate) fn run_headless_streaming(
+    binary: &str,
+    leading: &[&str],
+    prompt: &str,
+    beat: Beat,
+    timeout: Option<Duration>,
+    keep_log: bool,
+) -> Result<(ExitStatus, PathBuf)> {
+    let stdout = std::io::stdout();
+    let mut relay = stdout.lock();
+    run_logged(
+        binary,
+        leading,
+        prompt,
+        RawSink::Stream(&mut relay),
+        beat,
+        timeout,
+        keep_log,
+    )
+}
+
+/// Where the raw stdout stream of a logged run goes: the quiet run renders
+/// through the harness seam's renderer, the verbose run relays the raw bytes
+/// to the user's terminal.
+enum RawSink<'a> {
+    /// Render each line through the harness seam's renderer (quiet headless).
+    Render(Option<RunLineRenderer>),
+    /// Relay raw bytes verbatim to the writer (`--verbose` headless: the
+    /// user's stdout), beside the run log.
+    Stream(&'a mut dyn Write),
+}
+
+/// The shared skeleton of both logged runs: start the guard, bound the wait,
+/// drive the chosen sink, then apply the run-log lifecycle.
+fn run_logged(
+    binary: &str,
+    leading: &[&str],
+    prompt: &str,
+    sink: RawSink<'_>,
+    beat: Beat,
+    timeout: Option<Duration>,
+    keep_log: bool,
+) -> Result<(ExitStatus, PathBuf)> {
     let mut run = HeadlessRun::start(beat)?;
     let log_path = run.log_path().to_path_buf();
     let deadline = timeout.map(|limit| Instant::now() + limit);
-    let (status, readable) = match drive(&mut run, binary, leading, prompt, render_line, deadline) {
+    let driven = match sink {
+        RawSink::Render(render_line) => {
+            drive_render(&mut run, binary, leading, prompt, render_line, deadline)
+        }
+        RawSink::Stream(relay) => drive_stream(&mut run, binary, leading, prompt, relay, deadline),
+    };
+    let (status, readable) = match driven {
         Ok(driven) => driven,
         Err(err) => {
             return Err(err).with_context(|| format!("{RAW_LOG_CONTEXT}: {}", log_path.display()));
@@ -327,16 +395,15 @@ pub(crate) fn run_headless(
     Ok((status, log_path))
 }
 
-/// The I/O half: spawn, adopt, stream, and wait. Every `?` here returns to
-/// `run_headless`, whose guard does the teardown on the way out.
-fn drive(
+/// The shared spawn: stdout piped (the transport both sinks read), the
+/// child's stderr into the run log. The child is adopted before any `?`, so
+/// a later failure still leaves it for the guard to kill and reap.
+fn spawn_piped(
     run: &mut HeadlessRun,
     binary: &str,
     leading: &[&str],
     prompt: &str,
-    render_line: Option<RunLineRenderer>,
-    deadline: Option<Instant>,
-) -> Result<(ExitStatus, bool)> {
+) -> Result<ChildStdout> {
     let mut launch = Command::new(binary);
     launch.args(leading).arg(prompt);
     launch.stdout(Stdio::piped());
@@ -350,7 +417,21 @@ fn drive(
         )
     })?;
     run.adopt(child);
-    let stdout = run.take_stdout().context("pipe the advisor's stdout")?;
+    run.take_stdout().context("pipe the advisor's stdout")
+}
+
+/// The I/O half of the quiet run: spawn, adopt, stream, render, and wait.
+/// Every `?` here returns to `run_logged`, whose guard does the teardown on
+/// the way out.
+fn drive_render(
+    run: &mut HeadlessRun,
+    binary: &str,
+    leading: &[&str],
+    prompt: &str,
+    render_line: Option<RunLineRenderer>,
+    deadline: Option<Instant>,
+) -> Result<(ExitStatus, bool)> {
+    let stdout = spawn_piped(run, binary, leading, prompt)?;
 
     // A reader thread makes the deadline reach the blocking `read_line`: the
     // main loop waits on the channel, so a hung child cannot pin it.
@@ -398,12 +479,78 @@ fn drive(
     Ok((status, readable))
 }
 
-/// The next raw line, or `None` when the reader disconnected. With a deadline,
-/// a silent child becomes a timeout instead of an indefinite wait.
-fn next_line(
-    lines: &Receiver<std::io::Result<String>>,
+/// The I/O half of the verbose run: the same spawn and reader-thread shape,
+/// but the reader hands raw chunks to the main loop, which writes them to the
+/// run log and relays them verbatim — no line splitting, so the bytes the
+/// child wrote are the bytes the user sees.
+fn drive_stream(
+    run: &mut HeadlessRun,
+    binary: &str,
+    leading: &[&str],
+    prompt: &str,
+    relay: &mut dyn Write,
     deadline: Option<Instant>,
-) -> Result<Option<std::io::Result<String>>> {
+) -> Result<(ExitStatus, bool)> {
+    let stdout = spawn_piped(run, binary, leading, prompt)?;
+
+    let (chunk_tx, chunk_rx) = channel();
+    let reader = std::thread::spawn(move || {
+        let mut source = std::io::BufReader::new(stdout);
+        let mut chunk = Vec::new();
+        loop {
+            match source.read_until(b'\n', &mut chunk) {
+                Ok(0) => break,
+                Ok(_) => {
+                    if chunk_tx.send(Ok(std::mem::take(&mut chunk))).is_err() {
+                        break;
+                    }
+                }
+                Err(err) => {
+                    let _ = chunk_tx.send(Err(err));
+                    break;
+                }
+            }
+        }
+    });
+    run.adopt_reader(reader);
+
+    let mut readable = false;
+    loop {
+        let chunk = match next_line(&chunk_rx, deadline) {
+            Ok(Some(chunk)) => chunk,
+            Ok(None) => break,
+            Err(err) => {
+                run.abandon_reader();
+                return Err(err);
+            }
+        };
+        let chunk = match chunk {
+            Ok(chunk) => chunk,
+            Err(err) => {
+                run.abandon_reader();
+                return Err(err).context("read the advisor's output");
+            }
+        };
+        run.count_event();
+        run.log().write_all(&chunk).context("write the run log")?;
+        relay
+            .write_all(&chunk)
+            .context("relay the advisor's raw output")?;
+        relay.flush().context("relay the advisor's raw output")?;
+        readable = true;
+    }
+    let status = run.wait_for_status(deadline)?;
+    Ok((status, readable))
+}
+
+/// The next item from the reader, or `None` when the reader disconnected.
+/// With a deadline, a silent child becomes a timeout instead of an indefinite
+/// wait. Generic over the item the reader sends — rendered runs send lines,
+/// the verbose stream sends raw chunks.
+fn next_line<T>(
+    lines: &Receiver<std::io::Result<T>>,
+    deadline: Option<Instant>,
+) -> Result<Option<std::io::Result<T>>> {
     let Some(deadline) = deadline else {
         return match lines.recv() {
             Ok(line) => Ok(Some(line)),
@@ -465,6 +612,125 @@ mod tests {
         assert!(!should_remove_run_log(true, true));
         assert!(!should_remove_run_log(false, false));
         assert!(!should_remove_run_log(false, true));
+    }
+
+    #[test]
+    fn a_timeout_kills_the_verbose_stream_and_names_the_log() {
+        let pid_file = std::env::temp_dir().join(format!(
+            "saniwalens-verbose-timeout-pid-{}",
+            std::process::id()
+        ));
+        let script = format!("echo $$ > '{}'; exec sleep 5", pid_file.display());
+        let started = Instant::now();
+        let err = run_headless_streaming(
+            "/bin/sh",
+            &["-c", script.as_str()],
+            "ignored",
+            fast_beat(),
+            Some(Duration::from_secs(2)),
+            false,
+        )
+        .expect_err("the silent child times out on the verbose stream too");
+        assert!(
+            started.elapsed() < Duration::from_secs(5),
+            "the timeout did not return promptly: {:?}",
+            started.elapsed()
+        );
+        let rendered = format!("{err:#}");
+        assert!(
+            rendered.contains("timeout"),
+            "the failure does not name the timeout: {rendered}"
+        );
+        let log = raw_log_path(&err).expect("the failure names the raw log");
+        let _ = std::fs::remove_file(&log);
+        let pid = std::fs::read_to_string(&pid_file).expect("the child wrote its pid");
+        let _ = std::fs::remove_file(&pid_file);
+        let alive = Command::new("kill")
+            .arg("-0")
+            .arg(pid.trim())
+            .stderr(Stdio::null())
+            .status()
+            .expect("kill -0 runs");
+        assert!(!alive.success(), "the child survived the verbose timeout");
+    }
+
+    #[test]
+    fn the_verbose_stream_times_out_after_output_started() {
+        // Output flowed, then the child hung: the deadline must still fire,
+        // so a verbose run's quiet stretch is bounded like a quiet run's.
+        let pid_file = std::env::temp_dir().join(format!(
+            "saniwalens-verbose-hang-pid-{}",
+            std::process::id()
+        ));
+        let script = format!(
+            "printf 'start\\n'; echo $$ > '{}'; exec sleep 5",
+            pid_file.display()
+        );
+        let err = run_headless_streaming(
+            "/bin/sh",
+            &["-c", script.as_str()],
+            "ignored",
+            fast_beat(),
+            Some(Duration::from_secs(1)),
+            false,
+        )
+        .expect_err("the hung child times out despite earlier output");
+        let log = raw_log_path(&err).expect("the failure names the raw log");
+        let _ = std::fs::remove_file(&log);
+        let pid = std::fs::read_to_string(&pid_file).expect("the child wrote its pid");
+        let _ = std::fs::remove_file(&pid_file);
+        let alive = Command::new("kill")
+            .arg("-0")
+            .arg(pid.trim())
+            .stderr(Stdio::null())
+            .status()
+            .expect("kill -0 runs");
+        assert!(!alive.success(), "the child survived the verbose timeout");
+    }
+
+    #[test]
+    fn the_verbose_stream_without_a_deadline_lets_the_child_finish() {
+        // The `--timeout 0` shape: resolve_timeout maps an explicit zero to
+        // no deadline, so the run completes whatever it takes.
+        let (status, log_path) = run_headless_streaming(
+            "/bin/sh",
+            &["-c", "sleep 0.2; printf 'done\\n'"],
+            "ignored",
+            fast_beat(),
+            None,
+            false,
+        )
+        .expect("the child finishes without a deadline");
+        assert!(status.success(), "the child exit status: {status}");
+        assert!(
+            !log_path.exists(),
+            "the successful run removed its log: {log_path:?}"
+        );
+    }
+
+    #[test]
+    fn the_verbose_stream_relays_raw_bytes_verbatim() {
+        // `\r\n` and a missing trailing newline are exactly the bytes a
+        // lines()-based relay would normalize away; the verbose relay must
+        // carry them untouched, to stdout and to the log alike.
+        let mut run = HeadlessRun::start(fast_beat()).expect("the log and beat start");
+        let log_path = run.log_path().to_path_buf();
+        let mut relayed: Vec<u8> = Vec::new();
+        let (status, _readable) = drive_stream(
+            &mut run,
+            "/bin/sh",
+            &["-c", "printf 'a\\r\\nb'"],
+            "ignored",
+            &mut relayed,
+            None,
+        )
+        .expect("the child completes");
+        drop(run);
+        assert!(status.success(), "the child exit status: {status}");
+        assert_eq!(relayed, b"a\r\nb", "the relayed bytes were normalized");
+        let log = std::fs::read(&log_path).expect("the run log is readable");
+        let _ = std::fs::remove_file(&log_path);
+        assert_eq!(log, b"a\r\nb", "the logged bytes were normalized");
     }
 
     #[test]
