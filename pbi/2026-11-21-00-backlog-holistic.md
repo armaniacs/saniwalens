@@ -75,3 +75,14 @@ holistic-code-improvement スキルによる第2ラウンド。4班並列レビ�
 | [14-temp-name-stem](archived/2026-11-21-14-refactor-temp-name-stem.md) | 3.0 | 一時名の衝突耐性イディオム（pid+nanos+SEQ）を unique_temp_stem() 1 箇所に集約、2 委譲先は整形のみ。3 形式ともバイト同一。56be095 |
 
 最終ゲート: cargo fmt --check / cargo clippy --all-targets --all-features -- -D warnings / cargo test（41 suite、1,060 passed）/ cargo build --release、全 green。バッチ境界（6 バッチ）ごとに fmt+clippy+test を実行し、バッチ境界でしか出ない失敗を 2 件検出・修正（analyzer_version pin の未追従、cli/mod.rs 行予算超過 — 両方とも統合側が修正）。
+
+## アーカイブ履歴（adversarial レビュー追加分・autonomous-task-closer ラウンド）
+
+adversarial-code-review（fork/main..1121a 差分、4 チャンク × 2 視点、反証 25 件で SURVIVES 22）の指摘を pbi-create-bdd-workspace 流儀で 13 PBI に構造化し（2026-11-21-15〜27）、closer 流儀で実装・アーカイブする。台帳はこのセクションに追記型で集約する。
+
+| PBI | 重大度 | 結果 |
+|---|---|---|
+| [15-terminal-output-sanitization](archived/2026-11-21-15-fix-terminal-output-sanitization.md) | 高 | sanitize_cell を Cc 全域（\n\t 除く）+ Cf bidi/ゼロ幅除去に強化、doctor_agent_lines の agent 名を sanitize 経由に、E2E fixture に C1/bidi/CR 投入。37a4ba5 |
+| [17-timestamp-gap-arithmetic](archived/2026-11-21-17-fix-timestamp-gap-arithmetic.md) | 中 | span_end と duration_sec を saturating_sub 化（opencode の part ts 素通しの隣接極端ペアで debug panic / release wrap）。span.rs コメントに ts クランプ不採用の裁定を記録。4ccb919 |
+| [19-frozen-read-only-seam](archived/2026-11-21-19-fix-frozen-read-only-seam.md) | 中 | optimize/guide inline の frozen 糸口を ReadOnly seam に切替（PBI 08-12 の閉じ残し）+ frozen 時の fresh 度行。テストを seed 方式へ移行。8641d3b |
+| [20-timeout-direct-deadline](archived/2026-11-21-20-fix-timeout-direct-deadline.md) | 中 | Headless+verbose に deadline 機構を適用、direct は明示 timeout で警告。spec 同期（cli.md timeout 節 + frozen 契約の全体化）込み。c329ab0 |
