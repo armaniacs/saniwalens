@@ -10,6 +10,26 @@ use std::ops::Deref;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 
+/// Spawn the built binary inside a synthetic home: `HOME`, `XDG_STATE_HOME`,
+/// and `XDG_CONFIG_HOME` all point into `home`, and the locale variables are
+/// cleared then set to exactly `locale` — so a test names its full locale
+/// tuple instead of inheriting the runner's own `LANG` and `LANGUAGE`.
+pub fn run_cli(home: &Path, args: &[&str], locale: &[(&str, &str)]) -> std::process::Output {
+    let mut cmd = std::process::Command::new(PathBuf::from(env!("CARGO_BIN_EXE_saniwalens")));
+    cmd.args(args)
+        .env("HOME", home)
+        .env("XDG_STATE_HOME", home.join("state"))
+        .env("XDG_CONFIG_HOME", home.join("config"))
+        .env_remove("LC_ALL")
+        .env_remove("LC_MESSAGES")
+        .env_remove("LANG")
+        .env_remove("LANGUAGE");
+    for (key, value) in locale {
+        cmd.env(key, value);
+    }
+    cmd.output().expect("the binary runs")
+}
+
 /// The environment variable that keeps a scratch dir for post-mortem
 /// inspection instead of removing it when its scope ends.
 const KEEP_SCRATCH: &str = "SANIWALENS_KEEP_SCRATCH";

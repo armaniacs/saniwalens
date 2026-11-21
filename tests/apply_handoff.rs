@@ -7,8 +7,7 @@
 //! extract-save-prompt chain through the public seam. Every fixture is
 //! synthetic; no harness binary is ever spawned.
 
-use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::path::Path;
 
 use saniwalens::adapter::harness::{Harness, RunLine, extract_plan_text};
 use saniwalens::core::optimize as optimize_mod;
@@ -25,10 +24,6 @@ const TOOL_LINE: &str = r#"{"type":"tool_use","timestamp":1792904532992,"session
 /// A synthetic text-event line carrying plan prose.
 const TEXT_LINE: &str = r#"{"type":"text","timestamp":1792904882135,"sessionID":"ses_demo","part":{"id":"prt_demo","type":"text","text":"1. Add a file map to AGENTS.md"}}"#;
 
-fn binary() -> PathBuf {
-    PathBuf::from(env!("CARGO_BIN_EXE_saniwalens"))
-}
-
 /// A synthetic home sandbox: `HOME` and `XDG_STATE_HOME` both point into
 /// scratch space, so the binary under test never touches the real home or
 /// the real state dir.
@@ -37,21 +32,13 @@ fn sandbox(name: &str) -> ScratchDir {
 }
 
 fn run_in(home: &Path, args: &[&str]) -> std::process::Output {
-    Command::new(binary())
-        .args(args)
-        .env("HOME", home)
-        .env("XDG_STATE_HOME", home.join("state"))
-        .env("XDG_CONFIG_HOME", home.join("config"))
-        .output()
-        .expect("the binary runs")
+    common::run_cli(home, args, &[])
 }
 
 #[test]
 fn optimize_help_advertises_apply() {
-    let out = Command::new(binary())
-        .args(["optimize", "--help"])
-        .output()
-        .expect("the binary runs");
+    let home = sandbox("help-apply");
+    let out = common::run_cli(&home, &["optimize", "--help"], &[]);
     assert!(out.status.success());
     let help = String::from_utf8(out.stdout).unwrap();
     assert!(

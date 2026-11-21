@@ -7,17 +7,12 @@
 //! not, and an unknown value must fail naming the valid ones. Every fixture
 //! is synthetic; no advisor binary is ever spawned.
 
-use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::path::Path;
 
 use saniwalens::core::optimize::AdvisorLanguage;
 
 mod common;
 use common::ScratchDir;
-
-fn binary() -> PathBuf {
-    PathBuf::from(env!("CARGO_BIN_EXE_saniwalens"))
-}
 
 /// A synthetic home sandbox: `HOME`, `XDG_STATE_HOME`, and `XDG_CONFIG_HOME`
 /// all point into scratch space, so the binary under test never touches the
@@ -31,19 +26,7 @@ fn sandbox(name: &str) -> ScratchDir {
 /// pairs, so each locale case names its full `LC_ALL` / `LC_MESSAGES` /
 /// `LANG` / `LANGUAGE` tuple.
 fn run_in_with_locale(home: &Path, args: &[&str], locale: &[(&str, &str)]) -> std::process::Output {
-    let mut cmd = Command::new(binary());
-    cmd.args(args)
-        .env("HOME", home)
-        .env("XDG_STATE_HOME", home.join("state"))
-        .env("XDG_CONFIG_HOME", home.join("config"))
-        .env_remove("LC_ALL")
-        .env_remove("LC_MESSAGES")
-        .env_remove("LANG")
-        .env_remove("LANGUAGE");
-    for (key, value) in locale {
-        cmd.env(key, value);
-    }
-    cmd.output().expect("the binary runs")
+    common::run_cli(home, args, locale)
 }
 
 /// Write the tool's own config file under the sandbox's `XDG_CONFIG_HOME`.
