@@ -749,6 +749,11 @@ impl Store {
     }
 
     fn from_connection(mut conn: Connection) -> Result<Self> {
+        // Must be set before `migrate` begins its transaction: BEGIN IMMEDIATE
+        // only waits for a concurrent writer's lock while a busy timeout is
+        // installed — without one, contended opens die with "database is
+        // locked" at the guard instead of waiting out the other connection.
+        conn.busy_timeout(std::time::Duration::from_secs(5))?;
         migrate(&mut conn, SCHEMA)?;
         Ok(Self { conn })
     }
@@ -2151,18 +2156,13 @@ impl Store {
 /// The schema text is a parameter only so tests can replay a declaration this
 /// release has not made yet — the classification guard's mistake is by
 /// definition absent from a correct `SCHEMA`.
+///
+/// The version guard and the stamp recording this build's schema share one
+/// `BEGIN IMMEDIATE` transaction: deciding outside the lock would let a
+/// concurrent saniwalens move `user_version` between the guard's read and
+/// this build's write, and this build would then lay its shape over a store
+/// a newer binary still reads.
 fn migrate(conn: &mut Connection, schema: &str) -> Result<()> {
-    let version: i64 = conn.query_row("PRAGMA user_version", [], |row| row.get(0))?;
-    if version > SCHEMA_VERSION {
-        // Reconciliation only ever adds; it cannot undo a newer saniwalens's
-        // changes, and writing this build's shape over them would corrupt a
-        // store that binary still reads correctly.
-        anyhow::bail!(
-            "the store was written by a newer saniwalens (schema v{version}; this build knows \
-             v{SCHEMA_VERSION}) — upgrade saniwalens to read it"
-        );
-    }
-
     let desired = Connection::open_in_memory()?;
     desired.execute_batch(schema)?;
     desired.execute_batch(INDEX_SCHEMA)?;
@@ -2173,7 +2173,25 @@ fn migrate(conn: &mut Connection, schema: &str) -> Result<()> {
     // write in this file does: reconciliation may bail partway through, and a
     // store left half-migrated is exactly the outcome in-place upgrading exists
     // to avoid. SQLite rolls DDL back like any other statement.
-    let tx = conn.transaction()?;
+    //
+    // BEGIN IMMEDIATE, not the deferred default: it takes the write lock up
+    // front, so the version guard below is serialized with the user_version
+    // stamp at the end, and a concurrent writer's lock delays the guard itself
+    // (waiting, via the busy timeout set in `from_connection`) instead of the
+    // migration deciding first and BUSY-failing mid-DDL. The guard sits before
+    // any DDL, so its bail drops an untouched transaction.
+    let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+
+    let version: i64 = tx.query_row("PRAGMA user_version", [], |row| row.get(0))?;
+    if version > SCHEMA_VERSION {
+        // Reconciliation only ever adds; it cannot undo a newer saniwalens's
+        // changes, and writing this build's shape over them would corrupt a
+        // store that binary still reads correctly.
+        anyhow::bail!(
+            "the store was written by a newer saniwalens (schema v{version}; this build knows \
+             v{SCHEMA_VERSION}) — upgrade saniwalens to read it"
+        );
+    }
 
     let mut rebuilt = false;
     for table in REBUILT_TABLES {
@@ -2960,6 +2978,147 @@ mod tests {
         let msg = err.to_string();
         assert!(msg.contains("upgrade"), "{msg}");
         assert!(!msg.contains("delete"), "must not advise deletion: {msg}");
+    }
+
+    #[test]
+    fn the_version_guard_waits_for_a_concurrent_writer_before_refusing() {
+        use std::sync::mpsc;
+        use std::time::Duration;
+
+        // The guard reads user_version inside the migration's BEGIN IMMEDIATE,
+        // so while another writer holds the store the guard cannot even run: a
+        // refusal that raced past the lock would decide on a version a
+        // concurrent saniwalens may be moving (the TOCTOU `migrate` closes).
+        let dir = std::env::temp_dir().join(format!(
+            "saniwalens-guard-refuse-test-{}",
+            std::process::id()
+        ));
+        let path = dir.join("saniwalens.db");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let fixture = Connection::open(&path).unwrap();
+        fixture
+            .execute_batch(&format!("PRAGMA user_version = {};", SCHEMA_VERSION + 1))
+            .unwrap();
+        drop(fixture);
+
+        let holder = Connection::open(&path).unwrap();
+        holder.execute_batch("BEGIN IMMEDIATE;").unwrap();
+
+        let (done, rx) = mpsc::channel();
+        let store_path = path.clone();
+        let handle = std::thread::spawn(move || {
+            let conn = Connection::open(&store_path).unwrap();
+            let _ = done.send(Store::from_connection(conn).map(|_| ()));
+        });
+
+        let held = rx.recv_timeout(Duration::from_millis(500));
+        assert!(
+            held.is_err(),
+            "the guard must wait for the concurrent writer, not refuse past it: {held:?}"
+        );
+
+        holder.execute_batch("ROLLBACK;").unwrap();
+
+        let outcome = rx
+            .recv_timeout(Duration::from_secs(10))
+            .expect("the guard must run once the writer releases the store");
+        handle.join().unwrap();
+
+        let msg = outcome
+            .expect_err("a store one version ahead must still be refused")
+            .to_string();
+        assert!(msg.contains("upgrade"), "{msg}");
+        assert!(!msg.contains("delete"), "must not advise deletion: {msg}");
+
+        let untouched = Connection::open_with_flags(
+            &path,
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        )
+        .unwrap();
+        let version: i64 = untouched
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(version, SCHEMA_VERSION + 1, "the refusal must not stamp");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn migrate_waits_out_a_concurrent_writer_then_migrates_on_release() {
+        use std::sync::mpsc;
+        use std::time::Duration;
+
+        // Same-version concurrency: waiting must end in a migration, not in the
+        // old "database is locked" hard failure — the busy timeout set in
+        // `from_connection`, before migrate's transaction, is what turns the
+        // guard's BEGIN IMMEDIATE into a wait.
+        let dir =
+            std::env::temp_dir().join(format!("saniwalens-guard-wait-test-{}", std::process::id()));
+        let path = dir.join("saniwalens.db");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let mut seeded = Store::open(&path, OpenMode::ReadWrite).unwrap();
+        seeded
+            .replace_surfaces(&[surface("git-commit", Scope::Global, 1)])
+            .unwrap();
+        drop(seeded);
+
+        let holder = Connection::open(&path).unwrap();
+        holder.execute_batch("BEGIN IMMEDIATE;").unwrap();
+
+        let (done, rx) = mpsc::channel();
+        let store_path = path.clone();
+        let handle = std::thread::spawn(move || {
+            let _ = done.send(Store::open(&store_path, OpenMode::ReadWrite).map(|_| ()));
+        });
+
+        let held = rx.recv_timeout(Duration::from_millis(500));
+        assert!(
+            held.is_err(),
+            "migrate must not run its transaction past a concurrent writer's lock: {held:?}"
+        );
+
+        holder.execute_batch("ROLLBACK;").unwrap();
+
+        let outcome = rx
+            .recv_timeout(Duration::from_secs(10))
+            .expect("migrate must complete once the writer releases the store");
+        handle.join().unwrap();
+        outcome.expect("the waiting open must succeed");
+
+        let check = Connection::open_with_flags(
+            &path,
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        )
+        .unwrap();
+        let version: i64 = check
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(version, SCHEMA_VERSION);
+        let count: i64 = check
+            .query_row("SELECT count(*) FROM surfaces", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(count, 1, "the seeded surface must survive the wait");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_refused_migration_leaves_the_store_untouched() {
+        // The guard sits before any DDL inside the transaction, so its bail
+        // drops an untouched transaction — the same connection stays usable and
+        // user_version keeps exactly the value the newer binary wrote.
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(&format!("PRAGMA user_version = {};", SCHEMA_VERSION + 1))
+            .unwrap();
+
+        migrate(&mut conn, SCHEMA).expect_err("must be refused");
+
+        let version: i64 = conn
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(version, SCHEMA_VERSION + 1);
     }
 
     #[test]

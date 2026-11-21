@@ -320,6 +320,13 @@ would collide with its own `CREATE` on the second open.
 The whole migration runs in one transaction, so a bail partway never leaves a
 half-migrated store.
 
+The version check is part of that atomicity: the guard reads `user_version`
+inside the same `BEGIN IMMEDIATE` transaction that stamps it, so a newer build
+cannot slip its DDL past the guard in the window between check and stamp. The
+read-write open sets a busy timeout (5 s) before migrating, so a concurrent
+opener waits briefly and surfaces a clear lock error instead of failing with a
+bare `database is locked`; the read-only path sets none.
+
 `PRAGMA user_version` carries `SCHEMA_VERSION`. Reconciliation only ever adds,
 so routine additive changes do not bump it; it exists for what reconciliation
 cannot express. A store stamped **newer** than this build is refused rather than
