@@ -34,13 +34,23 @@ use common::ScratchDir;
 /// The stdin handle is dropped right after the script is written, so the
 /// guide's next read sees EOF exactly as a closed pipe would.
 fn run_guided(name: &str, args: &[&str], script: &str) -> (ScratchDir, std::process::Output) {
+    // `--language ja` pins the dialog wording: the resolved language is
+    // otherwise locale-dependent (runner envs differ), and every script below
+    // asserts the Ja wording. A later `--language` in `args` wins the preset,
+    // so the En test passes `["--language", "en"]` to override it.
+    let mut argv = vec!["--language", "ja"];
+    argv.extend_from_slice(args);
+    run_guided_argv(name, &argv, script)
+}
+
+fn run_guided_argv(name: &str, argv: &[&str], script: &str) -> (ScratchDir, std::process::Output) {
     // Synthetic only: an empty `.claude/projects` tree for HOME isolation,
     // the same shape `tests/guide_entry.rs` uses. `XDG_CONFIG_HOME` is set so
     // the save flow writes under the scratch dir, never the real home.
     let dir = ScratchDir::new("saniwalens-guide-flow", name);
     std::fs::create_dir_all(dir.join(".claude").join("projects")).unwrap();
     let mut child = Command::new(env!("CARGO_BIN_EXE_saniwalens"))
-        .args(args)
+        .args(argv)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -277,5 +287,38 @@ fn quit_first_runs_no_report_and_touches_no_store() {
             .join("saniwalens.db")
             .exists(),
         "analyze never ran, so no store file may exist"
+    );
+}
+
+#[test]
+fn english_flow_renders_the_en_vocabulary() {
+    // The En wording ships with PBI 2026-11-22-02: a later `--language`
+    // preset wins over the Ja default this suite pins, so the same script
+    // shows the English dialog.
+    let (dir, out) = run_guided("english-flow", &["--language", "en"], "\n\n\n\n\n\n");
+    assert!(
+        out.status.success(),
+        "english flow must exit 0: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let shown = stdout(&out);
+    assert!(
+        shown.contains("Pick the agent you use (q to quit)"),
+        "the harness prompt is English: {shown}"
+    );
+    assert!(
+        shown.contains("Agent in use: claude"),
+        "the current-harness echo is English: {shown}"
+    );
+    assert!(
+        shown.contains("Run: saniwalens doctor"),
+        "the command echo is English: {shown}"
+    );
+    assert!(
+        !dir.join("cfg")
+            .join("saniwalens")
+            .join("config.toml")
+            .exists(),
+        "skipping the save must not create a config file"
     );
 }

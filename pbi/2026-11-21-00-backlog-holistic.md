@@ -56,7 +56,7 @@ holistic-code-improvement スキルによる第2ラウンド。4班並列レビ�
 | 7 | transcript/opencode 全量読みのメモリ上限（積み残し） | 3.0 | 3/0.5/100%/0.5 | 巨大ファイル時のみ顕在化 |
 | 8 | PBI 19 MCP schema 計測（RICE 1.5 = 3/1/50%/1） | 1.5 | 3/1/50%/1 | **ゲート: 安全な静的 schema ソースの出現待ち**。producer ゼロ（デッド行）の現状では効果限定 |
 | 9 | DRY 小物セット（積み残し: waste suggestion 二重計算・CatalogEntry 変換二重化・opencode/kilocode 同型 truncate・guide_entry フラグ解析） | 1.5 | 3/0.5/100%/1 | 4 件を 1 バッチに |
-| 10 | guide TUI の UI ローカライズ方針（積み残し） | 1.2 | 3/0.5/80%/1 | **ゲート: UI ローカライズ方針の決定待ち** |
+| 10 | guide TUI の UI ローカライズ方針（積み残し） | 1.2 | 3/0.5/80%/1 | **実施済み（2026-11-22）**: 方針決定（B: `--language` 追従）→ 実装・アーカイブ（archived/2026-11-22-02、v0.6.9 でリリース予定） |
 
 再採点で除外した項目: headless `Instant::now() + limit` パニック（vulnhunt 済み・格下げ済みの再録扱いのため対象外）、fingerprint_restat の毒済み復帰非対称・bidi isolates（本ラウンドで実施済み）。
 
@@ -87,7 +87,7 @@ closer ラウンド 2 でゲートなし 7 件を消化済み。v0.6.6 の Relea
 | 01 | [analyze が projects dir 不在を空として扱う](archived/2026-11-22-01-fix-analyze-missing-projects-dir.md) | 36.0 | 6/3/100%/0.5 | 初回起動は全環境で必ず通るが不在で Err。v0.6.6 の Release workflow（run 44975508069、nix / build 3 jobs）で実証済み。**実施済み**: `list_main_transcripts` で NotFound を零セッションとして扱い、意外・権限エラーは従来どおり Err。apply_handoff の seed は hermetic（合成 CLAUDE_CONFIG_DIR）に補強、spec 同期（session-format.md File layout 節）込み。v0.6.8 に含む |
 | 02 | PBI 06 4th harness adapter（順位表 01 行参照、RICE 4.5 = 6/3/50%/2） | 4.5 | 6/3/50%/2 | **ゲート: discovery**（どの CLI の実データがあるかのユーザー情報待ち）。HarnessFacts 済みでコスト低下 |
 | 03 | PBI 19 MCP schema 計測（RICE 1.5 = 3/1/50%/1） | 1.5 | 3/1/50%/1 | **ゲート: 安全な静的 schema ソースの出現待ち**。producer ゼロ（デッド行）の現状では効果限定 |
-| 04 | guide TUI の UI ローカライズ方針（積み残し） | 1.2 | 3/0.5/80%/1 | **ゲート: UI ローカライズ方針の決定待ち** |
+| 04 | guide TUI の UI ローカライズ方針（積み残し） | 1.2 | 3/0.5/80%/1 | **実施済み（2026-11-22）**: 方針決定（B: `--language` 追従）→ [guide-ui-language](archived/2026-11-22-02-feat-guide-ui-language.md) として実装・アーカイブ。v0.6.9 でリリース予定 |
 | 05 | opencode DB のセッション単位ストリーミング読み（順位 7 観測のフォローアップ、Snapshot 接合の再設計を要する） | 0.75 | 3/0.5/100%/2 | 巨大 DB のみ顕在化（メモリ）。副エージェント transcript ゲート込み |
 
 ## 出所
