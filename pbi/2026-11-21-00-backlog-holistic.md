@@ -78,9 +78,17 @@ pbi-backlog-prioritizer の確定順位に従い、ゲートなし 7 項目を 4
 
 残る積み残し（ゲート付きのみ）: PBI 06（discovery 待ち）、PBI 19（外部条件待ち）、guide TUI UI ローカライズ方針（決定待ち）。フォローアップ候補として記録: opencode DB のセッション単位ストリーミング読み（副エージェント transcript ゲート込み）。
 
-## v0.6.6 リリースでの新規発見（PBI 候補、2026-11-22）
+## v0.6.6 リリースでの新規発見（2026-11-22、pbi-backlog-prioritizer で RICE 再採点、5 候補）
 
-- **analyze が projects dir 不在で Err**（v0.6.6 Release workflow 失敗の直接原因）。`analyze` は `~/.claude/projects` が存在しない環境（新規ユーザー・nix sandbox）で `read projects dir` Err となり、空セッションとして成功しない（`adapter/claude.rs` の `list_main_transcripts`）。テストは advisor_language の seed が実ホスト `~/.claude` を実読みしていたため未捕捉 — hermetic seed 修正（96650b8）でテストは通るようになったが、**プロダクト側の不在時挙動（不在を空として成功させるか）は未修正**。新規ユーザーの初回 `analyze` 失敗につながる実害候補。次ラウンドの PBI 化候補。
+closer ラウンド 2 でゲートなし 7 件を消化済み。v0.6.6 の Release workflow 失敗（`tests/advisor_language.rs` の非 hermetic seed — 96650b8 で修正済み）が新規候補 1 件を生んだ。確定順位のとおり:
+
+| 順位 | 候補 | RICE | 内訳 (R/I/C/E) | 根拠・ゲート |
+|---|---|---|---|---|
+| 01 | [analyze が projects dir 不在を空として扱う](2026-11-22-01-fix-analyze-missing-projects-dir.md) | 36.0 | 6/3/100%/0.5 | 初回起動は全環境で必ず通るが不在で Err。v0.6.6 の Release workflow（run 44975508069、nix / build 3 jobs）で実証済み |
+| 02 | PBI 06 4th harness adapter（順位表 01 行参照、RICE 4.5 = 6/3/50%/2） | 4.5 | 6/3/50%/2 | **ゲート: discovery**（どの CLI の実データがあるかのユーザー情報待ち）。HarnessFacts 済みでコスト低下 |
+| 03 | PBI 19 MCP schema 計測（RICE 1.5 = 3/1/50%/1） | 1.5 | 3/1/50%/1 | **ゲート: 安全な静的 schema ソースの出現待ち**。producer ゼロ（デッド行）の現状では効果限定 |
+| 04 | guide TUI の UI ローカライズ方針（積み残し） | 1.2 | 3/0.5/80%/1 | **ゲート: UI ローカライズ方針の決定待ち** |
+| 05 | opencode DB のセッション単位ストリーミング読み（順位 7 観測のフォローアップ、Snapshot 接合の再設計を要する） | 0.75 | 3/0.5/100%/2 | 巨大 DB のみ顕在化（メモリ）。副エージェント transcript ゲート込み |
 
 ## 出所
 
