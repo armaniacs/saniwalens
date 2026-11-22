@@ -43,13 +43,22 @@ holistic-code-improvement スキルによる第2ラウンド。4班並列レビ�
 ## 台帳送り（今回扱わない）
 
 - 進行中 2 件のゲート継続: 06（4th harness、discovery で実データ有無の確認が必要）、19（MCP schema 計測、安全な静的 schema ソースの出現待ち）
-- 積み残しテーマ（再検討トリガー: 次ラウンド予約）:
-  - guide TUI の UI ローカライズ方針（views/guide.rs のプロンプト文のみ日本語ハードコード。UI ローカライズ決定時の初手）
-  - advisor prompt 内の schema crib（core/optimize.rs 内、store schema の手写し）の pin テスト無し。schema 進化時に陳腐化する
-  - transcript JSONL・opencode DB の全量一括読みのメモリ上限（巨大ファイル時のみ顕在化、低）
-  - cleanup `dir_size` の無境界再帰（ユーザー自身の state 配下のみで低）
-  - DRY 班の小物: waste.rs suggestion 式の二重計算、CatalogEntry→CatalogRow 8 フィールドマッピング二重化、opencode/kilocode の同型 truncate、guide_entry 3 フラグ解析のテーブル駆動化
-  - 堅牢性班の小物: waste.rs 冗長ペア再照会の project 非比較（正しさの問題）、headless `Instant::now() + limit` パニック（vulnhunt 済・格下げ済みの再録扱い）
+- 積み残しテーマの優先順位（2026-11-22 に pbi-backlog-prioritizer で RICE 再採点、10 候補を同一基準で比較。確定順位のとおり）:
+
+| 順位 | 候補 | RICE | 内訳 (R/I/C/E) | 根拠・ゲート |
+|---|---|---|---|---|
+| 1 | waste.rs 冗長ペア再照会の project 比較 | 6.4 | 4/1/80%/0.5 | 堅牢性班が「正しさの問題」と指摘（未検証のため C=80%。着手時にまず観測） |
+| 2 | session.rs 再エクスポート二重経路の解消 | 5.0 | 5/0.5/100%/0.5 | PBI 13 残。import 経路の二重化が新規コードのたびに増殖（PBI 09 が bridge 削除済みの同型負債） |
+| 3 | cargo-mutants scoped CI job | 5.0 | 5/0.5/100%/0.5 | PBI 21/23/27 で手作業実施した mutation 検証の常設化。変更有りのみ scoped 実行。同点はリスク軽減効果で in-repo 負債を先に |
+| 4 | PBI 06 4th harness adapter（順位表 01 行参照、RICE 4.5 = 6/3/50%/2） | 4.5 | 6/3/50%/2 | **ゲート: discovery**（どの CLI の実データがあるかのユーザー情報待ち）。HarnessFacts 済みでコスト低下 |
+| 5 | cleanup dir_size の再帰境界（積み残し） | 4.0 | 2/0.5/100%/0.25 | 無境界再帰。state 配下限定で低 |
+| 6 | advisor prompt の schema crib pin（積み残し） | 4.0 | 4/0.5/100%/0.5 | store schema の手写しが進化時に静かに陳腐化する |
+| 7 | transcript/opencode 全量読みのメモリ上限（積み残し） | 3.0 | 3/0.5/100%/0.5 | 巨大ファイル時のみ顕在化 |
+| 8 | PBI 19 MCP schema 計測（RICE 1.5 = 3/1/50%/1） | 1.5 | 3/1/50%/1 | **ゲート: 安全な静的 schema ソースの出現待ち**。producer ゼロ（デッド行）の現状では効果限定 |
+| 9 | DRY 小物セット（積み残し: waste suggestion 二重計算・CatalogEntry 変換二重化・opencode/kilocode 同型 truncate・guide_entry フラグ解析） | 1.5 | 3/0.5/100%/1 | 4 件を 1 バッチに |
+| 10 | guide TUI の UI ローカライズ方針（積み残し） | 1.2 | 3/0.5/80%/1 | **ゲート: UI ローカライズ方針の決定待ち** |
+
+再採点で除外した項目: headless `Instant::now() + limit` パニック（vulnhunt 済み・格下げ済みの再録扱いのため対象外）、fingerprint_restat の毒済み復帰非対称・bidi isolates（本ラウンドで実施済み）。
 
 ## 出所
 
