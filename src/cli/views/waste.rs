@@ -15,7 +15,7 @@ use crate::core::surface::{
     startup_savings, supports_never_fires,
 };
 use crate::session::Style;
-use crate::store::Store;
+use crate::store::{CatalogEntry, Store};
 
 use super::super::{
     Align, Format, TableSpec, ViewCtx, empty_in_window, in_scope, render_view, savings_cell,
@@ -176,10 +176,7 @@ pub(crate) fn waste(
     for i in paired_ids {
         let other = &dupes[paired[&i]];
         let me = &dupes[i];
-        let entry = &catalog
-            .iter()
-            .find(|e| e.kind == me.kind && e.id == me.id && e.scope == me.scope)
-            .expect("duplicate candidate comes from the catalog");
+        let entry = catalog_entry(&catalog, me);
         let load_mode = LoadMode::from_label(&entry.load_mode).unwrap_or(LoadMode::OnDemand);
         found.push(Row {
             wedge: Wedge::Redundant,
@@ -326,5 +323,76 @@ fn savings_rank(savings: StartupSavings) -> (u8, std::cmp::Reverse<u64>) {
         StartupSavings::Tokens(n) => (0, std::cmp::Reverse(n)),
         StartupSavings::UnknownSchema => (1, std::cmp::Reverse(0)),
         StartupSavings::Declutter => (2, std::cmp::Reverse(0)),
+    }
+}
+
+/// The candidate's own catalog row: the resolved entry feeds the row's
+/// project, usage and token figures, so a near-miss is misattribution. The
+/// catalog's unique key is the full `(kind, id, scope, project)` tuple
+/// (`Store::effective_catalog` groups by it) — `scope` alone separates global
+/// from project rows but not two projects that installed the same surface id,
+/// so all four parts must match.
+fn catalog_entry<'a>(catalog: &'a [CatalogEntry], me: &DuplicateCandidate<'_>) -> &'a CatalogEntry {
+    catalog
+        .iter()
+        .find(|e| {
+            e.kind == me.kind && e.id == me.id && e.scope == me.scope && e.project == me.project
+        })
+        .expect("duplicate candidate comes from the catalog")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn entry(kind: &str, id: &str, scope: &str, project: &str) -> CatalogEntry {
+        CatalogEntry {
+            kind: kind.to_string(),
+            id: id.to_string(),
+            scope: scope.to_string(),
+            project: project.to_string(),
+            static_tokens: Some(400),
+            startup_tokens: Some(40),
+            load_mode: "startup_description".to_string(),
+            uses: 3,
+            paths: Vec::new(),
+            description: Some("Write git commit messages with hooks".to_string()),
+        }
+    }
+
+    #[test]
+    fn requery_resolves_the_candidates_own_project_row() {
+        let catalog = vec![
+            entry("skill", "commit-helper", "project", "alpha"),
+            entry("skill", "commit-helper", "project", "beta"),
+        ];
+        let me = DuplicateCandidate {
+            id: "commit-helper",
+            kind: "skill",
+            scope: "project",
+            project: "beta",
+            description: "Write git commit messages with hooks",
+        };
+        assert_eq!(
+            catalog_entry(&catalog, &me).project,
+            "beta",
+            "same (kind, id, scope) in another project must not win the lookup"
+        );
+    }
+
+    #[test]
+    fn requery_still_separates_global_from_project_rows() {
+        let catalog = vec![
+            entry("skill", "commit-helper", "global", ""),
+            entry("skill", "commit-helper", "project", "beta"),
+        ];
+        let me = DuplicateCandidate {
+            id: "commit-helper",
+            kind: "skill",
+            scope: "project",
+            project: "beta",
+            description: "Write git commit messages with hooks",
+        };
+        assert_eq!(catalog_entry(&catalog, &me).project, "beta");
     }
 }
