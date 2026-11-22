@@ -8,6 +8,20 @@
 バージョンは [Semantic Versioning](https://semver.org/lang/ja/) に従う。
 各節はタグ間差分単位で記録する（ブランチ差分単位ではない）。
 
+## [0.6.9] - 2026-11-22
+
+### Added
+
+- guide TUI の対話文面を advisor language に追従（`--language en` で英語の
+  対話、`ja` は v0.6.8 までの文言バイト同一）。`cli/views/guide.rs` に
+  `GuideText`（en/ja 語彙）を導入し、フローコードから言語分岐をなくした。
+- opencode DB 読みをセッション単位ストリーミングに変更。`read_index`
+  （data なし meta）+ `read_session_rows`（900 変数ずつの IN 分割で
+  1 セッション分だけ data を読む）により、RSS が DB 全体比例から
+  1 セッション分へ抑制される。fingerprint の message_count は
+  data を含まない meta カウントになり、破損行を含む DB で stamp ペアが
+  不一致になる潜在的再取り込みループを解消。
+
 ## [0.6.8] - 2026-11-22
 
 ### Fixed
