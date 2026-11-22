@@ -78,6 +78,10 @@ pbi-backlog-prioritizer の確定順位に従い、ゲートなし 7 項目を 4
 
 残る積み残し（ゲート付きのみ）: PBI 06（discovery 待ち）、PBI 19（外部条件待ち）、guide TUI UI ローカライズ方針（決定待ち）。フォローアップ候補として記録: opencode DB のセッション単位ストリーミング読み（副エージェント transcript ゲート込み）。
 
+## v0.6.6 リリースでの新規発見（PBI 候補、2026-11-22）
+
+- **analyze が projects dir 不在で Err**（v0.6.6 Release workflow 失敗の直接原因）。`analyze` は `~/.claude/projects` が存在しない環境（新規ユーザー・nix sandbox）で `read projects dir` Err となり、空セッションとして成功しない（`adapter/claude.rs` の `list_main_transcripts`）。テストは advisor_language の seed が実ホスト `~/.claude` を実読みしていたため未捕捉 — hermetic seed 修正（96650b8）でテストは通るようになったが、**プロダクト側の不在時挙動（不在を空として成功させるか）は未修正**。新規ユーザーの初回 `analyze` 失敗につながる実害候補。次ラウンドの PBI 化候補。
+
 ## 出所
 
 - holistic-code-improvement ラウンド2（ブランチ 1121a）。holistic-code-review スキルは未導入のため、4班並列サブエージェント（DRY / SoC / 拡張性 / 堅牢性、全指摘に file:line 実証）で代替実施。報告書間の矛盾（cache 計測コードの存在）は機械確認で棄却済み
