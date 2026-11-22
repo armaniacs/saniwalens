@@ -119,6 +119,14 @@ pub(crate) fn run_cleanup(
     }
 }
 
+/// The deepest the size walk descends, in directory levels below the
+/// listed entry. The state layout nests a handful of levels (area →
+/// generation → a nested dir or two), so the cap never bites there; it
+/// exists because a pathologically deep tree would otherwise recurse to
+/// the stack's end, and a subtree past the cap counts as one skip — the
+/// same shape as an unreadable dir — so the undercount stays visible.
+const MAX_WALK_DEPTH: usize = 32;
+
 /// One path's listed size plus what could not be read below it: a real
 /// subdir counts its recursive total, anything else (file, link) its own
 /// length.
@@ -127,10 +135,16 @@ pub(crate) fn run_cleanup(
 /// resolve. Every path is read with [`fs::symlink_metadata`] and the walk
 /// never follows a link, so a link counts as a link instead of pulling its
 /// target's size in ― including a dangling link, which counts its own
-/// length rather than its (missing) target.
-fn sized_path(path: &Path, meta: &fs::Metadata) -> (u64, usize) {
+/// length rather than its (missing) target. The depth policy pairs with
+/// it: `depth` is how many directory levels may still be entered, and a
+/// dir with no budget left counts as one skip (the same shape as an
+/// unreadable dir) instead of recursing on.
+fn sized_path(path: &Path, meta: &fs::Metadata, depth: usize) -> (u64, usize) {
     if meta.file_type().is_dir() {
-        dir_size(path)
+        if depth == 0 {
+            return (0, 1);
+        }
+        dir_size(path, depth - 1)
     } else {
         (meta.len(), 0)
     }
@@ -155,8 +169,10 @@ pub struct CollectedEntries {
 /// fresh machine simply has nothing saved yet. An area that cannot be read
 /// at all also lists as empty with no count: with no children enumerable,
 /// there is nothing to count. A generation dir's size is
-/// the recursive total over the files under it, with symlink handling per
-/// [`sized_path`]: a link never pulls its target into the listing.
+/// the recursive total over the files under it, with symlink handling and
+/// the [`MAX_WALK_DEPTH`] bound per [`sized_path`]: a link never pulls its
+/// target into the listing, and a subtree deeper than the cap counts as
+/// one skip instead of being walked to the stack's end.
 pub fn collect_entries(dir: &Path) -> CollectedEntries {
     let Ok(read) = fs::read_dir(dir) else {
         return CollectedEntries::default();
@@ -169,7 +185,7 @@ pub fn collect_entries(dir: &Path) -> CollectedEntries {
             skipped += 1;
             continue;
         };
-        let (bytes, nested) = sized_path(&path, &meta);
+        let (bytes, nested) = sized_path(&path, &meta, MAX_WALK_DEPTH);
         skipped += nested;
         entries.push(Entry {
             path,
@@ -182,12 +198,13 @@ pub fn collect_entries(dir: &Path) -> CollectedEntries {
 
 /// The recursive total over the files under `dir` plus the count of what
 /// could not be read below it: a real subdir recurses, anything else
-/// (file, link) counts its own length, with symlink handling per
-/// [`sized_path`]. Unreadable children are counted, not hidden, so a listing never
+/// (file, link) counts its own length, with symlink handling and the
+/// [`MAX_WALK_DEPTH`] bound per [`sized_path`]. Unreadable children are
+/// counted, not hidden, so a listing never
 /// fails over one bad entry and never silently undercounts one either ―
 /// the count rides back through [`sized_path`] to [`collect_entries`],
 /// which reports it.
-fn dir_size(dir: &Path) -> (u64, usize) {
+fn dir_size(dir: &Path, depth: usize) -> (u64, usize) {
     let Ok(read) = fs::read_dir(dir) else {
         return (0, 1);
     };
@@ -199,7 +216,7 @@ fn dir_size(dir: &Path) -> (u64, usize) {
             skipped += 1;
             continue;
         };
-        let (bytes, nested) = sized_path(&path, &meta);
+        let (bytes, nested) = sized_path(&path, &meta, depth);
         total = total.saturating_add(bytes);
         skipped += nested;
     }
@@ -891,9 +908,63 @@ mod tests {
         std::fs::create_dir_all(&locked).unwrap();
         std::fs::write(locked.join("big.md"), "x".repeat(4096)).unwrap();
         std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000)).unwrap();
-        let (bytes, skipped) = dir_size(&generation);
+        let (bytes, skipped) = dir_size(&generation, MAX_WALK_DEPTH);
         std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o755)).unwrap();
         assert_eq!(bytes, 5);
         assert_eq!(skipped, 1);
+    }
+
+    #[test]
+    fn collect_walks_a_generation_right_up_to_the_depth_cap() {
+        // Boundary: MAX_WALK_DEPTH directory levels are walked in full, so
+        // the cap never bites a normal generation layout.
+        let area = ScratchDir::new("saniwalens-cleanup", "collect-depth-within");
+        let generation = area.join("2026-01-01T00-00-00");
+        let mut deep = generation.clone();
+        for _ in 0..MAX_WALK_DEPTH - 1 {
+            deep = deep.join("level");
+        }
+        std::fs::create_dir_all(&deep).unwrap();
+        std::fs::write(deep.join("deep.md"), "12345").unwrap();
+
+        let collected = collect_entries(&area);
+        let generation_entry = collected
+            .entries
+            .iter()
+            .find(|entry| entry.path == generation)
+            .expect("the generation lists");
+        assert_eq!(generation_entry.bytes, 5);
+        assert_eq!(collected.skipped, 0);
+    }
+
+    #[test]
+    fn collect_counts_a_generation_beyond_the_depth_cap_as_skipped() {
+        // The walk's other bound beside permissions: deeper than the cap
+        // the walk stops instead of recursing to the stack's end, and the
+        // unreachable bottom is counted as skipped so the undercount stays
+        // visible.
+        let area = ScratchDir::new("saniwalens-cleanup", "collect-depth-beyond");
+        let generation = area.join("2026-01-01T00-00-00");
+        let mut deep = generation.clone();
+        for _ in 0..MAX_WALK_DEPTH + 1 {
+            deep = deep.join("level");
+        }
+        std::fs::create_dir_all(&deep).unwrap();
+        std::fs::write(deep.join("deep.md"), "12345").unwrap();
+
+        let collected = collect_entries(&area);
+        let generation_entry = collected
+            .entries
+            .iter()
+            .find(|entry| entry.path == generation)
+            .expect("the generation lists");
+        assert_eq!(
+            generation_entry.bytes, 0,
+            "the file below the cap is not walked"
+        );
+        assert_eq!(
+            collected.skipped, 1,
+            "the capped subtree surfaces as one skip"
+        );
     }
 }
