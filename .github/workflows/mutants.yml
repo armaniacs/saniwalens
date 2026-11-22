@@ -1,0 +1,155 @@
+name: Mutants
+
+# Standing harness for the mutation pins that PBI 21/23/27 verified by hand:
+# a pin only stays trustworthy while nothing weakens its catch, and without a
+# recurring check that decay is invisible. Runs weekly and on demand — never on
+# push or pull request. A mutants run is the slowest check this repo has, and
+# gating PRs on it would multiply that cost by every change; a red run here is
+# information, not a gate: surviving mutants in code changed since the last
+# green run, reported as annotations, a step summary, and the mutants-out
+# artifact.
+#
+# Scoped to stay cheap: mutants are generated only for files changed since the
+# last successful run of this workflow (`--in-diff`), so a quiet week costs
+# minutes. With no resolvable base — the very first run, rewritten history, a
+# lost SHA, or the `full` input — it falls back to whole-tree, capped by the
+# job timeout instead of by a diff. Known limitation of any diff-scoped run
+# (cargo-mutants' own docs): only mutants in changed files are tested, so a
+# caller-only change does not re-test the callee's mutants; dispatch with
+# `full: true` after sweeping refactors.
+#
+# Not in the nix shell: the flake devShell stays lean and cargo-mutants is not
+# among its packages, so this installs the upstream binary via
+# taiki-e/install-action — the same pinned-tool pattern as cargo-deny in
+# ci.yml, and cargo-mutants' officially recommended CI install (prebuilt
+# release binary, far faster than `cargo install`, which would compile the
+# tool and its deps on every run).
+on:
+  schedule:
+    # Weekly, off the top of the hour: minute-0 crons queue behind every other
+    # scheduled workflow on GitHub's shared runners.
+    - cron: "17 3 * * 1"
+  workflow_dispatch:
+    inputs:
+      full:
+        description: "Ignore the diff base and mutate the whole tree (slow)"
+        type: boolean
+        default: false
+      since:
+        description: "Optional git rev to diff against, instead of the last successful run"
+        type: string
+        required: false
+        default: ""
+
+# `actions: read` is what `gh run list` needs to see this workflow's own run
+# history; nothing here writes.
+permissions:
+  contents: read
+  actions: read
+
+# One mutants run at a time, repo-wide: it is the most expensive thing this
+# repo's CI does. Cancelling the older run is safe by construction — the newer
+# run resolves its diff base before the cancelled one could have succeeded, so
+# its diff covers the cancelled run's changes too.
+concurrency:
+  group: mutants
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  mutants:
+    name: cargo-mutants
+    runs-on: ubuntu-latest
+    # Hard cost cap. Diff-scoped weekly runs finish in minutes; the cap only
+    # bites on whole-tree runs (first run, `full`, or a lost diff base).
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # Full history: the diff base can be the last successful run, which
+          # may sit many commits back (a failing run leaves the base where it
+          # was, so the diff grows until something goes green).
+          fetch-depth: 0
+
+      - name: Resolve diff base
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          FULL: ${{ inputs.full }}
+          SINCE: ${{ inputs.since }}
+        run: |
+          set -euo pipefail
+          mode=full
+          if [ "$FULL" != "true" ]; then
+            base="$SINCE"
+            if [ -z "$base" ]; then
+              # Last successful run of this workflow on main: everything
+              # merged since it is unverified, mutant-wise. Failed runs do
+              # not move the base, and the run in progress does not count —
+              # it has not succeeded yet.
+              base=$(gh run list --workflow=mutants.yml --branch main \
+                       --status success --limit 1 \
+                       --json headSha --jq '.[0].headSha // empty') || base=""
+            fi
+            # The base must exist in this checkout's history; anything else
+            # (typo'd input, rewritten history) falls through to the
+            # whole-tree run rather than guessing at a diff.
+            if [ -n "$base" ] && git cat-file -e "$base^{commit}" 2>/dev/null; then
+              git diff "$base" > git.diff
+              mode=diff
+              echo "diff base $base: $(wc -l < git.diff) lines"
+            fi
+          fi
+          echo "MUTANTS_MODE=$mode" >> "$GITHUB_ENV"
+
+      - uses: dtolnay/rust-toolchain@stable
+      # Same toolchain route as the other non-nix jobs in ci.yml (deny,
+      # coverage, semver): cargo resolves the rust-toolchain.toml pin itself.
+      - uses: Swatinem/rust-cache@v2
+      # Pinned, not floating: tool drift would silently change what counts as
+      # a surviving mutant (the same lesson ci.yml's cargo-deny job records).
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-mutants@27.1.0
+
+      - name: Run mutants
+        run: |
+          set -euo pipefail
+          # --in-place: cargo-mutants' official CI recommendation — no tree
+          # copy, and each mutant rebuilds incrementally against one warm
+          # target dir, which matters where bundled SQLite makes every cold
+          # build expensive. Mutants then run serially; the small weekly diff
+          # is what keeps that cheap.
+          # --no-shuffle: the same diff produces the same run, so red runs
+          # are comparable week to week.
+          # A surviving mutant exits non-zero: the red run IS the report,
+          # alongside the annotations cargo-mutants emits on Actions.
+          if [ "$MUTANTS_MODE" = diff ]; then
+            cargo mutants --in-place --no-shuffle -vV --in-diff git.diff
+          else
+            cargo mutants --in-place --no-shuffle -vV
+          fi
+
+      - name: Outcomes summary
+        if: always()
+        run: |
+          set -euo pipefail
+          {
+            echo "### cargo-mutants (${MUTANTS_MODE:-unknown} run)"
+            if [ -f mutants.out/outcomes.json ]; then
+              # Defensive shape: a renamed field degrades to a missing line,
+              # never to a failed step on an otherwise green run.
+              jq -r '(.outcomes.mutants // []) | group_by(.outcome)[] | "- \(.[0].outcome): \(length)"' \
+                mutants.out/outcomes.json
+            else
+              echo "no mutants.out/outcomes.json produced"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: mutants-out
+          path: mutants.out
