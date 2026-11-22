@@ -8,6 +8,20 @@
 バージョンは [Semantic Versioning](https://semver.org/lang/ja/) に従う。
 各節はタグ間差分単位で記録する（ブランチ差分単位ではない）。
 
+## [0.6.8] - 2026-11-22
+
+### Fixed
+
+- `analyze` が `~/.claude/projects` 不在の環境（新規ユーザー・fresh CI
+  ランナー・nix sandbox）で `read projects dir` エラーになり、空セッション
+  として成功しない問題を修正。不在を零セッションとして扱い、空ストアを
+  作って成功する。v0.6.6 / v0.6.7 のリリースビルドがこの問題で失敗して
+  いた — リリースビルドのテストが実ホストの `~/.claude` を実読みして
+  いた非決定的依存（v0.6.6: `tests/advisor_language.rs` の seed、v0.6.7:
+  `tests/apply_handoff.rs` の seed）を、合成 `CLAUDE_CONFIG_DIR` の
+  hermetic 構成に変更済み。v0.6.7 は crates.io に publish されていない
+  （Homebrew tap は v0.6.5 のまま）。
+
 ## [0.6.7] - 2026-11-22
 
 ### Fixed
