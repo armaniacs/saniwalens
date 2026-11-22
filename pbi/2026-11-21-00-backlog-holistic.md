@@ -60,6 +60,24 @@ holistic-code-improvement スキルによる第2ラウンド。4班並列レビ�
 
 再採点で除外した項目: headless `Instant::now() + limit` パニック（vulnhunt 済み・格下げ済みの再録扱いのため対象外）、fingerprint_restat の毒済み復帰非対称・bidi isolates（本ラウンドで実施済み）。
 
+## 積み残し消化（closer ラウンド 2、2026-11-22: 再採点 10 候補のうち着手可能 7 件を実施）
+
+pbi-backlog-prioritizer の確定順位に従い、ゲートなし 7 項目を 4 バッチ（3/2/2/1 並列・直列）で閉じた。
+
+| 順位 | 項目 | 結果 | コミット |
+|---|---|---|---|
+| 1 | waste.rs 冗長ペア再照会の project 比較 | **観測で PROVED** — 3 タプル照合で別プロジェクト行に誤帰属。4 タプル完全照合に修正、誤照合 pin 2 件。通常出力バイト同一 | b7522db |
+| 2 | session.rs 再エクスポート二重経路の解消 | re-export 29 個中 26 個を削除、16 ファイルの import を正規モジュールへ。残 3 個（heartbeat/window/cleanup）は統合側が消化 | 564fc26 |
+| 3 | cargo-mutants scoped CI job | `.github/workflows/mutants.yml` 新設（週次 cron + dispatch、`--in-diff` 差分限定、180 分上限、cargo-mutants@27.1.0 pinned、PR ゲートなし） | 3bedc9c |
+| 5 | cleanup dir_size 再帰境界 | symlink 非追従は既存。`MAX_WALK_DEPTH=32` を追加、超過部分は skip 計上（通常合計バイト同一） | a441135 |
+| 6 | advisor prompt schema crib pin | crib は手写しと確定。実宣言 schema を ground truth にした 4 層 pin（rename/drop/ビュー列追加/prose 列参照）を mutation 検証済みで追加 | バッチ2 |
+| 7 | transcript/opencode 全量読みのメモリ上限 | 観測: Claude 側 `fs::read` 全量が未境界（opencode DB は拒否が全セッション喪失のため記録のみ）→ `TRANSCRIPT_MAX_BYTES` 512MiB ゲート（一覧段階 stat 判定、超過は毎回警告、stamp せず）。spec 同期込み | a32e8ae |
+| 9 | DRY 小物セット | suggestion 式 1 回計算化、guide プリセットフラグ解析テーブル化、store 分割が複製した CatalogEntry 閉包統一、`CatalogEntry→CatalogRow` を `From` 1 定義に（cli/mod.rs と inventory.rs の逐語複製を消す）、opencode/kilocode truncate を `clean_truncate` に統一 | a32e8ae、676dd86 |
+
+最終ゲート: cargo fmt --check / cargo clippy --all-targets --all-features -- -D warnings / cargo test（42 suite、1,161 passed）/ cargo build --release、全 green。
+
+残る積み残し（ゲート付きのみ）: PBI 06（discovery 待ち）、PBI 19（外部条件待ち）、guide TUI UI ローカライズ方針（決定待ち）。フォローアップ候補として記録: opencode DB のセッション単位ストリーミング読み（副エージェント transcript ゲート込み）。
+
 ## 出所
 
 - holistic-code-improvement ラウンド2（ブランチ 1121a）。holistic-code-review スキルは未導入のため、4班並列サブエージェント（DRY / SoC / 拡張性 / 堅牢性、全指摘に file:line 実証）で代替実施。報告書間の矛盾（cache 計測コードの存在）は機械確認で棄却済み
