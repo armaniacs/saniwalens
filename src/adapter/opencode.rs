@@ -16,7 +16,7 @@ use crate::adapter::harness::{
     load_skills_deduped,
 };
 use crate::adapter::transcript::{
-    ToolError, WorkEvent, resolve_usage_field, warn_dropped_usage_fields,
+    ToolError, WorkEvent, clean_truncate, resolve_usage_field, warn_dropped_usage_fields,
 };
 use crate::core::friction::classify_error;
 use crate::core::path::basename;
@@ -151,7 +151,7 @@ pub fn extract_tool_errors(parts: &[PartRow]) -> Vec<ToolError> {
         errors.push(ToolError {
             epoch_ms: part_time(part),
             category: classify_error(text),
-            excerpt: truncate(text),
+            excerpt: clean_truncate(text),
             tool: part_tool(part).unwrap_or("unknown").to_string(),
             target: tool_target(input),
         });
@@ -698,20 +698,10 @@ fn tool_target(input: Option<&Value>) -> String {
     };
     for key in ["filePath", "file_path", "path", "command", "pattern", "url"] {
         if let Some(value) = input.get(key).and_then(Value::as_str) {
-            return truncate(value);
+            return clean_truncate(value);
         }
     }
     String::new()
-}
-
-/// Whitespace-collapse and truncate by Unicode scalar (never mid-character).
-fn truncate(s: &str) -> String {
-    s.split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ")
-        .chars()
-        .take(200)
-        .collect()
 }
 
 /// The opencode database for this run: the environment read that

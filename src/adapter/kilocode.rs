@@ -20,7 +20,7 @@ use crate::adapter::harness::{
     load_commands, load_kilo_instructions, load_skills_deduped,
 };
 use crate::adapter::transcript::{
-    ToolError, WorkEvent, resolve_usage_field, warn_dropped_usage_fields,
+    ToolError, WorkEvent, clean_truncate, resolve_usage_field, warn_dropped_usage_fields,
 };
 use crate::core::friction::classify_error;
 use crate::core::path::basename;
@@ -305,7 +305,7 @@ pub fn extract_tool_errors(conversation: &str) -> Vec<ToolError> {
                         // the envelope's own fields matched the wrong
                         // vocabulary ("timeout" among them).
                         category: classify_error(&text),
-                        excerpt: truncate(&text),
+                        excerpt: clean_truncate(&text),
                         tool,
                         target,
                     });
@@ -325,7 +325,7 @@ fn tool_target(input: Option<&Value>) -> String {
     };
     for key in ["path", "file_path", "command", "pattern", "url"] {
         if let Some(value) = input.get(key).and_then(Value::as_str) {
-            return truncate(value);
+            return clean_truncate(value);
         }
     }
     String::new()
@@ -368,16 +368,6 @@ fn unwrap_envelope(text: &str) -> String {
                 .map(str::to_string)
         })
         .unwrap_or_else(|| text.to_string())
-}
-
-/// Whitespace-collapse and truncate by Unicode scalar (never mid-character).
-fn truncate(text: &str) -> String {
-    text.split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ")
-        .chars()
-        .take(200)
-        .collect()
 }
 
 /// Estimate the session root. The strongest signal is the `cwd` kilocode

@@ -358,7 +358,6 @@ mod tests {
     use super::*;
     use crate::adapter::harness::AnalyzeStats;
 
-    use crate::cli::report::Style;
     use crate::session_env::SessionEnv;
     use crate::store::OpenMode;
 

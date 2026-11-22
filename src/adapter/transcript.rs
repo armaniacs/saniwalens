@@ -576,7 +576,9 @@ fn tool_target(input: Option<&Value>) -> String {
 }
 
 /// Whitespace-collapse and truncate by Unicode scalar (never mid-character).
-fn clean_truncate(s: &str) -> String {
+/// The single normalization primitive for adapter excerpt/target text — the
+/// adapters must call this rather than carry their own copies.
+pub(crate) fn clean_truncate(s: &str) -> String {
     s.split_whitespace()
         .collect::<Vec<_>>()
         .join(" ")
