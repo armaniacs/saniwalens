@@ -15,7 +15,7 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::{Receiver, channel};
 use std::time::{Duration, Instant};
 
-use crate::session::Style;
+use crate::cli::report::Style;
 
 /// How often a beat fires while the advisor works.
 pub const CADENCE: Duration = Duration::from_secs(30);

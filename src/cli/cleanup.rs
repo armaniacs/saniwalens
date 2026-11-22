@@ -22,7 +22,7 @@ use anyhow::{Context, Result};
 
 use super::handoff;
 use super::{Align, Format, emit_json, render};
-use crate::session::SessionEnv;
+use crate::session_env::SessionEnv;
 
 /// One listed entry: a plan file or one backup generation directory.
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -6,6 +6,7 @@
 use anyhow::Result;
 
 use crate::adapter::harness::Harness;
+use crate::cli::report::Style;
 use crate::core::glob_match::DEFAULT_MATCH_BUDGET;
 use crate::core::period::TimeRange;
 use crate::core::scope::ScopeFilter;
@@ -14,7 +15,6 @@ use crate::core::surface::{
     has_described_purpose, is_usage_measurable, never_fires, on_demand_tokens, redundant_pairs,
     startup_savings, supports_never_fires,
 };
-use crate::session::Style;
 use crate::store::{CatalogEntry, Store};
 
 use super::super::{

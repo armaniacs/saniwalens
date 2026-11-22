@@ -196,7 +196,7 @@ impl AdvisorLanguage {
     }
 
     /// Every valid `--language` spelling, in canonical order, for error
-    /// hints (`session::parse_language`): built from [`AdvisorLanguage::ALL`],
+    /// hints (`session_env::parse_language`): built from [`AdvisorLanguage::ALL`],
     /// never re-spelled.
     pub fn label_list() -> String {
         Self::ALL
@@ -1890,6 +1890,161 @@ mod tests {
                 prompt.contains(sentence),
                 "ja output must carry the language sentence:\n{prompt}"
             );
+        }
+    }
+
+    /// The "Schema crib" the instructions hand-copy from the store schema:
+    /// the bullet block after the anchor, ending where the 4-space bullet
+    /// indentation ends.
+    fn schema_crib_block(prompt: &str) -> String {
+        let start = prompt
+            .find("Schema crib:")
+            .expect("the advisor instructions keep their schema crib");
+        let block = &prompt[start..];
+        let lines = block
+            .lines()
+            .skip(1)
+            .take_while(|line| line.starts_with("    - "))
+            .collect::<Vec<_>>();
+        assert!(
+            !lines.is_empty(),
+            "the schema crib keeps its bullet list:\n{block}"
+        );
+        lines.join("\n")
+    }
+
+    /// `relation(col, col, …)` signatures in the crib, with whether the column
+    /// list ends in the crib's own ellipsis marker for "incomplete list".
+    fn crib_signatures(crib: &str) -> Vec<(String, Vec<String>, bool)> {
+        let bytes = crib.as_bytes();
+        let mut signatures = Vec::new();
+        let mut i = 0;
+        while i < bytes.len() {
+            if !bytes[i].is_ascii_lowercase() {
+                i += 1;
+                continue;
+            }
+            let start = i;
+            while i < bytes.len()
+                && (bytes[i].is_ascii_lowercase() || bytes[i].is_ascii_digit() || bytes[i] == b'_')
+            {
+                i += 1;
+            }
+            if i < bytes.len()
+                && bytes[i] == b'('
+                && let Some(close) = crib[i..].find(')')
+            {
+                let inner = &crib[i + 1..i + close];
+                let columns = inner
+                    .split(',')
+                    .map(str::trim)
+                    .filter(|column| !column.is_empty() && *column != "…" && *column != "...")
+                    .map(str::to_string)
+                    .collect::<Vec<_>>();
+                if !columns.is_empty() {
+                    let ellipsis = inner.contains('…') || inner.contains("...");
+                    signatures.push((crib[start..i].to_string(), columns, ellipsis));
+                }
+                i += close;
+            }
+        }
+        signatures
+    }
+
+    /// `relation.column` references in the crib's prose (the join recipe).
+    fn crib_dotted_refs(crib: &str) -> Vec<(String, String)> {
+        let bytes = crib.as_bytes();
+        let is_word = |b: u8| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_';
+        let mut refs = Vec::new();
+        for (i, &byte) in bytes.iter().enumerate() {
+            if byte != b'.' {
+                continue;
+            }
+            let mut left = i;
+            while left > 0 && is_word(bytes[left - 1]) {
+                left -= 1;
+            }
+            let mut right = i + 1;
+            while right < bytes.len() && is_word(bytes[right]) {
+                right += 1;
+            }
+            if left < i && right > i + 1 {
+                refs.push((crib[left..i].to_string(), crib[i + 1..right].to_string()));
+            }
+        }
+        refs
+    }
+
+    #[test]
+    fn the_schema_crib_matches_the_declared_store_schema() {
+        // Ground truth is the declared schema as actually applied — an
+        // in-memory store, whose open runs the real `SCHEMA` plus the
+        // `tool_errors` view generated from `EVENT_ENCODING` — so the crib is
+        // checked against what `saniwalens sql` will really answer, never
+        // against a second hand-written copy of the schema.
+        let store = crate::store::Store::in_memory().expect("the declared schema opens");
+        let columns_of = |relation: &str| -> Option<Vec<String>> {
+            let (_, rows) = store
+                .query(&format!("PRAGMA table_info('{relation}')"))
+                .expect("PRAGMA table_info queries");
+            (!rows.is_empty()).then(|| rows.iter().map(|row| row[1].clone()).collect())
+        };
+
+        let crib = schema_crib_block(&instructions(&claude_copy()));
+
+        // The crib keeps describing the relations the documented
+        // investigations depend on: the friction slice (tool_errors), the
+        // subagent bill and its join (subagent_runs), and everything else
+        // (sessions, events).
+        let signatures = crib_signatures(&crib);
+        for relation in ["tool_errors", "subagent_runs", "sessions", "events"] {
+            assert!(
+                signatures.iter().any(|(name, _, _)| name == relation),
+                "the schema crib keeps a `{relation}` signature:\n{crib}"
+            );
+        }
+
+        // Every relation and column the crib names must exist in the declared
+        // schema, so a rename or drop on the schema side fails here loudly.
+        for (relation, columns, ellipsis) in &signatures {
+            let declared = columns_of(relation).unwrap_or_else(|| {
+                panic!(
+                    "the schema crib names `{relation}` but the declared schema has no such table or view"
+                )
+            });
+            for column in columns {
+                assert!(
+                    declared.contains(column),
+                    "the schema crib names `{relation}.{column}` but the declared schema has no \
+                     such column (declared: {declared:?})"
+                );
+            }
+            // A signature without the ellipsis claims the complete column
+            // list — `tool_errors` is fully enumerated so the advisor never
+            // needs `SELECT *` against the generated view. That makes a new
+            // `EVENT_ENCODING` role (a new view column) crib rot too: the
+            // exact-count check fails until the crib is updated.
+            if !ellipsis {
+                assert_eq!(
+                    columns.len(),
+                    declared.len(),
+                    "the schema crib's `{relation}` claims the complete column list but the \
+                     declared schema has {} columns: {declared:?}",
+                    declared.len()
+                );
+            }
+        }
+
+        // The prose join recipe (`events.target = subagent_runs.root_tool_use_id`)
+        // must keep pointing at real columns of real relations.
+        for (relation, column) in crib_dotted_refs(&crib) {
+            if let Some(declared) = columns_of(&relation) {
+                assert!(
+                    declared.contains(&column),
+                    "the schema crib references `{relation}.{column}` but the declared schema has \
+                     no such column (declared: {declared:?})"
+                );
+            }
         }
     }
 }

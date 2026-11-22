@@ -7,9 +7,9 @@ use anyhow::Result;
 
 use crate::adapter::harness::Harness;
 use crate::adapter::transcript::prompt_text_at;
+use crate::cli::report::Style;
 use crate::core::period::TimeRange;
 use crate::core::prompt::{SkillCandidate, cluster_candidates};
-use crate::session::Style;
 use crate::store::Store;
 
 use super::super::{Align, Format, TableSpec, ViewCtx, note, render_view};

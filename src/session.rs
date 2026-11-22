@@ -13,29 +13,11 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 
-use crate::adapter::harness::Harness;
+use crate::adapter::harness::{AnalyzeStats, Harness};
+use crate::cli::report::{Style, eprint_freshness, freshness_line};
 use crate::core::optimize::AdvisorLanguage;
+use crate::session_env::{LanguageSource, SessionEnv, state_base};
 use crate::store::{OpenMode, Store};
-
-// The resolution vocabulary moved to `session_env` and the presentation
-// primitives to `cli::report`; these re-exports keep every existing
-// `crate::session::…` import working — several import sites (the adapter,
-// `headless`, `cleanup`, `window`, `heartbeat`) are outside this split's
-// file allowance.
-pub(crate) use crate::cli::report::{Style, eprint_freshness, freshness_line};
-pub use crate::cli::report::{eprint_language_decision, language_decision_line};
-pub use crate::session_env::{
-    EnvRoots, LanguageSource, LocaleEnv, ResolvedCli, SessionEnv, config_file_path, env_roots,
-    language_head, locale_env, locale_is_c, locale_is_japanese, locale_language, parse_harness,
-    parse_language, process_locale_language, resolve_cli, resolve_cli_with_language,
-    resolve_locale_language,
-};
-pub(crate) use crate::session_env::{home_dir, state_base, xdg_from_env};
-
-/// Counters from one analyze run, for the command's summary line and the
-/// freshness header on auto-refreshing reads. Owned by the analyze seam
-/// (`adapter::harness`), re-exported here for the shell's imports.
-pub use crate::adapter::harness::AnalyzeStats;
 
 /// One invocation's resolved world: which harness, which store file, and the
 /// opened, harness-guarded store. Every command builds exactly this and
@@ -374,6 +356,11 @@ pub(crate) fn eprint_frozen_freshness(store: &Store) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::adapter::harness::AnalyzeStats;
+
+    use crate::cli::report::Style;
+    use crate::session_env::SessionEnv;
+    use crate::store::OpenMode;
 
     fn example_dir(sub: &str) -> PathBuf {
         std::env::temp_dir().join(format!("saniwalens-session-{sub}-{}", std::process::id()))

@@ -26,7 +26,7 @@ use crate::core::span::{
 use crate::core::subagent::SubagentRun;
 use crate::core::surface::{LoadMode, Scope, Surface};
 use crate::core::usage::{attribute_subagents, extract_usage_events, output_tokens};
-use crate::session::{home_dir, xdg_from_env};
+use crate::session_env::{home_dir, xdg_from_env};
 use crate::store::SessionMeta;
 
 /// The model label when a message names none — honest, never a guess.

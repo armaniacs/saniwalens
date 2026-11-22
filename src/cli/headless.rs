@@ -23,7 +23,7 @@ use std::time::{Duration, Instant};
 use anyhow::{Context, Result};
 
 use crate::adapter::harness::{RunLine, RunLineRenderer};
-use crate::session::Style;
+use crate::cli::report::Style;
 
 use super::heartbeat;
 pub(crate) use super::heartbeat::Beat;

@@ -14,12 +14,15 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 
+use crate::adapter::harness::AnalyzeStats;
 use crate::adapter::harness::Harness;
+use crate::cli::report::Style;
 use crate::cli::{Format, ViewFormat};
 use crate::core::bucket::JST_OFFSET_SECS;
 use crate::core::period::{self, TimeRange, WindowPair};
 use crate::core::scope::ScopeFilter;
-use crate::session::{AnalyzeStats, Session, SessionEnv, Style};
+use crate::session::Session;
+use crate::session_env::SessionEnv;
 
 /// The period flags the eight single-window views share, declared once here
 /// and flattened into each command. `--last`'s conflicts are pinned on this

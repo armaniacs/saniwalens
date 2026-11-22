@@ -8,12 +8,12 @@
 use anyhow::Result;
 
 use crate::adapter::harness::Harness;
+use crate::cli::report::Style;
 use crate::core::bucket::JST_OFFSET_SECS;
 use crate::core::period::{self, WindowPair};
 use crate::core::trend::{
     TrendWindowAggregates, TwoWindow, kind_pairs, skill_deltas, surface_deltas,
 };
-use crate::session::Style;
 use crate::store::Store;
 
 use super::super::{Align, Format, TableSpec, ViewCtx, framed, note, render_view};
@@ -1535,7 +1535,7 @@ mod tests {
             db_path: PathBuf::new(),
             store: two_window_store(),
             language: crate::core::optimize::AdvisorLanguage::default(),
-            language_source: crate::session::LanguageSource::Default,
+            language_source: crate::session_env::LanguageSource::Default,
         };
         trend(&two.store, &two.harness, trend_pair(), Format::Table).unwrap();
         trend(&two.store, &two.harness, trend_pair(), Format::Markdown).unwrap();
@@ -1545,7 +1545,7 @@ mod tests {
             db_path: PathBuf::new(),
             store: Store::in_memory().unwrap(),
             language: crate::core::optimize::AdvisorLanguage::default(),
-            language_source: crate::session::LanguageSource::Default,
+            language_source: crate::session_env::LanguageSource::Default,
         };
         trend(&empty.store, &empty.harness, trend_pair(), Format::Table).unwrap();
         trend(&empty.store, &empty.harness, trend_pair(), Format::Json).unwrap();

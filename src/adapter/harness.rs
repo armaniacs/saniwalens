@@ -21,7 +21,7 @@ use crate::core::span::Span;
 use crate::core::subagent::SubagentRun;
 use crate::core::surface::{Scope, Surface};
 use crate::core::usage::UsageEvent;
-use crate::session::home_dir;
+use crate::session_env::home_dir;
 use crate::store::{IngestBatch, OpenMode, SessionMeta, Store};
 
 /// One rendered slice of a headless run's raw stdout line — what the
@@ -464,7 +464,7 @@ impl Harness {
     pub const ALL: [Harness; 3] = [Harness::Claude, Harness::Opencode, Harness::Kilocode];
 
     /// Every valid `--harness` spelling, in canonical order, for error hints
-    /// (`session::parse_harness`): built from [`Harness::ALL`], never re-spelled.
+    /// (`session_env::parse_harness`): built from [`Harness::ALL`], never re-spelled.
     pub fn label_list() -> String {
         Self::ALL
             .iter()

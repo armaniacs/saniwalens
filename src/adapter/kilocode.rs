@@ -27,7 +27,7 @@ use crate::core::path::basename;
 use crate::core::span::{DEFAULT_IDLE_GAP_MS, Record, RecordKind, extract_spans, session_start};
 use crate::core::surface::{Scope, Surface};
 use crate::core::usage::extract_usage_events;
-use crate::session::{home_dir, xdg_from_env};
+use crate::session_env::{home_dir, xdg_from_env};
 use crate::store::SessionMeta;
 use std::collections::HashSet;
 use std::fs;

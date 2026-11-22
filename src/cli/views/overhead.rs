@@ -5,8 +5,8 @@
 use anyhow::Result;
 
 use crate::adapter::harness::Harness;
+use crate::cli::report::Style;
 use crate::core::period::TimeRange;
-use crate::session::Style;
 use crate::store::Store;
 
 use super::super::{Align, Format, TableSpec, ViewCtx, empty_in_window, note, render_view};

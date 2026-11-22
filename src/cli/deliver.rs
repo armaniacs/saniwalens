@@ -13,8 +13,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use anyhow::{Context, Result};
 
 use crate::adapter::harness::RunLineRenderer;
+use crate::cli::report::Style;
 use crate::core::optimize as optimize_mod;
-use crate::session::Style;
 
 use super::headless;
 

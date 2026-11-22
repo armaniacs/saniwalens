@@ -5,8 +5,9 @@ use crate::adapter::harness::Harness;
 use crate::core::optimize::{AdvisorLanguage, RunMode};
 use crate::core::period::TimeRange;
 use crate::core::scope::ScopeFilter;
-use crate::session::{
-    Session, SessionEnv, config_file_path, env_roots, home_dir, process_locale_language,
+use crate::session::Session;
+use crate::session_env::{
+    SessionEnv, config_file_path, env_roots, home_dir, process_locale_language,
     resolve_cli_with_language,
 };
 use crate::store::Store;
@@ -1914,7 +1915,7 @@ mod tests {
         // composes must carry the single language sentence. The session is
         // built through the guide's own seam (`guide_session`), frozen open.
         use crate::core::optimize::{self as optimize_mod, AdvisorLanguage};
-        use crate::session::resolve_cli_with_language;
+        use crate::session_env::resolve_cli_with_language;
         use crate::store::OpenMode;
 
         let dir =
@@ -1958,7 +1959,7 @@ mod tests {
         // PBI 2026-11-10-08 BDD "未設定では従来どおり": with no language
         // resolved, the guide's inline prompt carries no language sentence.
         use crate::core::optimize::{self as optimize_mod, AdvisorLanguage};
-        use crate::session::resolve_cli_with_language;
+        use crate::session_env::resolve_cli_with_language;
         use crate::store::OpenMode;
 
         let dir = std::env::temp_dir().join(format!(

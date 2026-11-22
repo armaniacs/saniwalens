@@ -17,9 +17,11 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 
 use crate::adapter::harness::{Harness, RunLine, RunLineRenderer, extract_plan_text};
+use crate::cli::report::Style;
 use crate::core::optimize as optimize_mod;
 use crate::core::scope::ScopeFilter;
-use crate::session::{Session, SessionEnv, Style, state_base};
+use crate::session::Session;
+use crate::session_env::{SessionEnv, state_base};
 
 use super::deliver::{
     BriefingFile, ProcessAdvisor, create_private_dir_all, unique_temp_stem, write_private_tempfile,
@@ -843,7 +845,7 @@ mod tests {
             db_path: db,
             store,
             language: optimize_mod::AdvisorLanguage::default(),
-            language_source: crate::session::LanguageSource::Default,
+            language_source: crate::session_env::LanguageSource::Default,
         }
     }
 

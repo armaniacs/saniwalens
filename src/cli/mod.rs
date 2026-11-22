@@ -7,17 +7,17 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 
-use crate::adapter::harness::Harness;
+use crate::adapter::harness::{AnalyzeStats, Harness};
+use crate::cli::report::{Style, eprint_freshness, eprint_language_decision, freshness_line};
 use crate::core::findings;
 use crate::core::optimize as optimize_mod;
 use crate::core::period::TimeRange;
 use crate::core::scope::ScopeFilter;
 use crate::core::subagent::SplitCoverage;
 use crate::core::surface::{StartupSavings, Wedge};
-use crate::session::{
-    AnalyzeStats, Session, SessionEnv, Style, env_roots, eprint_freshness, eprint_frozen_freshness,
-    eprint_language_decision, freshness_line, guard_harness, home_dir, process_locale_language,
-    refreshed_just_now_line, resolve_cli_with_language,
+use crate::session::{Session, eprint_frozen_freshness, guard_harness, refreshed_just_now_line};
+use crate::session_env::{
+    SessionEnv, env_roots, home_dir, process_locale_language, resolve_cli_with_language,
 };
 use crate::store::{OpenMode, Store};
 
