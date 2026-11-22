@@ -92,8 +92,20 @@ fn main_transcripts(projects: &Path) -> Result<Vec<PathBuf>> {
 
 fn list_main_transcripts(projects: &Path, max_bytes: u64) -> Result<Vec<PathBuf>> {
     let mut transcripts = Vec::new();
-    let slugs = fs::read_dir(projects)
-        .with_context(|| format!("read projects dir {}", projects.display()))?;
+    // A missing projects dir is the normal state of a fresh environment (new
+    // user, fresh CI runner, nix sandbox): the walk yields zero sessions
+    // instead of failing the whole analyze (PBI 2026-11-22-01). Any other
+    // read error (an unexpected mode, a vanished parent) still fails loudly
+    // with the dir named.
+    let slugs = match fs::read_dir(projects) {
+        Ok(slugs) => slugs,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(transcripts);
+        }
+        Err(err) => {
+            return Err(err).with_context(|| format!("read projects dir {}", projects.display()));
+        }
+    };
     for slug in slugs.flatten() {
         if !slug.path().is_dir() {
             continue;
@@ -360,6 +372,16 @@ mod tests {
     use super::*;
     use crate::store::{OpenMode, Store};
     use std::path::Path;
+
+    /// The projects dir the walker finds on a fresh environment: absent from
+    /// the filesystem entirely, yet `analyze` succeeds with zero sessions
+    /// (PBI 2026-11-22-01) — a new user's first run never starts from failure.
+    #[test]
+    fn a_missing_projects_dir_walks_to_zero_sessions() {
+        let absent = Path::new("/tmp/nonexistent").join("no-such-projects-here");
+        let transcripts = list_main_transcripts(&absent, u64::MAX).unwrap();
+        assert!(transcripts.is_empty());
+    }
 
     /// Serializes the tests that point `analyze` at a synthetic config root:
     /// they share the process-wide `CLAUDE_CONFIG_DIR`, so they must not run

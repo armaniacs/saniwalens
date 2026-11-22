@@ -84,7 +84,7 @@ closer ラウンド 2 でゲートなし 7 件を消化済み。v0.6.6 の Relea
 
 | 順位 | 候補 | RICE | 内訳 (R/I/C/E) | 根拠・ゲート |
 |---|---|---|---|---|
-| 01 | [analyze が projects dir 不在を空として扱う](2026-11-22-01-fix-analyze-missing-projects-dir.md) | 36.0 | 6/3/100%/0.5 | 初回起動は全環境で必ず通るが不在で Err。v0.6.6 の Release workflow（run 44975508069、nix / build 3 jobs）で実証済み |
+| 01 | [analyze が projects dir 不在を空として扱う](archived/2026-11-22-01-fix-analyze-missing-projects-dir.md) | 36.0 | 6/3/100%/0.5 | 初回起動は全環境で必ず通るが不在で Err。v0.6.6 の Release workflow（run 44975508069、nix / build 3 jobs）で実証済み。**実施済み**: `list_main_transcripts` で NotFound を零セッションとして扱い、意外・権限エラーは従来どおり Err。apply_handoff の seed は hermetic（合成 CLAUDE_CONFIG_DIR）に補強、spec 同期（session-format.md File layout 節）込み。v0.6.8 に含む |
 | 02 | PBI 06 4th harness adapter（順位表 01 行参照、RICE 4.5 = 6/3/50%/2） | 4.5 | 6/3/50%/2 | **ゲート: discovery**（どの CLI の実データがあるかのユーザー情報待ち）。HarnessFacts 済みでコスト低下 |
 | 03 | PBI 19 MCP schema 計測（RICE 1.5 = 3/1/50%/1） | 1.5 | 3/1/50%/1 | **ゲート: 安全な静的 schema ソースの出現待ち**。producer ゼロ（デッド行）の現状では効果限定 |
 | 04 | guide TUI の UI ローカライズ方針（積み残し） | 1.2 | 3/0.5/80%/1 | **ゲート: UI ローカライズ方針の決定待ち** |

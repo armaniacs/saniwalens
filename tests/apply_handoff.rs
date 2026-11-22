@@ -78,7 +78,10 @@ fn normal_print_leaves_no_plan_file_behind() {
     let db = home.join("s.db");
     // A seeded empty store is enough: `--frozen` is read-only by contract
     // (it never creates a store), `--print` skips every spawn, and the
-    // briefing renders its empty sections away.
+    // briefing renders its empty sections away. The seed itself runs hermetic
+    // (synthetic `CLAUDE_CONFIG_DIR`): the walker treats a missing projects
+    // dir as zero sessions (PBI 2026-11-22-01), so this never depends on the
+    // runner's own `~/.claude` either way.
     let seed = run_in(&home, &["analyze", "--db", &db.display().to_string()]);
     assert!(
         seed.status.success(),

@@ -22,6 +22,12 @@ two specs most likely to change when Claude Code ships a new release.
       agent-<agentId>.meta.json                ← that subagent's sidecar (below)
 ```
 
+The whole tree is optional: a fresh environment (new user, fresh CI runner,
+nix sandbox) has no `projects/` directory at all, and `analyze` treats that as
+zero sessions — the run succeeds and creates an empty store
+(`adapter/claude.rs`). Any other read error on the directory (an unexpected
+mode, a vanished parent) still fails loudly with the path named.
+
 - `<cwd-slug>` encodes the working directory (path separators → `-`). Worktree
   directories appear as their own slugs (e.g. a `...--wt-feat-x` suffix); the
   store folds these to a parent project ― see `storage.md`.

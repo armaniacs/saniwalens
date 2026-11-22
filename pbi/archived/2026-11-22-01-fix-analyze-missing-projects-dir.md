@@ -43,14 +43,14 @@ Scenario: 読み取りできない projects ディレクトリは従来どおり
 ```
 
 ## 受け入れ基準
-- [ ] projects dir 不在（CLAUDE_CONFIG_DIR が新規環境を指す）で analyze が
+- [x] projects dir 不在（CLAUDE_CONFIG_DIR が新規環境を指す）で analyze が
   success を返し、空ストアが作られる（E2E、ScratchDir 環境）
-- [ ] 同状態で 2 回目の analyze も success（冪等）
-- [ ] 読み取り権限のない projects dir（同一ユーザーで chmod 0022 再現不可の
+- [x] 同状態で 2 回目の analyze も success（冪等）
+- [x] 読み取り権限のない projects dir（同一ユーザーで chmod 0022 再現不可の
   ため、存在する dir の NotFound 以外の read_dir エラー経路を pin）は
   従来どおり Err で文脈を名指す
-- [ ] fixture 付きの従来ケース（sessions 1 件）は出力バイト同一
-- [ ] opencode / kilocode の既存挙動は不変（e2e golden 3/3）
+- [x] fixture 付きの従来ケース（sessions 1 件）は出力バイト同一
+- [x] opencode / kilocode の既存挙動は不変（e2e golden 3/3）
 
 ## テスト戦略
 - E2E: 不在 projects dir での analyze（新規環境初回シナリオ）
@@ -79,9 +79,9 @@ grep -n "fn default_projects_dir" src/adapter/claude.rs
   するだけ）。
 
 ## Definition of Done
-- [ ] 全 BDD シナリオが自動テストとして実装されパスする
-- [ ] e2e golden 3/3（バイト同一の証人）が green
-- [ ] コードレビュー完了
-- [ ] spec 同期（docs/specs/harness.md または session-format.md の不在時
+- [x] 全 BDD シナリオが自動テストとして実装されパスする
+- [x] e2e golden 3/3（バイト同一の証人）が green
+- [x] コードレビュー完了
+- [x] spec 同期（docs/specs/harness.md または session-format.md の不在時
   挙動に 1 行追記）
-- [ ] 台帳の候補節を実施済みに更新
+- [x] 台帳の候補節を実施済みに更新
