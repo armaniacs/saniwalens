@@ -69,6 +69,13 @@ fn print_prompt_seed(
 ) -> std::process::Output {
     let db = home.join("s.db");
     if seed {
+        // Hermetic seed: the analyze must not read the runner's own
+        // `~/.claude/projects` — a nix sandbox (and any fresh environment)
+        // has none, and `analyze` fails honestly when the projects dir is
+        // missing. Point `CLAUDE_CONFIG_DIR` at an empty fixture projects
+        // dir so the seed ingests zero sessions by design.
+        let claude_config = home.join("claude-config");
+        std::fs::create_dir_all(claude_config.join("projects")).unwrap();
         let seeded = run_in_with_locale(
             home,
             &[
@@ -76,7 +83,10 @@ fn print_prompt_seed(
                 "--db",
                 db.to_str().expect("the sandbox path is UTF-8"),
             ],
-            &[],
+            &[(
+                "CLAUDE_CONFIG_DIR",
+                claude_config.to_str().expect("the sandbox path is UTF-8"),
+            )],
         );
         assert!(
             seeded.status.success(),
