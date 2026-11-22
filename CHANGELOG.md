@@ -8,6 +8,19 @@
 バージョンは [Semantic Versioning](https://semver.org/lang/ja/) に従う。
 各節はタグ間差分単位で記録する（ブランチ差分単位ではない）。
 
+## [0.6.7] - 2026-11-22
+
+### Fixed
+
+- `tests/advisor_language.rs` の seed analyze が実ホストの `~/.claude/projects`
+  を実読みしており、nix sandbox のように projects dir が不在な環境で
+  リリースビルドが失敗する問題を修正。seed を空 fixture `projects` dir +
+  `CLAUDE_CONFIG_DIR` の hermetic 構成に変更する。実コード（src/）への
+  変更はなく、v0.6.6 のリリースビルドが crates.io / Homebrew tap まで
+  到達しなかったことの補填。テストから発見した新規ユーザー環境での
+  `analyze` 失敗（projects dir 不在時に Err）は台帳に PBI 候補として
+  記録（本バージョンでは未修正）。
+
 ## [0.6.6] - 2026-11-22
 
 ### Added
