@@ -227,6 +227,14 @@ It echoes the equivalent command line before running (e.g. `saniwalens
 --harness kilocode waste --scope global`) and again after the report. The
 reproducible artifact is that command line, not the session.
 
+**Dialog language.** The interactive lines (questions, options, echoes) follow
+the resolved advisor language — the same resolution `optimize` uses, so
+`--language en` shows an English dialog and `--language ja` (or a Ja locale)
+shows the Japanese wording byte-for-byte. The dialog vocabulary is
+the store's `GuideText` (`cli/views/guide.rs`); the flow code never branches on
+the language itself. Report output is unaffected (it is English-only by
+contract above).
+
 **Next step.** `optimize` is not a menu item, but after each report the guide
 prints a next-step line with the matching scope (`saniwalens optimize --scope
 global`). The line is harness-aware: on a headless harness it carries

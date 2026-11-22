@@ -457,38 +457,31 @@ pub(crate) fn ask_save<R: BufRead, W: Write>(
     input: &mut R,
     output: &mut W,
     existing: Option<&str>,
+    text: &GuideText,
     harness: &str,
     path: &Path,
 ) -> anyhow::Result<Option<String>> {
-    writeln!(
-        output,
-        "使っているエージェント ({harness}) の設定を保存しますか? (config: {})",
-        path.display()
-    )?;
+    writeln!(output, "{}", text.save_config_question(harness, path))?;
     let pick = ask_choice(
         input,
         output,
-        "保存先を選んでください",
-        &[
-            "保存しない",
-            "既定のharnessにする (default_harness)",
-            "名前付きで保存する (--profile 名 で呼び出せる)",
-        ],
+        text.save_dest_prompt(),
+        &text.save_dest_options(),
         0,
     )?;
     let rendered = match pick {
         Choice::Quit | Choice::Pick(0) => return Ok(None),
         Choice::Pick(1) => render_default_harness(existing, harness),
         _ => {
-            let name = ask_profile_name(input, output)?;
+            let name = ask_profile_name(input, output, text)?;
             let Some(name) = name else {
                 return Ok(None);
             };
             render_profile(existing, &name, harness)
         }
     };
-    writeln!(output, "書き込む内容:\n{rendered}")?;
-    writeln!(output, "保存しますか? [y/N]")?;
+    writeln!(output, "{}", text.write_preview(&rendered))?;
+    writeln!(output, "{}", text.save_confirm())?;
     let mut line = String::new();
     if input.read_line(&mut line)? == 0 {
         return Ok(None);
@@ -502,12 +495,178 @@ pub(crate) fn ask_save<R: BufRead, W: Write>(
 
 /// Free-text profile-name prompt with validation retry; `q`/EOF quits the
 /// save (not the guide).
+/// The guide's dialog vocabulary, resolved once per run from the resolved
+/// advisor language. Every interactive line the guide prints comes from
+/// here, so the flow code never branches on the language itself. Ja strings
+/// are the pre-v0.6.9 wording byte-for-byte; En wording ships with this
+/// vocabulary.
+pub(crate) struct GuideText {
+    language: AdvisorLanguage,
+}
+
+impl GuideText {
+    pub(crate) fn new(language: AdvisorLanguage) -> Self {
+        Self { language }
+    }
+
+    /// Pick one of the two strings for the resolved language.
+    fn pick(&self, ja: &'static str, en: &'static str) -> &'static str {
+        match self.language {
+            AdvisorLanguage::Ja => ja,
+            AdvisorLanguage::En => en,
+        }
+    }
+
+    pub(crate) fn save_config_question(&self, harness: &str, config: &Path) -> String {
+        match self.language {
+            AdvisorLanguage::Ja => format!(
+                "使っているエージェント ({harness}) の設定を保存しますか? (config: {})",
+                config.display()
+            ),
+            AdvisorLanguage::En => format!(
+                "Save the configuration for the {harness} agent? (config: {})",
+                config.display()
+            ),
+        }
+    }
+
+    pub(crate) fn save_dest_prompt(&self) -> &'static str {
+        self.pick("保存先を選んでください", "Choose where to save it")
+    }
+
+    pub(crate) fn save_dest_options(&self) -> [&'static str; 3] {
+        match self.language {
+            AdvisorLanguage::Ja => [
+                "保存しない",
+                "既定のharnessにする (default_harness)",
+                "名前付きで保存する (--profile 名 で呼び出せる)",
+            ],
+            AdvisorLanguage::En => [
+                "Do not save",
+                "Make it the default harness (default_harness)",
+                "Save it under a name (callable with --profile NAME)",
+            ],
+        }
+    }
+
+    pub(crate) fn write_preview(&self, rendered: &str) -> String {
+        match self.language {
+            AdvisorLanguage::Ja => format!("書き込む内容:\n{rendered}"),
+            AdvisorLanguage::En => format!("Content to write:\n{rendered}"),
+        }
+    }
+
+    pub(crate) fn save_confirm(&self) -> &'static str {
+        self.pick("保存しますか? [y/N]", "Save it? [y/N]")
+    }
+
+    pub(crate) fn profile_name_prompt(&self) -> &'static str {
+        self.pick(
+            "profile名 (英数・-・_)? [qでやめる] ",
+            "profile name (alphanumerics, '-', '_')? [q to skip] ",
+        )
+    }
+
+    pub(crate) fn invalid_profile_name(&self) -> &'static str {
+        self.pick(
+            "使えるのは英数・-・_だけです",
+            "Only alphanumerics, '-', and '_' are allowed",
+        )
+    }
+
+    pub(crate) fn pick_harness(&self) -> &'static str {
+        self.pick(
+            "使っているエージェントを選んでください（q で終了）",
+            "Pick the agent you use (q to quit)",
+        )
+    }
+
+    pub(crate) fn current_harness(&self, label: &str) -> String {
+        match self.language {
+            AdvisorLanguage::Ja => format!("使っているエージェント: {label}"),
+            AdvisorLanguage::En => format!("Agent in use: {label}"),
+        }
+    }
+
+    pub(crate) fn pick_purpose(&self) -> &'static str {
+        self.pick(
+            "やりたいことを選んでください（q で終了）",
+            "Pick what you want to do (q to quit)",
+        )
+    }
+
+    pub(crate) fn purpose_options(&self) -> [&'static str; 3] {
+        match self.language {
+            AdvisorLanguage::Ja => [
+                "健康診断 (doctor)",
+                "無駄を探す (waste)",
+                "失敗を調べる (failures)",
+            ],
+            AdvisorLanguage::En => [
+                "Health check (doctor)",
+                "Find waste (waste)",
+                "Inspect failures (failures)",
+            ],
+        }
+    }
+
+    pub(crate) fn pick_scope(&self) -> &'static str {
+        self.pick("範囲を選んでください", "Pick a scope")
+    }
+
+    pub(crate) fn scope_options(&self) -> [&'static str; 3] {
+        match self.language {
+            AdvisorLanguage::Ja => ["全体", "global", "project"],
+            AdvisorLanguage::En => ["Everything", "global", "project"],
+        }
+    }
+
+    pub(crate) fn run_echo(&self, command: &str) -> String {
+        match self.language {
+            AdvisorLanguage::Ja => format!("実行: {command}"),
+            AdvisorLanguage::En => format!("Run: {command}"),
+        }
+    }
+
+    pub(crate) fn ran_echo(&self, command: &str) -> String {
+        match self.language {
+            AdvisorLanguage::Ja => format!("実行したコマンド: {command}"),
+            AdvisorLanguage::En => format!("Command that ran: {command}"),
+        }
+    }
+
+    pub(crate) fn next_step(&self, line: &str) -> String {
+        match self.language {
+            AdvisorLanguage::Ja => format!("次の一手: {line} で原因の深掘りと対策提案"),
+            AdvisorLanguage::En => {
+                format!("Next step: {line} digs into the cause and suggests fixes")
+            }
+        }
+    }
+
+    pub(crate) fn next_step_confirm(&self) -> &'static str {
+        self.pick("次の一手を実行しますか? [y/N]", "Run the next step? [y/N]")
+    }
+
+    pub(crate) fn optimize_failed(&self, err: &anyhow::Error) -> String {
+        match self.language {
+            AdvisorLanguage::Ja => format!("optimize に失敗しました: {err:#}"),
+            AdvisorLanguage::En => format!("optimize failed: {err:#}"),
+        }
+    }
+
+    pub(crate) fn more_prompt(&self) -> &'static str {
+        self.pick("もう1件見る? [y/N]", "Look at another one? [y/N]")
+    }
+}
+
 fn ask_profile_name<R: BufRead, W: Write>(
     input: &mut R,
     output: &mut W,
+    text: &GuideText,
 ) -> anyhow::Result<Option<String>> {
     loop {
-        write!(output, "profile名 (英数・-・_)? [qでやめる] ")?;
+        write!(output, "{}", text.profile_name_prompt())?;
         output.flush()?;
         let mut line = String::new();
         if input.read_line(&mut line)? == 0 {
@@ -520,7 +679,7 @@ fn ask_profile_name<R: BufRead, W: Write>(
         if profile_name_is_valid(name) {
             return Ok(Some(name.to_string()));
         }
-        writeln!(output, "使えるのは英数・-・_だけです")?;
+        writeln!(output, "{}", text.invalid_profile_name())?;
     }
 }
 
@@ -614,6 +773,7 @@ pub(crate) fn run_guide<R: BufRead, W: Write>(
     output: &mut W,
     config_path: Option<&Path>,
 ) -> anyhow::Result<()> {
+    let text = GuideText::new(language);
     // Step 1 (design §2: harness → purpose → scope → execution): with no
     // preset the harness is an asked choice defaulting to the resolved value;
     // a preset skips the question and keeps the resolved value.
@@ -624,18 +784,12 @@ pub(crate) fn run_guide<R: BufRead, W: Write>(
             .iter()
             .position(|harness| harness == initial)
             .unwrap_or(0);
-        match ask_choice(
-            input,
-            output,
-            "使っているエージェントを選んでください（q で終了）",
-            &options,
-            default,
-        )? {
+        match ask_choice(input, output, text.pick_harness(), &options, default)? {
             Choice::Quit => return Ok(()),
             Choice::Pick(i) => current = Harness::ALL[i],
         }
     }
-    writeln!(output, "使っているエージェント: {}", current.label())?;
+    writeln!(output, "{}", text.current_harness(current.label()))?;
 
     let period = PeriodArgs {
         since: None,
@@ -651,12 +805,8 @@ pub(crate) fn run_guide<R: BufRead, W: Write>(
         let purpose = match ask_choice(
             input,
             output,
-            "やりたいことを選んでください（q で終了）",
-            &[
-                "健康診断 (doctor)",
-                "無駄を探す (waste)",
-                "失敗を調べる (failures)",
-            ],
+            text.pick_purpose(),
+            &text.purpose_options(),
             0,
         )? {
             Choice::Quit => return Ok(()),
@@ -665,13 +815,7 @@ pub(crate) fn run_guide<R: BufRead, W: Write>(
             _ => Purpose::Failures,
         };
         // Step 3: scope.
-        let scope = match ask_choice(
-            input,
-            output,
-            "範囲を選んでください",
-            &["全体", "global", "project"],
-            0,
-        )? {
+        let scope = match ask_choice(input, output, text.pick_scope(), &text.scope_options(), 0)? {
             Choice::Quit => return Ok(()),
             Choice::Pick(0) => ScopeChoice::All,
             Choice::Pick(1) => ScopeChoice::Global,
@@ -679,7 +823,7 @@ pub(crate) fn run_guide<R: BufRead, W: Write>(
         };
         // Step 4: show the command, run it, reprint it.
         let command = equivalent_command(&current, purpose, scope);
-        writeln!(output, "実行: {command}")?;
+        writeln!(output, "{}", text.run_echo(&command))?;
         let scope_flag: Option<&str> = match scope {
             ScopeChoice::All => None,
             ScopeChoice::Global => Some("global"),
@@ -715,15 +859,12 @@ pub(crate) fn run_guide<R: BufRead, W: Write>(
             Purpose::Waste => run_scoped(&dispatch, scope_flag, &period, &read, waste)?,
             Purpose::Failures => run_scoped(&dispatch, scope_flag, &period, &read, failures)?,
         };
-        writeln!(output, "実行したコマンド: {command}")?;
-        writeln!(
-            output,
-            "次の一手: {} で原因の深掘りと対策提案",
-            next_step_line(&current, scope)
-        )?;
-        if ask_yes_no(input, output, "次の一手を実行しますか? [y/N]")? {
+        writeln!(output, "{}", text.ran_echo(&command))?;
+        let next = text.next_step(&next_step_line(&current, scope));
+        writeln!(output, "{next}")?;
+        if ask_yes_no(input, output, text.next_step_confirm())? {
             let line = next_step_line(&current, scope);
-            writeln!(output, "実行: {line}")?;
+            writeln!(output, "{}", text.run_echo(&line))?;
             // Same harness, same scope, and same language as the resolved
             // invocation: the report already refreshed the store, so frozen
             // skips a second analyze. A headless harness has no dialog partner
@@ -741,21 +882,27 @@ pub(crate) fn run_guide<R: BufRead, W: Write>(
                 }
             });
             if let Err(e) = attempted {
-                writeln!(output, "optimize に失敗しました: {e:#}")?;
+                writeln!(output, "{}", text.optimize_failed(&e))?;
             }
         }
         if let Some(path) = config_path {
             let existing = match std::fs::read_to_string(path) {
-                Ok(text) => Some(text),
+                Ok(existing_text) => Some(existing_text),
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
                 Err(e) => return Err(e.into()),
             };
-            if let Some(text) = ask_save(input, output, existing.as_deref(), current.label(), path)?
-            {
-                persist_config(path, &text, existing.as_deref())?;
+            if let Some(saved) = ask_save(
+                input,
+                output,
+                existing.as_deref(),
+                &text,
+                current.label(),
+                path,
+            )? {
+                persist_config(path, &saved, existing.as_deref())?;
             }
         }
-        writeln!(output, "もう1件見る? [y/N]")?;
+        writeln!(output, "{}", text.more_prompt())?;
         let mut line = String::new();
         if input.read_line(&mut line)? == 0 {
             return Ok(());
@@ -1200,10 +1347,10 @@ mod tests {
         .unwrap();
         let shown = String::from_utf8(output).unwrap();
         assert!(
-            shown.contains("エージェントを選んで"),
+            shown.contains("Pick the agent you use"),
             "the harness question comes first: {shown}"
         );
-        assert!(!shown.contains("実行:"), "no report runs: {shown}");
+        assert!(!shown.contains("Run:"), "no report runs: {shown}");
     }
 
     #[test]
@@ -1231,14 +1378,14 @@ mod tests {
         .unwrap();
         let shown = String::from_utf8(output).unwrap();
         assert!(
-            shown.contains("エージェントを選んで"),
+            shown.contains("Pick the agent you use"),
             "the harness prompt appeared: {shown}"
         );
         assert!(
-            shown.contains("使っているエージェント: opencode"),
+            shown.contains("Agent in use: opencode"),
             "the selected harness is shown: {shown}"
         );
-        assert!(!shown.contains("実行:"), "no report runs: {shown}");
+        assert!(!shown.contains("Run:"), "no report runs: {shown}");
     }
 
     #[test]
@@ -1266,18 +1413,18 @@ mod tests {
         .unwrap();
         let shown = String::from_utf8(output).unwrap();
         assert!(
-            !shown.contains("エージェントを選んで"),
+            !shown.contains("Pick the agent you use"),
             "no harness question with a preset: {shown}"
         );
         assert!(
-            shown.contains("使っているエージェント: kilocode"),
+            shown.contains("Agent in use: kilocode"),
             "the resolved harness is shown: {shown}"
         );
         assert!(
-            shown.contains("健康診断"),
+            shown.contains("Health check (doctor)"),
             "the purpose prompt is reached: {shown}"
         );
-        assert!(!shown.contains("実行:"), "no report runs: {shown}");
+        assert!(!shown.contains("Run:"), "no report runs: {shown}");
     }
 
     #[test]
@@ -1305,8 +1452,8 @@ mod tests {
         )
         .unwrap();
         let shown = String::from_utf8(output).unwrap();
-        assert!(shown.contains("健康診断"));
-        assert!(!shown.contains("実行:"));
+        assert!(shown.contains("Health check (doctor)"));
+        assert!(!shown.contains("Run:"));
     }
 
     #[test]
@@ -1335,10 +1482,10 @@ mod tests {
         .unwrap();
         let shown = String::from_utf8(output).unwrap();
         assert!(
-            shown.contains("使っているエージェント: opencode"),
+            shown.contains("Agent in use: opencode"),
             "the resolved default is kept: {shown}"
         );
-        assert!(!shown.contains("実行:"), "no report runs: {shown}");
+        assert!(!shown.contains("Run:"), "no report runs: {shown}");
     }
 
     #[test]
@@ -1671,7 +1818,15 @@ mod tests {
             let mut input = std::io::Cursor::new("1\n");
             let mut output = Vec::new();
             let path = std::path::Path::new("/tmp/saniwalens-test-config.toml");
-            ask_save(&mut input, &mut output, None, harness, path).unwrap();
+            ask_save(
+                &mut input,
+                &mut output,
+                None,
+                &GuideText::new(AdvisorLanguage::Ja),
+                harness,
+                path,
+            )
+            .unwrap();
             let shown = String::from_utf8(output).unwrap();
             assert!(
                 shown.contains(harness),
@@ -1685,7 +1840,15 @@ mod tests {
         let mut input = std::io::Cursor::new("1\n");
         let mut output = Vec::new();
         let path = std::path::Path::new("/tmp/saniwalens-test-config.toml");
-        let out = ask_save(&mut input, &mut output, None, "kilocode", path).unwrap();
+        let out = ask_save(
+            &mut input,
+            &mut output,
+            None,
+            &GuideText::new(AdvisorLanguage::Ja),
+            "kilocode",
+            path,
+        )
+        .unwrap();
         assert!(out.is_none());
     }
 
@@ -1694,9 +1857,16 @@ mod tests {
         let mut input = std::io::Cursor::new("2\ny\n");
         let mut output = Vec::new();
         let path = std::path::Path::new("/tmp/saniwalens-test-config.toml");
-        let out = ask_save(&mut input, &mut output, None, "kilocode", path)
-            .unwrap()
-            .expect("y confirms the save");
+        let out = ask_save(
+            &mut input,
+            &mut output,
+            None,
+            &GuideText::new(AdvisorLanguage::Ja),
+            "kilocode",
+            path,
+        )
+        .unwrap()
+        .expect("y confirms the save");
         assert!(out.contains("default_harness = \"kilocode\"\n"), "{out}");
     }
 
@@ -1705,9 +1875,16 @@ mod tests {
         let mut input = std::io::Cursor::new("3\nbad name\nwork\ny\n");
         let mut output = Vec::new();
         let path = std::path::Path::new("/tmp/saniwalens-test-config.toml");
-        let out = ask_save(&mut input, &mut output, None, "kilocode", path)
-            .unwrap()
-            .expect("y confirms the save");
+        let out = ask_save(
+            &mut input,
+            &mut output,
+            None,
+            &GuideText::new(AdvisorLanguage::Ja),
+            "kilocode",
+            path,
+        )
+        .unwrap()
+        .expect("y confirms the save");
         assert!(
             out.contains("[profiles.work]\nharness = \"kilocode\"\n"),
             "{out}"
@@ -1721,7 +1898,15 @@ mod tests {
         let mut input = std::io::Cursor::new("q\n");
         let mut output = Vec::new();
         let path = std::path::Path::new("/tmp/saniwalens-test-config.toml");
-        let out = ask_save(&mut input, &mut output, None, "kilocode", path).unwrap();
+        let out = ask_save(
+            &mut input,
+            &mut output,
+            None,
+            &GuideText::new(AdvisorLanguage::Ja),
+            "kilocode",
+            path,
+        )
+        .unwrap();
         assert!(out.is_none());
     }
 
@@ -1730,7 +1915,15 @@ mod tests {
         let mut input = std::io::Cursor::new("2\nn\n");
         let mut output = Vec::new();
         let path = std::path::Path::new("/tmp/saniwalens-test-config.toml");
-        let out = ask_save(&mut input, &mut output, None, "kilocode", path).unwrap();
+        let out = ask_save(
+            &mut input,
+            &mut output,
+            None,
+            &GuideText::new(AdvisorLanguage::Ja),
+            "kilocode",
+            path,
+        )
+        .unwrap();
         assert!(out.is_none());
     }
 
@@ -1741,7 +1934,15 @@ mod tests {
         let mut input = std::io::Cursor::new("3\nq\n");
         let mut output = Vec::new();
         let path = std::path::Path::new("/tmp/saniwalens-test-config.toml");
-        let out = ask_save(&mut input, &mut output, None, "kilocode", path).unwrap();
+        let out = ask_save(
+            &mut input,
+            &mut output,
+            None,
+            &GuideText::new(AdvisorLanguage::Ja),
+            "kilocode",
+            path,
+        )
+        .unwrap();
         assert!(out.is_none());
         let shown = String::from_utf8(output).unwrap();
         assert!(!shown.contains("保存しますか? [y/N]"), "{shown}");
@@ -1754,7 +1955,15 @@ mod tests {
         let mut input = std::io::Cursor::new("3\nwork\n");
         let mut output = Vec::new();
         let path = std::path::Path::new("/tmp/saniwalens-test-config.toml");
-        let out = ask_save(&mut input, &mut output, None, "kilocode", path).unwrap();
+        let out = ask_save(
+            &mut input,
+            &mut output,
+            None,
+            &GuideText::new(AdvisorLanguage::Ja),
+            "kilocode",
+            path,
+        )
+        .unwrap();
         assert!(out.is_none());
         let shown = String::from_utf8(output).unwrap();
         assert!(shown.contains("保存しますか? [y/N]"), "{shown}");
