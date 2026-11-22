@@ -138,3 +138,20 @@ adversarial-code-review（fork/main..1121a 差分、4 チャンク × 2 視点�
 closer ラウンド最終ゲート: cargo fmt --check / cargo clippy --all-targets --all-features -- -D warnings / cargo test（41 suite、1,150 passed）/ cargo build --release、全 green。残余: tests/fingerprint_restat.rs の毒済み復帰の非対称（into_inner 統一）は低優先のフォローアップ（PBI 27 検討記録に記録）。
 
 残余フォローアップ（closer 完了後に実施、c2a8daa）: fingerprint_restat の env 操作を set_env Drop guard に統一（panic 時も毒済み残留なし・親環境の本来値を復帰）し、sanitize_cell に bidi isolates（U+2066-2069）除去を追加（fixture/assert も対応）。フルゲート green（41 suite、1,150 passed）。フォローアップ残はなし。
+
+## 再検討結果（holistic ラウンド 3、2026-11-22 v0.6.8 リリース後）
+
+差分スコープ（v0.6.5..v0.6.8、50 ファイル +11,554/−6,282）は 2026-11-22 の adversarial レビュー（51 指摘・反証 25）で網羅審査済みで、closer ラウンドで発見分は全て消化（順位 1-3・5-7・9 の 7 項目アーカイブ、opencode/kilocode truncate はバッチ 4）。機械点検の結果、**新規候補はゼロ**:
+
+- DoD 反映漏れ: 0 件（進行中 `[ ]` は 06/19 のみ、いずれも未着手・実装コミットなし）
+- アーカイブ重複: 0 件（archived/ 141 件、同名なし）
+- TODO/FIXME: 0 件
+- ゲート: fmt --check / clippy -D warnings / cargo test（42 suite、1,162 passed）/ cargo build --release、全 green
+- リリース: v0.6.8 Release workflow completed success、crates.io max_version 0.6.8、assets 12（全プラットフォーム）
+
+空の新台帳は作らない（rule 5）。次ラウンドの入り口（再検討トリガー順）:
+
+1. PBI 06 discovery — **ユーザー情報待ち**（どの agent CLI の実データがあるか）
+2. guide TUI UI ローカライズ方針 — 方針決定待ち
+3. opencode DB ストリーミング読み（RICE 0.75）— 単独では着手しない。何かの PR で opencode 読み経路を触る時の併案
+4. graphify-out の陳腐化観察（2026-11-16 生成、store/session 分割と v0.6.6-0.6.8 の変更を反映していない）— 次の大構造変更前に再生成（開発者向け、コード候補ではない）
