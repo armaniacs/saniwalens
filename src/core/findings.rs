@@ -88,8 +88,9 @@ pub struct SessionRoot {
     pub project: ProjectSlug,
 }
 
-/// One catalog row as the assembly sees it: plain data, mapped from the
-/// store's row type by the fetch (`cli/mod.rs`), so this module stays store-free.
+/// One catalog row as the assembly sees it: plain data projected from the
+/// store's row type (`From<CatalogEntry>` in the store), so this module stays
+/// store-free.
 #[derive(Debug, Clone)]
 pub struct CatalogRow {
     pub kind: String,

@@ -71,10 +71,26 @@ fn session_meta(
     }
 }
 
+/// Hard ceiling, in bytes, for one transcript read. The read is whole-file by
+/// design — the line-wise UTF-8 skip needs the full text, and the parse joins
+/// the surviving lines into one `String` — so RSS peaks at a few times the
+/// file size, and a transcript grows without bound over months. The listing
+/// refuses what that cannot afford.
+const TRANSCRIPT_MAX_BYTES: u64 = 512 * 1024 * 1024;
+
 /// Main session transcripts: the `<sessionId>.jsonl` files directly under each
 /// project slug directory (subagent transcripts live one level deeper and are
-/// not main-thread usage).
+/// not main-thread usage). A file over [`TRANSCRIPT_MAX_BYTES`] is refused at
+/// listing with a stderr warning instead of being read: an `Err` from the
+/// parse step would fail the whole analyze and, a failed candidate never
+/// being stamped, repeat on every run. The refusal is not stamped either, so
+/// the warning also repeats on every run — the file's absence stays visible,
+/// and a transcript that later fits is ingested normally.
 fn main_transcripts(projects: &Path) -> Result<Vec<PathBuf>> {
+    list_main_transcripts(projects, TRANSCRIPT_MAX_BYTES)
+}
+
+fn list_main_transcripts(projects: &Path, max_bytes: u64) -> Result<Vec<PathBuf>> {
     let mut transcripts = Vec::new();
     let slugs = fs::read_dir(projects)
         .with_context(|| format!("read projects dir {}", projects.display()))?;
@@ -85,6 +101,16 @@ fn main_transcripts(projects: &Path) -> Result<Vec<PathBuf>> {
         for entry in fs::read_dir(slug.path()).into_iter().flatten().flatten() {
             let path = entry.path();
             if path.extension().is_some_and(|ext| ext == "jsonl") {
+                // An unreadable stat keeps the file a candidate: a vanished
+                // file fails honestly at the read, as it did before the gate.
+                if fs::metadata(&path).is_ok_and(|meta| meta.len() > max_bytes) {
+                    eprintln!(
+                        "warning: transcript exceeded TRANSCRIPT_MAX_BYTES ({max_bytes} bytes): \
+                         skipped — {}",
+                        path.display()
+                    );
+                    continue;
+                }
                 transcripts.push(path);
             }
         }
@@ -173,7 +199,9 @@ struct TranscriptText {
 /// `read_to_string` would fail the parse — a failed candidate is never
 /// stamped, so one bad byte would stop the analyze forever. The count of
 /// skipped lines rides along for [`warn_skipped_invalid_utf8_lines`]. A file
-/// that cannot be read at all stays an error.
+/// that cannot be read at all stays an error. The read is whole-file by
+/// design; [`TRANSCRIPT_MAX_BYTES`] at the listing keeps what reaches here
+/// affordable.
 fn read_transcript_text(path: &Path) -> Result<TranscriptText> {
     let bytes = fs::read(path).with_context(|| format!("read {}", path.display()))?;
     let mut valid: Vec<&str> = Vec::new();
@@ -586,6 +614,54 @@ mod tests {
         ));
         let _ = std::fs::remove_file(&path);
         assert!(read_transcript_text(&path).is_err());
+    }
+
+    // ---- 順位7: the size gate at the transcript listing ----
+
+    /// A projects tree with one slug directory — synthetic, never a real
+    /// one (`.claude/rules/session-data-privacy.md`). Returns the projects
+    /// root the listing walks; transcripts go into its slug child.
+    fn listing_fixture(name: &str) -> (PathBuf, PathBuf) {
+        let dir = std::env::temp_dir().join(format!(
+            "saniwalens-claude-list-test-{name}-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        let projects = dir.join("projects");
+        std::fs::create_dir_all(projects.join("-tmp-example-proj")).unwrap();
+        (dir, projects)
+    }
+
+    #[test]
+    fn an_over_cap_transcript_is_refused_at_listing() {
+        // The read is whole-file, so the listing refuses what it cannot
+        // afford — per file: the rest of the project still lists. The stderr
+        // warning is the print-only contract, same as
+        // `warn_skipped_invalid_utf8_lines`.
+        let (dir, projects) = listing_fixture("over");
+        let slug = projects.join("-tmp-example-proj");
+        let big = slug.join("aaaaaaaa-0000-0000-0000-000000000001.jsonl");
+        std::fs::write(&big, "0123456789").unwrap();
+        let small = slug.join("aaaaaaaa-0000-0000-0000-000000000002.jsonl");
+        std::fs::write(&small, "0123").unwrap();
+        let listed = list_main_transcripts(&projects, 8).unwrap();
+        assert_eq!(listed, vec![small], "only the over-cap file is refused");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_transcript_exactly_at_the_cap_stays_listed() {
+        // `>` is the refusal rule: the cap itself is affordable, so a file
+        // of exactly max_bytes bytes lists normally.
+        let (dir, projects) = listing_fixture("boundary");
+        let exact = projects
+            .join("-tmp-example-proj")
+            .join("aaaaaaaa-0000-0000-0000-000000000001.jsonl");
+        std::fs::write(&exact, "01234567").unwrap();
+        let listed = list_main_transcripts(&projects, 8).unwrap();
+        assert_eq!(listed, vec![exact]);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

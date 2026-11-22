@@ -52,43 +52,38 @@ impl Entry {
 /// is the explicit entry (flags after it still count as presets), a `-` flag
 /// or any other token is a real command.
 pub(crate) fn guide_entry(argv: &[String]) -> Entry {
-    let mut harness: Option<String> = None;
-    let mut profile: Option<String> = None;
-    let mut language: Option<String> = None;
+    // The preset flags and the `Entry::Guide` slot each fills (0=harness,
+    // 1=profile, 2=language). The three are the same option shape — both
+    // `--flag value` and `--flag=value`, same validation — so one loop parses
+    // them all; another preset is one table row, not another pair of arms.
+    const PRESET_FLAGS: [(&str, usize); 3] =
+        [("--harness", 0), ("--profile", 1), ("--language", 2)];
+    let mut presets: [Option<String>; 3] = [None, None, None];
     let mut args = argv.iter().skip(1);
     while let Some(arg) = args.next() {
-        if let Some(value) = arg.strip_prefix("--harness=") {
-            if value.is_empty() {
-                return Entry::Normal;
+        let mut hit = None;
+        for &(flag, slot) in &PRESET_FLAGS {
+            if let Some(rest) = arg.strip_prefix(flag) {
+                if let Some(value) = rest.strip_prefix('=') {
+                    if value.is_empty() {
+                        return Entry::Normal;
+                    }
+                    hit = Some((slot, value.to_string()));
+                } else if rest.is_empty() {
+                    match args.next() {
+                        // A `-` token in the value position is a flag, not a
+                        // preset: `--harness --help` must reach clap, not the guide.
+                        Some(value) if !value.starts_with('-') => {
+                            hit = Some((slot, value.clone()));
+                        }
+                        _ => return Entry::Normal,
+                    }
+                }
+                break;
             }
-            harness = Some(value.to_string());
-        } else if let Some(value) = arg.strip_prefix("--profile=") {
-            if value.is_empty() {
-                return Entry::Normal;
-            }
-            profile = Some(value.to_string());
-        } else if let Some(value) = arg.strip_prefix("--language=") {
-            if value.is_empty() {
-                return Entry::Normal;
-            }
-            language = Some(value.to_string());
-        } else if arg == "--harness" {
-            match args.next() {
-                // A `-` token in the value position is a flag, not a preset:
-                // `--harness --help` must reach clap, not the guide.
-                Some(value) if !value.starts_with('-') => harness = Some(value.clone()),
-                _ => return Entry::Normal,
-            }
-        } else if arg == "--profile" {
-            match args.next() {
-                Some(value) if !value.starts_with('-') => profile = Some(value.clone()),
-                _ => return Entry::Normal,
-            }
-        } else if arg == "--language" {
-            match args.next() {
-                Some(value) if !value.starts_with('-') => language = Some(value.clone()),
-                _ => return Entry::Normal,
-            }
+        }
+        if let Some((slot, value)) = hit {
+            presets[slot] = Some(value);
         } else if arg != "tui" {
             // A `-` flag (--help, --version, …) or a real subcommand:
             // clap owns this invocation, not the guide.
@@ -97,6 +92,7 @@ pub(crate) fn guide_entry(argv: &[String]) -> Entry {
     }
     // End of argv with no subcommand or flag: guide entry. An explicit `tui`
     // needs no separate handling — reaching here means clap has nothing to parse.
+    let [harness, profile, language] = presets;
     Entry::Guide {
         harness,
         profile,

@@ -31,16 +31,7 @@ pub(crate) fn inventory(
         .effective_catalog(window)?
         .into_iter()
         .filter(|e| in_scope(filter, &e.scope, &e.project))
-        .map(|e| findings::CatalogRow {
-            kind: e.kind,
-            id: e.id,
-            scope: e.scope,
-            project: e.project,
-            startup_tokens: e.startup_tokens,
-            static_tokens: e.static_tokens,
-            load_mode: e.load_mode,
-            uses: e.uses,
-        })
+        .map(findings::CatalogRow::from)
         .collect();
     let usage = store.usage_counts(window)?;
     let rows = findings::inventory_rows(&catalog, &usage, filter);

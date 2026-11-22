@@ -213,7 +213,12 @@ fn part_time(part: &PartRow<'_>) -> i64 {
 
 /// A whole opencode database, read into owned rows. The CLI shell calls
 /// `read_database` once and lends the rows to the pure mapping above, so no
-/// SQL leaks past the adapter (`docs/specs/harness.md`).
+/// SQL leaks past the adapter (`docs/specs/harness.md`). The snapshot is
+/// resident for the whole analyze — its message and part data at full size,
+/// transiently about twice that while each text blob converts to its owned
+/// `Value` — with no size gate: refusing a database would drop every session
+/// at once, and bounding the residency means a per-session streaming read,
+/// a redesign of this seam and of the `child_costs` prepass, not a cap.
 pub struct Snapshot {
     pub sessions: Vec<SnapshotSession>,
     pub messages: Vec<SnapshotMessage>,

@@ -246,23 +246,7 @@ impl Store {
              ORDER BY f.kind, f.id, f.scope, f.project LIMIT ?"
         ))?;
         let rows = stmt
-            .query_map(params_from_iter(params), |row| {
-                let attrs: Option<String> = row.get(7)?;
-                Ok(CatalogEntry {
-                    kind: row.get(0)?,
-                    id: row.get(1)?,
-                    scope: row.get(2)?,
-                    project: row.get(3)?,
-                    static_tokens: row.get(4)?,
-                    startup_tokens: row.get(5)?,
-                    load_mode: row.get(6)?,
-                    uses: row.get(9)?,
-                    paths: attrs
-                        .and_then(|text| serde_json::from_str::<Vec<String>>(&text).ok())
-                        .unwrap_or_default(),
-                    description: row.get(8)?,
-                })
-            })?
+            .query_map(params_from_iter(params), catalog_entry_from_row)?
             .collect::<rusqlite::Result<Vec<_>>>()?;
         Ok(rows)
     }

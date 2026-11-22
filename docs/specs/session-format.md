@@ -83,7 +83,11 @@ rest; unknown types are skipped.
   the session it lives in instead of failing the whole analyze. These resiliency
   rules ship with `analyzer_version` 11 for the Claude route (the earlier
   version left type-invalid lines silently absent, so stores must re-analyze to
-  see the healed rows).
+  see the healed rows). A transcript file over 512 MiB
+  (`TRANSCRIPT_MAX_BYTES`, `adapter/claude.rs`) is refused at the discovery
+  stage (stat only — the file is never read) with a stderr warning naming the
+  constant and the file; it is not stamped, so the warning repeats and a later
+  trim resumes ordinary ingestion.
   - **Prompt size** at a request (the full context handed to the model) is
     `input_tokens + cache_read_input_tokens + cache_creation_input_tokens`. It
     is **not monotonic**: at the context limit Claude Code compacts and the next

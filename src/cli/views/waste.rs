@@ -56,9 +56,10 @@ pub(crate) fn waste(
         startup_tokens: Option<u64>,
         /// What its body costs when loaded — an invocation cost, never a saving.
         on_demand_tokens: Option<u64>,
-        /// Never-fires evidence: the unmatched globs (and body cost) replace
-        /// the generic suggestion. `None` for every other wedge.
-        evidence: Option<String>,
+        /// The rendered suggestion: the never-fires/redundant evidence when the
+        /// row carries one, else the generic wedge suggestion. Built once here
+        /// so the JSON and table renderers cannot drift apart.
+        suggestion: String,
     }
 
     let mut found: Vec<Row> = Vec::new();
@@ -84,6 +85,8 @@ pub(crate) fn waste(
             entry.uses,
             HEAVY_TOKENS,
         ) {
+            let savings = startup_savings(load_mode, startup_tokens);
+            let on_demand = on_demand_tokens(load_mode, static_tokens);
             found.push(Row {
                 wedge,
                 kind: &entry.kind,
@@ -91,10 +94,10 @@ pub(crate) fn waste(
                 scope: &entry.scope,
                 project: &entry.project,
                 uses: entry.uses,
-                savings: startup_savings(load_mode, startup_tokens),
+                savings,
                 startup_tokens,
-                on_demand_tokens: on_demand_tokens(load_mode, static_tokens),
-                evidence: None,
+                on_demand_tokens: on_demand,
+                suggestion: savings_suggestion(wedge, savings, on_demand),
             });
         }
     }
@@ -141,10 +144,10 @@ pub(crate) fn waste(
             savings: StartupSavings::Declutter,
             startup_tokens: None,
             on_demand_tokens: rule.static_tokens,
-            evidence: Some(format!(
+            suggestion: format!(
                 "never fired in window [{}] — narrow its paths or delete its {body}",
                 rule.globs.join(", ")
-            )),
+            ),
         });
     }
 
@@ -188,10 +191,10 @@ pub(crate) fn waste(
             savings: startup_savings(load_mode, entry.startup_tokens.map(|t| t as u64)),
             startup_tokens: entry.startup_tokens.map(|t| t as u64),
             on_demand_tokens: on_demand_tokens(load_mode, entry.static_tokens.map(|t| t as u64)),
-            evidence: Some(format!(
+            suggestion: format!(
                 "redundant with {}/{} ({}) — merge it with its double or delete one",
                 other.kind, other.id, other.scope
-            )),
+            ),
         });
     }
 
@@ -250,7 +253,7 @@ pub(crate) fn waste(
                 "startup_tokens": row.startup_tokens,
                 "on_demand_tokens": row.on_demand_tokens,
                 "uses": if is_usage_measurable(row.kind) { Some(row.uses) } else { None },
-                "suggestion": row.evidence.clone().unwrap_or_else(|| savings_suggestion(row.wedge, row.savings, row.on_demand_tokens)),
+                "suggestion": row.suggestion.clone(),
             })
         })
         .collect();
@@ -298,9 +301,7 @@ pub(crate) fn waste(
                     scope_cell(row.scope, row.project),
                     savings_cell(row.savings, row.startup_tokens),
                     uses_cell,
-                    row.evidence.clone().unwrap_or_else(|| {
-                        savings_suggestion(row.wedge, row.savings, row.on_demand_tokens)
-                    }),
+                    row.suggestion.clone(),
                 ]
             })
             .collect(),

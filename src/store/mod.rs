@@ -255,6 +255,46 @@ pub struct CatalogEntry {
     pub description: Option<String>,
 }
 
+impl From<CatalogEntry> for crate::core::findings::CatalogRow {
+    /// The fetch boundary's projection: the store row keeps `paths` and
+    /// `description` for the wedges that need them, while the assembly's row
+    /// keeps the eight fields the briefing and the inventory share. One
+    /// `From` here replaces the per-caller field-by-field mapping.
+    fn from(e: CatalogEntry) -> Self {
+        crate::core::findings::CatalogRow {
+            kind: e.kind,
+            id: e.id,
+            scope: e.scope,
+            project: e.project,
+            startup_tokens: e.startup_tokens,
+            static_tokens: e.static_tokens,
+            load_mode: e.load_mode,
+            uses: e.uses,
+        }
+    }
+}
+
+/// The shared `surfaces`-row → [`CatalogEntry`] mapping: the unbounded query
+/// and its bounded briefing twin must not drift on column order or attrs
+/// parsing, so both hand their rows to this one function.
+fn catalog_entry_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<CatalogEntry> {
+    let attrs: Option<String> = row.get(7)?;
+    Ok(CatalogEntry {
+        kind: row.get(0)?,
+        id: row.get(1)?,
+        scope: row.get(2)?,
+        project: row.get(3)?,
+        static_tokens: row.get(4)?,
+        startup_tokens: row.get(5)?,
+        load_mode: row.get(6)?,
+        uses: row.get(9)?,
+        paths: attrs
+            .and_then(|text| serde_json::from_str::<Vec<String>>(&text).ok())
+            .unwrap_or_default(),
+        description: row.get(8)?,
+    })
+}
+
 // The briefing's row types are owned by the pure core (core::findings), which
 // consumes them; re-exported here so the `crate::store::...` paths of the
 // query methods and their callers stay stable.
@@ -1611,23 +1651,7 @@ impl Store {
              ORDER BY f.kind, f.id, f.scope, f.project"
         ))?;
         let rows = stmt
-            .query_map(params_from_iter(binds), |row| {
-                let attrs: Option<String> = row.get(7)?;
-                Ok(CatalogEntry {
-                    kind: row.get(0)?,
-                    id: row.get(1)?,
-                    scope: row.get(2)?,
-                    project: row.get(3)?,
-                    static_tokens: row.get(4)?,
-                    startup_tokens: row.get(5)?,
-                    load_mode: row.get(6)?,
-                    uses: row.get(9)?,
-                    paths: attrs
-                        .and_then(|text| serde_json::from_str::<Vec<String>>(&text).ok())
-                        .unwrap_or_default(),
-                    description: row.get(8)?,
-                })
-            })?
+            .query_map(params_from_iter(binds), catalog_entry_from_row)?
             .collect::<rusqlite::Result<Vec<_>>>()?;
         Ok(rows)
     }

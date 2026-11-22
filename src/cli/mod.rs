@@ -681,16 +681,7 @@ fn findings_input(store: &Store, window: TimeRange) -> Result<findings::Findings
         catalog: store
             .effective_catalog_briefing(window, findings::BRIEFING_GROUPS_LIMIT)?
             .into_iter()
-            .map(|e| findings::CatalogRow {
-                kind: e.kind,
-                id: e.id,
-                scope: e.scope,
-                project: e.project,
-                startup_tokens: e.startup_tokens,
-                static_tokens: e.static_tokens,
-                load_mode: e.load_mode,
-                uses: e.uses,
-            })
+            .map(findings::CatalogRow::from)
             .collect(),
         session_roots: store.session_roots_briefing(findings::BRIEFING_GROUPS_LIMIT)?,
         prompt_behaviors: store
